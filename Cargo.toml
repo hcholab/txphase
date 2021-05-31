@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "oram-sgx",
+    "oram-pbwt"
+]
+
+
