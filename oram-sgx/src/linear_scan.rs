@@ -39,4 +39,14 @@ impl ORAMBackend for LinearScanningORAM {
             self.data[idx].cmov((idx as u64).ct_eq(&(block_index as u64)), block);
         }
     }
+
+    fn modify_block_with(&mut self, block_index: usize, func: impl Fn(&mut Block)) {
+        let mut temp: A64Bytes<BlockSize> = Default::default();
+        for idx in 0..self.data.len() {
+            let choice = (idx as u64).ct_eq(&(block_index as u64));
+            temp.cmov(choice, &self.data[idx]);
+            func(&mut temp);
+            self.data[idx].cmov(choice, &temp);
+        }
+    }
 }

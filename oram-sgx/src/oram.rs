@@ -59,4 +59,12 @@ impl<OBC: ORAMBackendCreator, const VALUE_SIZE: usize> ORAM<OBC, VALUE_SIZE> {
         );
         result
     }
+
+    pub fn modify_block_with(&mut self, index: usize, func: impl Fn(&mut [u8])) {
+        let block_index = index / self.values_per_block;
+        let index_in_block = index % self.values_per_block;
+        self.backend.modify_block_with(block_index, |block| {
+            func(&mut block[(index_in_block * VALUE_SIZE)..((index_in_block + 1) * VALUE_SIZE)])
+        });
+    }
 }

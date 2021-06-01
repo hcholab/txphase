@@ -114,6 +114,25 @@ impl ORAMBackend for PathORAM {
             }
         });
     }
+
+    fn modify_block_with(&mut self, block_index: usize, func: impl Fn(&mut Block)) {
+        let inner_block_index = block_index / self.blocks_per_inner_block;
+        let index_in_inner_block = block_index % self.blocks_per_inner_block;
+        self.inner.access(inner_block_index as u64, |inner_block| {
+            let mut temp: A64Bytes<BlockSize> = Default::default();
+            for (idx, block) in
+                <dyn AsAlignedChunks<aligned_cmov::A64, BlockSize>>::as_mut_aligned_chunks(
+                    inner_block,
+                )
+                .iter_mut()
+                .enumerate()
+            {
+                temp.cmov((idx as u64).ct_eq(&(index_in_inner_block as u64)), block);
+                func(&mut temp);
+                block.cmov((idx as u64).ct_eq(&(index_in_inner_block as u64)), &temp);
+            }
+        });
+    }
 }
 
 type R = Hc128Rng;
@@ -139,18 +158,3 @@ impl ORAMCreator<InnerBlockSize, R> for MyPathORAMCreator {
         >(size, stash_size, rng_maker)
     }
 }
-
-//use mc_oblivious_traits::LinearScanningORAM;
-//struct MyLinearORAMCreator;
-
-//impl ORAMCreator<InnerBlockSize, R> for MyLinearORAMCreator {
-//type Output = LinearScanningORAM<InnerBlockSize>;
-
-//fn create<M: 'static + FnMut() -> R>(
-//size: u64,
-//_stash_size: usize,
-//_rng_maker: &mut M,
-//) -> Self::Output {
-//LinearScanningORAM::new(size)
-//}
-//}

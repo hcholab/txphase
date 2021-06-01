@@ -32,4 +32,8 @@ impl ORAMBackend for LeakyORAM {
     fn write_block(&mut self, block: &Block, block_index: usize) {
         self.data[block_index] = block.clone();
     }
+
+    fn modify_block_with(&mut self, block_index: usize, func: impl Fn(&mut Block)) {
+        func(&mut self.data[block_index])
+    }
 }
