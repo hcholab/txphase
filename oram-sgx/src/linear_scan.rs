@@ -1,6 +1,7 @@
 use crate::{Block, BlockSize, ORAMBackend, ORAMBackendCreator};
 use mc_oblivious_traits::{subtle::ConstantTimeEq, A64Bytes, CMov};
 
+#[derive(Clone)]
 pub struct LinearScanningORAMCreator;
 
 impl ORAMBackendCreator for LinearScanningORAMCreator {

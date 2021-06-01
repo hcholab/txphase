@@ -1,5 +1,5 @@
 [package]
-name = "oram-pbwt"
+name = "phasing"
 version = "0.1.0"
 edition = "2018"
 

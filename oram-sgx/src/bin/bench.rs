@@ -1,5 +1,6 @@
 use oram_sgx::*;
 use rand::RngCore;
+use std::borrow::Cow;
 use std::time::Instant;
 
 fn main() {
@@ -19,7 +20,10 @@ fn main() {
     println!("=== Leaky ===");
     {
         let start = Instant::now();
-        let mut oram = ORAM::<_, VALUE_SIZE>::new_init(&values, LeakyORAMCreator);
+        let mut oram = ORAM::<_, VALUE_SIZE>::new_init(
+            values.iter().map(|v| Cow::Borrowed(v)),
+            LeakyORAMCreator,
+        );
         let init_time = (Instant::now() - start).as_millis();
         println!("Initialization time: {} ms", init_time);
 
@@ -36,7 +40,10 @@ fn main() {
     println!("=== Linear Scan ===");
     {
         let start = Instant::now();
-        let mut oram = ORAM::<_, VALUE_SIZE>::new_init(&values, LinearScanningORAMCreator);
+        let mut oram = ORAM::<_, VALUE_SIZE>::new_init(
+            values.iter().map(|v| Cow::Borrowed(v)),
+            LinearScanningORAMCreator,
+        );
         let init_time = (Instant::now() - start).as_millis();
         println!("Initialization time: {} ms", init_time);
 
@@ -53,8 +60,10 @@ fn main() {
     println!("=== Path ORAM ===");
     {
         let start = Instant::now();
-        let mut oram =
-            ORAM::<_, VALUE_SIZE>::new_init(&values, PathORAMCreator::with_stash_size(13));
+        let mut oram = ORAM::<_, VALUE_SIZE>::new_init(
+            values.iter().map(|v| Cow::Borrowed(v)),
+            PathORAMCreator::with_stash_size(13),
+        );
         let init_time = (Instant::now() - start).as_millis();
         println!("Initialization time: {} ms", init_time);
 

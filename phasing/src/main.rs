@@ -28,6 +28,41 @@ fn gen_target_sample(n_markers: usize, mut rng: impl Rng) -> Vec<u8> {
         .collect()
 }
 
+#[repr(C)]
+#[derive(Default, Clone)]
+struct OramValue1 {
+    u: u32,
+    p: u32,
+    q: u32,
+    pr: u32,
+    qr: u32,
+    div: u32,
+}
+
+impl OramValue1 {
+    pub fn from_array(array: [u8; std::mem::size_of::<Self>()]) -> Self {
+        unsafe { std::mem::transmute(array) }
+    }
+    pub fn as_array(&self) -> &[u8; std::mem::size_of::<Self>()] {
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+#[repr(C)]
+#[derive(Default, Clone)]
+struct OramValue2 {
+    div: u32,
+}
+
+impl OramValue2 {
+    pub fn from_array(array: [u8; std::mem::size_of::<Self>()]) -> Self {
+        unsafe { std::mem::transmute(array) }
+    }
+    pub fn as_array(&self) -> &[u8; std::mem::size_of::<Self>()] {
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
 fn main() {
     let n = 100000; // # samples
     let m = 10; // # markers
@@ -128,40 +163,54 @@ fn main() {
     now = Instant::now();
 
     /* ORAM construction (performed in enclave) */
-    let mut pbwt_oram = Vec::with_capacity(m);
-    const VALUE_SIZE: usize = 24;
-    let mut write_value = [0u8; VALUE_SIZE];
+    //let oram_creator = LeakyORAMCreator;
+    let oram_creator = LinearScanningORAMCreator;
+    //let oram_creator = PathORAMCreator::with_stash_size(13);
+
+    let mut pbwt_oram_1 = Vec::with_capacity(m);
+    let mut pbwt_oram_2 = Vec::with_capacity(m);
+    let mut write_value_1 = OramValue1::default();
+    let mut write_value_2 = OramValue2::default();
     for i in 0..m {
-        let mut write_values = Vec::with_capacity(n + 1);
+        let mut write_values_1 = Vec::with_capacity(n + 1);
+        let mut write_values_2 = Vec::with_capacity(n + 1);
         for j in 0..(n + 1) {
             if j == 0 {
-                write_value[0] = 0 as u8;
-                write_value[1] = i as u8;
-                write_value[2] = i as u8;
+                write_value_1.u = 0;
+                write_value_1.p = i as u32;
+                write_value_1.q = i as u32;
             } else {
-                write_value[0] = u_mat[i][j - 1] as u8;
-                write_value[1] = p_mat[i][j - 1] as u8;
-                write_value[2] = q_mat[i][j - 1] as u8;
+                write_value_1.u = u_mat[i][j - 1] as u32;
+                write_value_1.p = p_mat[i][j - 1] as u32;
+                write_value_1.q = q_mat[i][j - 1] as u32;
             }
 
             if j == n {
-                write_value[3] = i as u8;
-                write_value[4] = i as u8;
+                write_value_1.pr = i as u32;
+                write_value_1.qr = i as u32;
             } else {
-                write_value[3] = pr_mat[i][j] as u8;
-                write_value[4] = qr_mat[i][j] as u8;
+                write_value_1.pr = pr_mat[i][j] as u32;
+                write_value_1.qr = qr_mat[i][j] as u32;
             }
-
-            write_value[5] = if j == 0 { i } else { d_mat[i][j - 1] as usize } as u8;
-            write_values.push(write_value);
+            write_value_2.div = if j == 0 { i } else { d_mat[i][j - 1] as usize } as u32;
+            write_values_1.push(write_value_1.clone());
+            write_values_2.push(write_value_2.clone());
         }
-        write_value[5] = i as u8;
-        write_values.push(write_value);
-        pbwt_oram.push(ORAM::<_, VALUE_SIZE>::new_init(
-            &write_values,
-            PathORAMCreator::with_stash_size(13),
-            //LeakyORAMCreator,
-            //LinearScanningORAMCreator,
+        write_value_2.div = i as u32;
+        write_values_2.push(write_value_2.clone());
+        const VALUE_SIZE_1: usize = std::mem::size_of::<OramValue1>();
+        pbwt_oram_1.push(ORAM::<_, VALUE_SIZE_1>::new_init(
+            write_values_1
+                .iter()
+                .map(|v| std::borrow::Cow::Borrowed(v.as_array())),
+            oram_creator.clone(),
+        ));
+        const VALUE_SIZE_2: usize = std::mem::size_of::<OramValue2>();
+        pbwt_oram_2.push(ORAM::<_, VALUE_SIZE_2>::new_init(
+            write_values_2
+                .iter()
+                .map(|v| std::borrow::Cow::Borrowed(v.as_array())),
+            oram_creator.clone(),
         ));
     }
 
@@ -190,19 +239,19 @@ fn main() {
         //assert!((prev_a as usize) < n + 1);
 
         // Oblivious
-        let read_value = pbwt_oram[i].read(prev_a as usize);
-        let u_lookup = read_value[0] as usize;
-        let p_lookup = read_value[1] as usize;
-        let q_lookup = read_value[2] as usize;
-        let pr_lookup = read_value[3] as usize;
-        let qr_lookup = read_value[4] as usize;
+        let read_value = pbwt_oram_1[i].read(prev_a as usize);
+        let read_value = OramValue1::from_array(read_value);
+        let u_lookup = read_value.u as usize;
+        let p_lookup = read_value.p as usize;
+        let q_lookup = read_value.q as usize;
+        let pr_lookup = read_value.pr as usize;
+        let qr_lookup = read_value.qr as usize;
 
         a_target[i] = if t[i] == 0 {
             u_lookup
         } else {
             u_mat[i][n - 1] + (prev_a - u_lookup)
         };
-        //println!("{} {} {} -> {}", u_mat[i][n-1], prev_a, u_lookup, a_target[i]);
 
         d_pre_target[i] = if t[i] == 0 {
             p_lookup.max(d_pre_target[i - 1])
@@ -236,11 +285,13 @@ fn main() {
             let div;
             if chosen {
                 // Oblivious
-                let read_value = pbwt_oram[i].read((ind + 1) as usize);
-                div = read_value[5] as usize
+                let read_value = pbwt_oram_2[i].read((ind + 1) as usize);
+                let read_value = OramValue2::from_array(read_value);
+                div = read_value.div as usize
             } else {
-                let read_value = pbwt_oram[i].read((ind + 2) as usize);
-                div = read_value[5] as usize
+                let read_value = pbwt_oram_2[i].read((ind + 2) as usize);
+                let read_value = OramValue2::from_array(read_value);
+                div = read_value.div as usize
             }
 
             if chosen {

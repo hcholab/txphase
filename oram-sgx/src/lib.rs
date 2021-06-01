@@ -1,18 +1,17 @@
 mod leaky;
 mod linear_scan;
+mod oram;
 mod path_oram;
 
-use mc_oblivious_traits::{
-    typenum::{Unsigned, U64},
-    A64Bytes,
-};
-
-pub use linear_scan::*;
-pub use path_oram::*;
 pub use leaky::*;
+pub use linear_scan::*;
+pub use oram::*;
+pub use path_oram::*;
 
 pub type BlockSize = U64;
 pub type Block = A64Bytes<BlockSize>;
+
+use mc_oblivious_traits::{typenum::U64, A64Bytes};
 
 pub trait ORAMBackend {
     fn read_block(&mut self, block_index: usize) -> Block;
@@ -28,60 +27,10 @@ pub trait ORAMBackendCreator {
     ) -> Self::Backend;
 }
 
-pub struct ORAM<OBC: ORAMBackendCreator, const VALUE_SIZE: usize> {
-    values_per_block: usize,
-    backend: OBC::Backend,
-}
-
-impl<OBC: ORAMBackendCreator, const VALUE_SIZE: usize> ORAM<OBC, VALUE_SIZE> {
-    pub fn new_empty(n_values: usize, oram_backend_creator: OBC) -> Self {
-        assert!(VALUE_SIZE <= 64);
-        let values_per_block = BlockSize::USIZE / VALUE_SIZE;
-        let n_blocks = (n_values + values_per_block - 1) / values_per_block;
-        let backend = oram_backend_creator.new_empty(n_blocks);
-        Self {
-            values_per_block,
-            backend,
-        }
-    }
-
-    pub fn new_init(values: &[[u8; VALUE_SIZE]], oram_backend_creator: OBC) -> Self {
-        let values_per_block = BlockSize::USIZE / VALUE_SIZE;
-        let iter = values.chunks(values_per_block).map(|chunk| {
-            let mut iter: Box<dyn Iterator<Item = u8>> = Box::new(std::iter::empty());
-            for value in chunk {
-                iter = Box::new(iter.chain(value.iter().cloned()));
-            }
-            if chunk.len() < values_per_block || BlockSize::USIZE % VALUE_SIZE != 0 {
-                iter = Box::new(iter.chain(std::iter::repeat(0u8)));
-            };
-            use std::iter::FromIterator;
-            let block = Block::from_iter(iter);
-            std::borrow::Cow::<Block>::Owned(block)
-        });
-        let backend = oram_backend_creator.new_init(iter);
-        Self {
-            values_per_block,
-            backend,
-        }
-    }
-
-    // Assuming reading from a cache line is safe
-    pub fn read(&mut self, index: usize) -> [u8; VALUE_SIZE] {
-        let block_index = index / self.values_per_block;
-        let index_in_block = index % self.values_per_block;
-        let block = self.backend.read_block(block_index);
-        let mut result = [0u8; VALUE_SIZE];
-        result.copy_from_slice(
-            &block[(index_in_block * VALUE_SIZE)..((index_in_block + 1) * VALUE_SIZE)],
-        );
-        result
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::borrow::Cow;
 
     #[test]
     fn leaky() {
@@ -98,7 +47,10 @@ mod tests {
             }
         }
 
-        let mut oram = ORAM::<_, VALUE_SIZE>::new_init(&values, LeakyORAMCreator);
+        let mut oram = ORAM::<_, VALUE_SIZE>::new_init(
+            values.iter().map(|v| Cow::Borrowed(v)),
+            LeakyORAMCreator,
+        );
         for index in 0..n_values {
             let result = oram.read(index);
             assert_eq!(result, values[index]);
@@ -120,7 +72,10 @@ mod tests {
             }
         }
 
-        let mut oram = ORAM::<_, VALUE_SIZE>::new_init(&values, LinearScanningORAMCreator);
+        let mut oram = ORAM::<_, VALUE_SIZE>::new_init(
+            values.iter().map(|v| Cow::Borrowed(v)),
+            LinearScanningORAMCreator,
+        );
         for index in 0..n_values {
             let result = oram.read(index);
             assert_eq!(result, values[index]);
@@ -142,12 +97,13 @@ mod tests {
             }
         }
 
-        let mut oram =
-            ORAM::<_, VALUE_SIZE>::new_init(&values, PathORAMCreator::with_stash_size(11));
+        let mut oram = ORAM::<_, VALUE_SIZE>::new_init(
+            values.iter().map(|v| Cow::Borrowed(v)),
+            PathORAMCreator::with_stash_size(11),
+        );
         for index in 0..n_values {
             let result = oram.read(index);
             assert_eq!(result, values[index]);
         }
     }
-
 }

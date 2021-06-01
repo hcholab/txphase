@@ -9,6 +9,7 @@ use rand::{thread_rng, SeedableRng};
 use rand_hc::Hc128Rng;
 use typenum::Unsigned;
 
+#[derive(Clone)]
 pub struct PathORAMCreator {
     stash_size: usize,
 }
@@ -56,10 +57,10 @@ impl ORAMBackendCreator for PathORAMCreator {
                     let block = block.into_owned();
                     iter = Box::new(iter.chain(block.into_iter()));
                 } else {
-                    iter = Box::new(iter.chain(std::iter::repeat(0u8)));
                     break;
                 }
             }
+            iter = Box::new(iter.chain(std::iter::repeat(0u8)));
             use std::iter::FromIterator;
             let inner_block = A64Bytes::<InnerBlockSize>::from_iter(iter);
             inner.write(i as u64, &inner_block);

@@ -1,5 +1,6 @@
 use crate::{Block, ORAMBackend, ORAMBackendCreator};
 
+#[derive(Clone)]
 pub struct LeakyORAMCreator;
 
 impl ORAMBackendCreator for LeakyORAMCreator {
