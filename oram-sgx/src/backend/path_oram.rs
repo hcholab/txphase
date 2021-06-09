@@ -32,6 +32,7 @@ impl ORAMBackendCreator for PathORAMCreator {
             MyPathORAMCreator::create(n_inner_blocks as u64, self.stash_size, &mut rng_maker);
         Self::Backend {
             inner,
+            n_blocks,
             blocks_per_inner_block,
         }
     }
@@ -40,6 +41,7 @@ impl ORAMBackendCreator for PathORAMCreator {
         &self,
         mut blocks_iter: impl Iterator<Item = std::borrow::Cow<'a, Block>> + ExactSizeIterator,
     ) -> Self::Backend {
+        let n_blocks = blocks_iter.len();
         let blocks_per_inner_block = InnerBlockSize::USIZE / BlockSize::USIZE;
         let n_inner_blocks =
             (blocks_iter.len() + blocks_per_inner_block - 1) / blocks_per_inner_block;
@@ -67,6 +69,7 @@ impl ORAMBackendCreator for PathORAMCreator {
         }
         Self::Backend {
             inner,
+            n_blocks,
             blocks_per_inner_block,
         }
     }
@@ -77,9 +80,14 @@ type InnerBlockSize = typenum::U1024;
 pub struct PathORAM {
     inner: <MyPathORAMCreator as ORAMCreator<InnerBlockSize, R>>::Output,
     blocks_per_inner_block: usize,
+    n_blocks: usize,
 }
 
 impl ORAMBackend for PathORAM {
+    fn len(&self) -> usize {
+        self.n_blocks
+    }
+
     fn read_block(&mut self, block_index: usize) -> Block {
         let inner_block_index = block_index / self.blocks_per_inner_block;
         let index_in_inner_block = block_index % self.blocks_per_inner_block;
@@ -132,6 +140,28 @@ impl ORAMBackend for PathORAM {
                 block.cmov((idx as u64).ct_eq(&(index_in_inner_block as u64)), &temp);
             }
         });
+    }
+
+    fn into_iter(mut self) -> Box<dyn Iterator<Item = Block>> {
+        let n_inner_blocks =
+            (self.n_blocks + self.blocks_per_inner_block - 1) / self.blocks_per_inner_block;
+        let mut remaining_blocks = self.n_blocks;
+        Box::new(
+            (0..n_inner_blocks)
+                .map(move |i| {
+                    let inner_block = self.inner.read(i as u64);
+                    let take_n_blocks = remaining_blocks.min(self.blocks_per_inner_block);
+                    remaining_blocks -= take_n_blocks;
+                    <dyn AsAlignedChunks<aligned_cmov::A64, BlockSize>>::as_aligned_chunks(
+                        &inner_block,
+                    )
+                    .into_iter()
+                    .take(take_n_blocks)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                })
+                .flatten(),
+        )
     }
 }
 

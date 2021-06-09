@@ -6,15 +6,17 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mc-oblivious-ram = "2.0"
-mc-oblivious-traits = "2.0"
-aligned-cmov = "2.0"
+#mc-oblivious-ram = "2.0"
+#mc-oblivious-traits = "2.0"
+#aligned-cmov = "2.0"
+timing-shield = "0.2"
+subtle = "2.4"
 rand = "0.8"
 rand_hc = "0.3"
-generic-array = "0.14"
+#generic-array = "0.14"
 
-[[bin]]
-name = "bench"
+#[[bin]]
+#name = "bench"
 
 [package.metadata.fortanix-sgx]
 # stack size (in bytes) for each thread, the default stack size is 0x20000.

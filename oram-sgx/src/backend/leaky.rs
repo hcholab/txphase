@@ -25,15 +25,26 @@ pub struct LeakyORAM {
 }
 
 impl ORAMBackend for LeakyORAM {
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
     fn read_block(&mut self, block_index: usize) -> Block {
-        self.data[block_index].clone()
+
+        self.data[block_index % self.data.len()].clone()
     }
 
     fn write_block(&mut self, block: &Block, block_index: usize) {
-        self.data[block_index] = block.clone();
+        if block_index <= self.data.len() {
+            self.data[block_index] = block.clone();
+        }
     }
 
     fn modify_block_with(&mut self, block_index: usize, func: impl Fn(&mut Block)) {
         func(&mut self.data[block_index])
+    }
+
+    fn into_iter(self) -> Box<dyn Iterator<Item=Block>> {
+        Box::new(self.data.into_iter())
     }
 }
