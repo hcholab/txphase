@@ -1,49 +1,82 @@
+use ndarray::{Array2, Axis};
 pub use oram_sgx::timing_shield::TpU32;
 use oram_sgx::*;
-use rand::Rng;
 use std::time::Instant;
 
+#[derive(Default, Debug, Clone)]
+pub struct PBWTValue {
+    pub a: u32,
+    pub d: u32,
+    pub u: u32,
+    pub p: u32,
+    pub q: u32,
+    pub pr: u32,
+    pub qr: u32,
+}
 
-//pub struct PBWT {
-    //a_mat: Array2<u32>,
-    //d_mat: Array2<u32>,
-    //u_mat: Array2<u32>,
-    //p_mat: Array2<u32>,
-    //q_mat: Array2<u32>,
-    //pr_mat: Array2<u32>,
-    //qr_mat: Array2<u32>,
-//}
+pub struct PBWT {
+    array: Array2<PBWTValue>,
+}
 
-//impl PBWT {
-    //pub fn transform(ref_panel: &RefPanel) -> Self {
-        //todo!()
-    //}
-//}
+impl PBWT {
+    pub fn transform(ref_panel: &[Vec<u8>]) -> Self {
+        let n_markers = ref_panel.len();
+        let n_samples = ref_panel[0].len();
+        let mut array =
+            unsafe { Array2::<PBWTValue>::uninit((n_markers, n_samples)).assume_init() };
+
+        let mut a_d = vec![(0u32, 0u32); n_samples];
+        let mut b_e = vec![(0u32, 0u32); n_samples];
+
+        for (i, marker_column) in ref_panel.iter().enumerate() {
+            assert_eq!(marker_column.len(), n_markers);
+            let mut u = 0u32;
+            let mut v = 0u32;
+            let mut p = i as u32;
+            let mut q = i as u32;
+            let (prev_column, mut current_column) = array.view_mut().split_at(Axis(0), i);
+            let prev_column = prev_column.column(i - 1);
+            let mut current_column = current_column.column_mut(0);
+
+            for (j, (item, prev_item)) in current_column
+                .iter_mut()
+                .zip(prev_column.iter())
+                .enumerate()
+            {
+                let dki = if i == 0 { 0 } else { prev_item.d };
+                let aki = if i == 0 { j as u32 } else { prev_item.a };
+                if dki > p {
+                    p = dki;
+                }
+                if dki > q {
+                    q = dki;
+                }
+
+                if marker_column[aki as usize] == 0 {
+                    a_d[u as usize] = (aki, p);
+                    u = u + 1;
+                    p = 0;
+                } else {
+                    b_e[v as usize] = (aki, q);
+                    v = v + 1;
+                    q = 0;
+                }
+                item.u = u;
+                item.p = p;
+                item.q = q;
+
+                //for t in
+            }
+        }
+        todo!()
+    }
+}
 
 fn print_marker(shift: usize) {
     for _i in 0..shift {
         print!(" ");
     }
     print!("+\n");
-}
-
-fn gen_ref_panel(n_samples: usize, n_markers: usize, mut rng: impl Rng) -> Vec<Vec<u8>> {
-    (0..n_markers)
-        .into_iter()
-        .map(|_| {
-            (0..n_samples)
-                .into_iter()
-                .map(|_| rng.gen_range(0..2))
-                .collect()
-        })
-        .collect()
-}
-
-fn gen_target_sample(n_markers: usize, mut rng: impl Rng) -> Vec<u8> {
-    (0..n_markers)
-        .into_iter()
-        .map(|_| rng.gen_range(0..2))
-        .collect()
 }
 
 #[repr(C)]
@@ -54,7 +87,6 @@ struct OramValue1 {
     q: u32,
     pr: u32,
     qr: u32,
-    div: u32,
 }
 
 oram_sgx::oram_value! { OramValue1 }
@@ -74,8 +106,8 @@ pub fn pbwt() {
 
     // Random generation
     let mut rng = rand::thread_rng();
-    let x = gen_ref_panel(n, m, &mut rng);
-    let t = gen_target_sample(m, &mut rng);
+    let x = crate::utils::gen_ref_panel(n, m, &mut rng);
+    let t = crate::utils::gen_target_sample(m, &mut rng);
 
     /* PBWT construction */
     let mut a_mat = vec![vec![0; n]; m]; // positional prefix arrays
@@ -277,15 +309,13 @@ pub fn pbwt() {
         for l in 0..s {
             let chosen = (pre_ind < 0) || (post_ind < (n as i32) && post_div < pre_div);
             let mut ind = if chosen { post_ind } else { pre_ind };
-            //neighbors[i][l] = ind as u32;
+            neighbors[i][l] = ind as u32;
 
             if chosen {
                 ind += 1;
             } else {
                 ind -= 1;
             }
-
-            neighbors[i][l] = ind as u32;
 
             // Oblivious
             let div;
@@ -314,7 +344,6 @@ pub fn pbwt() {
         "Neighbor finding in {} ms",
         (Instant::now() - now).as_millis()
     );
-    return;
 
     /* Output */
     for j in 0..n {

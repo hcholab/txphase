@@ -8,14 +8,15 @@ edition = "2018"
 [dependencies]
 rand = "0.8"
 oram-sgx = { path = "../oram-sgx" }
-ndarray = "0.15"
+ndarray = {version = "0.15", features = ["approx"]}
 bitvec = "0.22"
+tp-fixedpoint = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/tp-fixedpoint" }
 
 [package.metadata.fortanix-sgx]
 # stack size (in bytes) for each thread, the default stack size is 0x20000.
 stack-size=0x200000
 # heap size (in bytes), the default heap size is 0x2000000.
-heap-size=0x40000000
+heap-size=0x100000000
 # the default number of threads is equal to the number of available CPUs of
 # the current system.
 # Gotcha: Don't forget to count the main thread when counting number of
