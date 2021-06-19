@@ -34,20 +34,26 @@ fn gen_data(m: usize, n: usize) -> (Vec<Vec<u8>>, Vec<u8>) {
 }
 
 pub fn test_hmm() {
-    let m = 1000; // num of variants
-    let n = 100; // num of samples
+    let m = 20000; // num of variants
+    let n = 500; // num of samples
     let (x, t) = gen_data(m, n);
-    let ref_result = Array1::from_vec(hmm_ref(&x, &t));
+
     #[cfg(feature = "leak-resist")]
-    let (x, t) = {
-        let x = x
-            .into_iter()
-            .map(|vec| vec.into_iter().map(|v| TpU8::protect(v)).collect())
-            .collect::<Vec<_>>();
-        let t = t.into_iter().map(|v| TpU8::protect(v)).collect::<Vec<_>>();
-        (x, t)
+    let result = {
+        let (x, t) = {
+            let x = x
+                .iter()
+                .map(|vec| vec.iter().map(|&v| TpU8::protect(v)).collect())
+                .collect::<Vec<_>>();
+            let t = t.iter().map(|&v| TpU8::protect(v)).collect::<Vec<_>>();
+            (x, t)
+        };
+        hmm(&x, &t)
     };
+
+    #[cfg(not(feature = "leak-resist"))]
     let result = hmm(&x, &t);
+
     #[cfg(feature = "leak-resist")]
     let result = Array1::from_vec(
         result
@@ -61,6 +67,9 @@ pub fn test_hmm() {
             })
             .collect::<Vec<_>>(),
     );
+
+    let ref_result = Array1::from_vec(hmm_ref(&x, &t));
+
     //let mut sum_error = 0.0;
     //for (&i, &r) in result.iter().zip(ref_result.iter()) {
     //let i: f32 = i.into();
@@ -565,7 +574,7 @@ fn hmm_ref(x: &[Vec<u8>], t: &[u8]) -> Vec<f32> {
         }
     }
 
-    println!("time = {} ms", (Instant::now() - start).as_millis());
+    println!("orig. time = {} ms", (Instant::now() - start).as_millis());
 
     phase
 }
