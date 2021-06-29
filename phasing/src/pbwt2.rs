@@ -8,8 +8,8 @@ pub fn test_pbwt2() {
     //let mut rng = rand::rngs::StdRng::seed_from_u64(1234);
     let mut rng = rand::thread_rng();
 
-    let n = 50000;
-    let m = 20000;
+    let n = 100;
+    let m = 100;
     let s = 4;
 
     let mut x = vec![vec![0 as u8; n]; m]; // ref panel
@@ -21,6 +21,8 @@ pub fn test_pbwt2() {
         }
         t[i] = rng.gen_range(0..2);
     }
+
+    let results = pbwt3(&x, &t, s);
 
     #[cfg(feature = "leak-resist")]
     let results = {
@@ -109,6 +111,225 @@ impl<T: 'static + Clone> SmallORAM<T> {
 
 use inner::*;
 
+fn pbwt3(x: &[Vec<u8>], t: &[Genotype], s: usize) -> Vec<Vec<UInt>> {
+    let m = x.len();
+    let n = x[0].len();
+
+    let x = Array2::from_shape_vec((m, n), x.iter().flatten().cloned().collect()).unwrap();
+    let t = Array1::from_vec(t.to_vec());
+    let start = Instant::now();
+
+    let mut prev_a_col = Array1::<u32>::from_iter(0..n as u32);
+    let mut cur_a_col = unsafe { Array1::<u32>::uninit(n).assume_init() };
+    let mut prev_d_col = Array1::<u32>::zeros(n);
+    let mut cur_d_col = unsafe { Array1::<u32>::uninit(n).assume_init() };
+
+    let mut cur_target_ind;
+    let mut prev_target_ind;
+    let mut cur_target_d;
+    let mut prev_target_d;
+    let mut prev_post_target_d;
+    let mut cur_post_target_d;
+    //let mut neighbors: Vec<Vec<u32>> = Vec::with_capacity(m);
+    println!("{:?}\n", x);
+
+    {
+        cur_target_ind = 0;
+        prev_target_ind = 0;
+        cur_target_d = 0;
+        prev_target_d = 0;
+        cur_post_target_d = 0;
+        prev_post_target_d = 0;
+        //neighbors.push(vec![0; s]);
+    }
+    println!("cur_a_col = {:?}", prev_a_col);
+    println!("cur_d_col = {:?}", prev_d_col);
+    println!("");
+
+    for i in 0..m {
+        let n_zeros = x.row(i).iter().filter(|&&v| v == 0).count();
+        let mut u = 0;
+        let mut v = n_zeros;
+
+        let mut p = i + 1;
+        let mut q = i + 1;
+        let mut target_p = 0;
+        let mut target_q = 0;
+
+        let mut post_target_flag = false;
+
+        for j in 0..n + 1 {
+            if j == prev_target_ind {
+                target_p = p.max(prev_target_d);
+                target_q = q.max(prev_target_d);
+                post_target_flag = true;
+                if t[i] == 0 {
+                    cur_target_ind = u;
+                    cur_target_d = target_p;
+                    if cur_target_ind == n_zeros {
+                        cur_post_target_d = i + 1;
+                        post_target_flag = false;
+                    } else {
+                        target_p = 0;
+                    }
+                } else {
+                    cur_target_ind = v;
+                    cur_target_d = target_q;
+                    if cur_target_ind == n {
+                        cur_post_target_d = i + 1;
+                        post_target_flag = false;
+                    } else {
+                        target_q = 0;
+                    }
+                }
+            }
+
+            if j < n {
+                let prev_a = prev_a_col[j] as usize;
+                let prev_d = prev_d_col[j] as usize;
+                p = p.max(prev_d);
+                q = q.max(prev_d);
+
+                if j == prev_target_ind {
+                    target_p = target_p.max(prev_post_target_d);
+                    target_q = target_q.max(prev_post_target_d);
+                } else if post_target_flag {
+                    target_p = target_p.max(prev_d);
+                    target_q = target_q.max(prev_d);
+                }
+
+                if x[[i, prev_a]] == 0 {
+                    cur_a_col[u] = prev_a as u32;
+                    cur_d_col[u] = p as u32;
+
+                    if post_target_flag && t[i] == 0 {
+                        cur_post_target_d = target_p;
+                        post_target_flag = false;
+                    }
+
+                    u += 1;
+                    p = 0;
+                } else {
+                    cur_a_col[v] = prev_a as u32;
+                    cur_d_col[v] = q as u32;
+
+                    if post_target_flag && t[i] == 1 {
+                        cur_post_target_d = target_q;
+                        post_target_flag = false;
+                    }
+
+                    v += 1;
+                    q = 0;
+                }
+            }
+        }
+
+        use ndarray::s;
+        let mut y = Array2::<u8>::zeros((i + 1, n));
+        for j in 0..n {
+            y.column_mut(j)
+                .assign(&x.slice(s![0..i + 1, prev_a_col[j] as usize]));
+        }
+        println!("prev y = \n{:?}", y);
+        for j in 0..n {
+            y.column_mut(j)
+                .assign(&x.slice(s![0..i + 1, cur_a_col[j] as usize]));
+        }
+        println!("y = \n{:?}", y);
+        println!("cur_a_col = {:?}", cur_a_col);
+        println!("cur_d_col = {:?}", cur_d_col);
+        println!("");
+        for j in 0..n {
+            let cur_d = cur_d_col[j] as usize;
+            if j == 0 {
+                assert_eq!(cur_d, i + 1);
+            } else {
+                assert_eq!(
+                    x.slice(s![cur_d..i, cur_a_col[j - 1] as usize]),
+                    x.slice(s![cur_d..i, cur_a_col[j] as usize]),
+                );
+                if cur_d > 0 && i + 1 - cur_d > 0 {
+                    assert_ne!(
+                        x.slice(s![(cur_d - 1)..i, cur_a_col[j - 1] as usize]),
+                        x.slice(s![(cur_d - 1)..i, cur_a_col[j] as usize]),
+                    );
+                }
+            }
+        }
+
+        println!("t = {:?}", t.slice(s![0..i + 1]));
+        println!("cur_target_ind = {}", cur_target_ind);
+        println!("cur_target_d = {}", cur_target_d);
+
+        if cur_target_ind == 0 {
+            assert_eq!(cur_target_d, i + 1);
+        } else {
+            assert_eq!(
+                x.slice(s![cur_target_d..i, cur_a_col[cur_target_ind - 1] as usize]),
+                t.slice(s![cur_target_d..i]),
+            );
+            if cur_target_d > 0 && i + 1 - cur_target_d > 0 {
+                assert_ne!(
+                    x.slice(s![
+                        (cur_target_d - 1)..i,
+                        cur_a_col[cur_target_ind - 1] as usize
+                    ]),
+                    t.slice(s![(cur_target_d - 1)..i,]),
+                );
+            }
+        }
+
+        if cur_target_ind < n {
+            println!("cur_post_target_d = {}", cur_post_target_d);
+            assert_eq!(
+                x.slice(s![cur_post_target_d..i, cur_a_col[cur_target_ind] as usize]),
+                t.slice(s![cur_post_target_d..i]),
+            );
+            if cur_post_target_d > 0 && i + 1 - cur_post_target_d > 0 {
+                assert_ne!(
+                    x.slice(s![
+                        (cur_post_target_d - 1)..i,
+                        cur_a_col[cur_target_ind] as usize
+                    ]),
+                    t.slice(s![(cur_post_target_d - 1)..i,]),
+                );
+            }
+        }
+
+        //use ndarray::s;
+        //if cur_target_ind == 0 {
+        //assert!(cur_target_d == i);
+        //} else {
+        //println!("{} {}", i, cur_target_d);
+        //assert_eq!(
+        //t.slice(s![cur_target_d..(i + 1)]),
+        //x.slice(s![cur_target_d..(i + 1), cur_a_col[cur_target_ind - 1] as usize])
+        //);
+        //}
+        //println!("{}", i);
+        //assert_eq!(
+        //t.slice(s![cur_target_d..(i + 1)]),
+        //x.slice(s![cur_target_ind - 1, cur_target_d..(i + 1)])
+        //);
+        ////if cur_target_d != 0 {
+        ////assert_ne!(
+        ////&t[(cur_target_d - 1)..(i + 1)],
+        ////&x.slice(ndarray::s![(cur_target_d - 1)..(i + 1), target_ind - 1])
+        ////.as_slice()
+        ////)
+        ////}
+        //}
+
+        prev_target_ind = cur_target_ind;
+        prev_target_d = cur_target_d;
+        prev_post_target_d = cur_post_target_d;
+        swap(&mut prev_a_col, &mut cur_a_col);
+        swap(&mut prev_d_col, &mut cur_d_col);
+    }
+
+    todo!()
+}
+
 fn pbwt2(x: &[Vec<u8>], t: &[Genotype], s: usize) -> Vec<Vec<UInt>> {
     let m = x.len();
     let n = x[0].len();
@@ -124,50 +345,53 @@ fn pbwt2(x: &[Vec<u8>], t: &[Genotype], s: usize) -> Vec<Vec<UInt>> {
     let mut prev_d_col = unsafe { Array1::<UInt>::uninit(n).assume_init() };
     let mut cur_d_col = unsafe { Array1::<UInt>::uninit(n).assume_init() };
 
-    // First position special case
-    let mut u = 0;
-    let mut v = x.row(0).iter().filter(|&&v| v == 0).count();
-
-    let first_x = x.row(0);
-    for j in 0..n {
-        if first_x[j] == 0 {
-            prev_a_col[u] = j as u32;
-            u = u + 1;
-        } else {
-            prev_a_col[v] = j as u32;
-            v = v + 1;
-        }
-    }
-    #[cfg(feature = "leak-resist")]
-    {
-        prev_d_col.fill(UInt::protect(0));
-    }
-    #[cfg(not(feature = "leak-resist"))]
-    {
-        prev_d_col.fill(0);
-    }
-
     let mut target_ind;
     let mut target_u;
     let mut target_d;
     let mut neighbors: Vec<Vec<UInt>> = Vec::with_capacity(m);
 
-    #[cfg(feature = "leak-resist")]
+    // First position special case
     {
-        target_ind = t[0]
-            .tp_eq(&1)
-            .select(UInt::protect(n as u32), UInt::protect(u as u32)); // target either comes at u or at the end
-        target_u = UInt::protect(0);
-        target_d = UInt::protect(0);
-        neighbors.push(vec![UInt::protect(0); s]);
-    }
+        let mut u = 0;
+        let mut v = x.row(0).iter().filter(|&&v| v == 0).count();
 
-    #[cfg(not(feature = "leak-resist"))]
-    {
-        target_ind = if t[0] == 1 { n } else { u }; // target either comes at u or at the end
-        target_u = 0;
-        target_d = 0;
-        neighbors.push(vec![0; s]);
+        let first_x = x.row(0);
+        for j in 0..n {
+            if first_x[j] == 0 {
+                prev_a_col[u] = j as u32;
+                u += 1;
+            } else {
+                prev_a_col[v] = j as u32;
+                v += 1;
+            }
+        }
+
+        #[cfg(feature = "leak-resist")]
+        {
+            prev_d_col.fill(UInt::protect(0));
+        }
+        #[cfg(not(feature = "leak-resist"))]
+        {
+            prev_d_col.fill(0);
+        }
+
+        #[cfg(feature = "leak-resist")]
+        {
+            target_ind = t[0]
+                .tp_eq(&1)
+                .select(UInt::protect(n as u32), UInt::protect(u as u32)); // target either comes at u or at the end
+            target_u = UInt::protect(0);
+            target_d = UInt::protect(0);
+            neighbors.push(vec![UInt::protect(0); s]);
+        }
+
+        #[cfg(not(feature = "leak-resist"))]
+        {
+            target_ind = if t[0] == 1 { n } else { u }; // target either comes at u or at the end
+            target_u = 0;
+            target_d = 0;
+            neighbors.push(vec![0; s]);
+        }
     }
 
     // Second position onwards
@@ -239,8 +463,6 @@ fn pbwt2(x: &[Vec<u8>], t: &[Genotype], s: usize) -> Vec<Vec<UInt>> {
                 let aki = prev_a_col[j];
                 let dki = prev_d_col[j];
 
-                let x0_flag = x[[i, aki as usize]] == 0;
-
                 #[cfg(feature = "leak-resist")]
                 {
                     p = dki.tp_gt(&p).select(dki, p);
@@ -260,7 +482,7 @@ fn pbwt2(x: &[Vec<u8>], t: &[Genotype], s: usize) -> Vec<Vec<UInt>> {
                 let l;
                 let cur_d;
 
-                if x0_flag {
+                if x[[i, aki as usize]] == 0 {
                     l = u;
                     u += 1;
                     cur_d = p;
@@ -328,7 +550,7 @@ fn pbwt2(x: &[Vec<u8>], t: &[Genotype], s: usize) -> Vec<Vec<UInt>> {
                 let s_m_dif = s - dif;
                 let s_p_dif = s + dif;
                 let cond2 = cond1.select(dif.tp_lt_eq(&s), dif.tp_lt(&s));
-                let ind = cond1.select(cond2.select(s_m_dif, 2 * s), cond2.select(s_p_dif, 2 * s));
+                let ind = cond1.select(cond2.select(s_m_dif, 2 * s), cond2.select(s_p_dif, 2 * s)); // 2 * s for fake writes
                 saved_d.write(cur_d, ind);
                 saved_a.write(cur_a, ind);
                 pre_min = (cond1 & cond2)
