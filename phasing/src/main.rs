@@ -10,6 +10,5 @@ fn main() {
     //pbwt::pbwt();
     //union_filter::union_filter();
     //hmm::test_hmm();
-    pbwt2::test_pbwt2();
 
 }
