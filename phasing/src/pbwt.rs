@@ -1,390 +1,607 @@
-use ndarray::{Array2, Axis};
-pub use oram_sgx::timing_shield::TpU32;
-use oram_sgx::*;
+use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 use std::time::Instant;
 
-#[derive(Default, Debug, Clone)]
-pub struct PBWTValue {
-    pub a: u32,
-    pub d: u32,
-    pub u: u32,
-    pub p: u32,
-    pub q: u32,
-    pub pr: u32,
-    pub qr: u32,
+#[cfg(feature = "leak-resist")]
+mod inner {
+    pub use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpOrd};
+    use tp_fixedpoint::timing_shield::{TpU32, TpU8};
+    pub type Genotype = TpU8;
+    pub type UInt = TpU32;
+    pub const ZERO: UInt = unsafe { std::mem::transmute(0u32) };
 }
 
-pub struct PBWT {
-    array: Array2<PBWTValue>,
+#[cfg(not(feature = "leak-resist"))]
+mod inner {
+    pub type Genotype = u8;
+    pub type UInt = u32;
+    pub const ZERO: u32 = 0;
 }
 
-impl PBWT {
-    pub fn transform(ref_panel: &[Vec<u8>]) -> Self {
-        let n_markers = ref_panel.len();
-        let n_samples = ref_panel[0].len();
-        let mut array =
-            unsafe { Array2::<PBWTValue>::uninit((n_markers, n_samples)).assume_init() };
+use inner::*;
 
-        let mut a_d = vec![(0u32, 0u32); n_samples];
-        let mut b_e = vec![(0u32, 0u32); n_samples];
+pub struct SmallORAM<T: 'static + Clone> {
+    slice_inner: &'static mut [T],
+    inner: Box<oram_sgx::align::A64Bytes<64>>,
+    capacity: UInt,
+    _phantom: std::marker::PhantomData<T>,
+}
 
-        for (i, marker_column) in ref_panel.iter().enumerate() {
-            assert_eq!(marker_column.len(), n_markers);
-            let mut u = 0u32;
-            let mut v = 0u32;
-            let mut p = i as u32;
-            let mut q = i as u32;
-            let (prev_column, mut current_column) = array.view_mut().split_at(Axis(0), i);
-            let prev_column = prev_column.column(i - 1);
-            let mut current_column = current_column.column_mut(0);
+impl<T: 'static + Clone> SmallORAM<T> {
+    pub fn with_capacity(capacity: usize) -> Self {
+        assert!((capacity + 1) <= 64 / std::mem::size_of::<T>());
+        let mut inner = Box::new(oram_sgx::align::A64Bytes::default());
+        let inner_ptr = inner.as_mut_slice() as *mut _ as *mut T;
+        let slice_inner = unsafe { std::slice::from_raw_parts_mut(inner_ptr, capacity + 1) };
 
-            for (j, (item, prev_item)) in current_column
-                .iter_mut()
-                .zip(prev_column.iter())
-                .enumerate()
-            {
-                let dki = if i == 0 { 0 } else { prev_item.d };
-                let aki = if i == 0 { j as u32 } else { prev_item.a };
-                if dki > p {
-                    p = dki;
-                }
-                if dki > q {
-                    q = dki;
-                }
+        let capacity = capacity as u32;
+        #[cfg(feature = "leak-resist")]
+        let capacity = UInt::protect(capacity);
 
-                if marker_column[aki as usize] == 0 {
-                    a_d[u as usize] = (aki, p);
-                    u = u + 1;
-                    p = 0;
-                } else {
-                    b_e[v as usize] = (aki, q);
-                    v = v + 1;
-                    q = 0;
-                }
-                item.u = u;
-                item.p = p;
-                item.q = q;
-
-                //for t in
-            }
+        Self {
+            slice_inner,
+            inner,
+            capacity,
+            _phantom: std::marker::PhantomData,
         }
-        todo!()
+    }
+
+    pub fn write(&mut self, v: T, i: UInt) {
+        #[cfg(feature = "leak-resist")]
+        let i = i.tp_gt_eq(&self.capacity).select(self.capacity, i).expose();
+
+        #[cfg(not(feature = "leak-resist"))]
+        assert!(i < self.capacity);
+
+        self.slice_inner[i as usize] = v;
+    }
+
+    pub fn read(&self, i: UInt) -> T {
+        #[cfg(feature = "leak-resist")]
+        let i = i.tp_gt(&self.capacity).select(self.capacity, i).expose();
+
+        #[cfg(not(feature = "leak-resist"))]
+        assert!(i < self.capacity);
+
+        self.slice_inner[i as usize].clone()
     }
 }
 
-fn print_marker(shift: usize) {
-    for _i in 0..shift {
-        print!(" ");
-    }
-    print!("+\n");
+#[derive(Clone)]
+struct PBWTColumn {
+    a: Array1<u32>,
+    d: Array1<u32>,
 }
 
-#[repr(C)]
-#[derive(Default, Clone)]
-struct OramValue1 {
-    u: u32,
-    p: u32,
-    q: u32,
-    pr: u32,
-    qr: u32,
+#[derive(Clone)]
+struct Target {
+    ind: UInt,
+    d: UInt,
+    post_d: UInt,
 }
 
-oram_sgx::oram_value! { OramValue1 }
+fn find_neighbors(
+    cur_x_col: ArrayView1<u8>,
+    cur_n_zeros: u32,
+    cur_t: Genotype,
+    i: u32,
+    s: usize,
+    prev_target: &Target,
+    cur_col: &PBWTColumn,
+    prev_col: &PBWTColumn,
+) -> (Target, Vec<UInt>) {
+    let n = prev_col.a.len();
+    let mut cur_target = Target {
+        ind: ZERO,
+        d: ZERO,
+        post_d: ZERO,
+    };
 
-#[repr(C)]
-#[derive(Default, Clone)]
-struct OramValue2 {
-    div: u32,
-}
+    // oblivious PBWT lookup
+    let mut target_u: UInt;
+    let mut target_v: UInt;
+    let mut target_p: UInt;
+    let mut target_q: UInt;
 
-oram_sgx::oram_value! { OramValue2 }
-
-pub fn pbwt() {
-    let n = 100000; // # samples
-    let m = 100; // # markers
-    let s = 4;
-
-    // Random generation
-    let mut rng = rand::thread_rng();
-    let x = crate::utils::gen_ref_panel(n, m, &mut rng);
-    let t = crate::utils::gen_target_sample(m, &mut rng);
-
-    /* PBWT construction */
-    let mut a_mat = vec![vec![0; n]; m]; // positional prefix arrays
-    let mut d_mat = vec![vec![0; n]; m]; // divergence arrays
-
-    // Extra cache for querying
-    let mut u_mat = vec![vec![0; n]; m];
-    let mut p_mat = vec![vec![0; n]; m];
-    let mut q_mat = vec![vec![0; n]; m];
-    let mut pr_mat = vec![vec![0; n]; m];
-    let mut qr_mat = vec![vec![0; n]; m];
-
-    let now;
+    #[cfg(feature = "leak-resist")]
     {
-        now = Instant::now();
+        target_u = ZERO;
+        target_v = UInt::protect(cur_n_zeros);
+        target_p = UInt::protect(i + 1);
+        target_q = UInt::protect(i + 1);
+    }
 
-        let mut a = vec![0; n];
-        let mut b = vec![0; n];
-        let mut d = vec![0; n];
-        let mut e = vec![0; n];
-        for i in 0..m {
-            let mut u = 0;
-            let mut v = 0;
-            let mut p = i;
-            let mut q = i;
-            for j in 0..n {
-                let dki = if i == 0 { 0 } else { d_mat[i - 1][j] };
-                let aki = if i == 0 { j } else { a_mat[i - 1][j] };
-                if dki > p {
-                    p = dki;
+    #[cfg(not(feature = "leak-resist"))]
+    {
+        target_u = 0;
+        target_v = cur_n_zeros;
+        target_p = i + 1;
+        target_q = i + 1;
+    }
+
+    for j in 0..n + 1 {
+        #[cfg(feature = "leak-resist")]
+        {
+            let cond1 = prev_target.ind.tp_eq(&(j as u32));
+            target_p = cond1.select(
+                prev_target
+                    .d
+                    .tp_gt(&target_p)
+                    .select(prev_target.d, target_p),
+                target_p,
+            );
+            target_q = cond1.select(
+                prev_target
+                    .d
+                    .tp_gt(&target_q)
+                    .select(prev_target.d, target_q),
+                target_q,
+            );
+            let cond2 = cur_t.tp_eq(&0);
+            cur_target.ind = cond1.select(cond2.select(target_u, target_v), cur_target.ind);
+            cur_target.d = cond1.select(cond2.select(target_p, target_q), cur_target.d);
+            let cond3 = cond2.select(
+                cur_target.ind.tp_eq(&cur_n_zeros),
+                cur_target.ind.tp_eq(&(n as u32)),
+            );
+            cur_target.post_d = (cond1 & cond3).select(UInt::protect(i + 1), cur_target.post_d);
+
+            target_p = (cond1 & cond2).select(ZERO, target_p);
+            target_u = (cond1 & cond2).select(target_u + 1, target_u);
+
+            target_q = (cond1 & !cond2).select(ZERO, target_q);
+            target_v = (cond1 & !cond2).select(target_v + 1, target_v);
+        }
+
+        #[cfg(not(feature = "leak-resist"))]
+        if j == prev_target.ind as usize {
+            target_p = target_p.max(prev_target.d);
+            target_q = target_q.max(prev_target.d);
+            if cur_t == 0 {
+                cur_target.ind = target_u;
+                cur_target.d = target_p;
+                if cur_target.ind == cur_n_zeros {
+                    cur_target.post_d = i + 1;
                 }
-                if dki > q {
-                    q = dki;
+                target_p = 0;
+                target_u += 1;
+            } else {
+                cur_target.ind = target_v;
+                cur_target.d = target_q;
+                if cur_target.ind == n as u32 {
+                    cur_target.post_d = i + 1;
                 }
-                if x[i][aki] == 0 {
-                    a[u] = aki;
-                    d[u] = p;
-                    u = u + 1;
-                    p = 0;
-                } else {
-                    b[v] = aki;
-                    e[v] = q;
-                    v = v + 1;
-                    q = 0;
-                }
-                u_mat[i][j] = u;
-                p_mat[i][j] = p;
-                q_mat[i][j] = q;
+                target_q = 0;
+                target_v += 1;
             }
-            for j in 0..u {
-                a_mat[i][j] = a[j];
-                d_mat[i][j] = d[j];
+        }
+
+        if j < n {
+            let prev_a = prev_col.a[j];
+            let prev_d = prev_col.d[j];
+
+            #[cfg(feature = "leak-resist")]
+            {
+                let cond1 = prev_target.ind.tp_eq(&(j as u32));
+                target_p = cond1.select(
+                    target_p
+                        .tp_gt(&prev_target.post_d)
+                        .select(target_p, prev_target.post_d),
+                    target_p,
+                );
+                target_q = cond1.select(
+                    target_q
+                        .tp_gt(&prev_target.post_d)
+                        .select(target_q, prev_target.post_d),
+                    target_q,
+                );
+
+                let prev_d = UInt::protect(prev_d as u32);
+                target_p =
+                    (!cond1).select(target_p.tp_gt(&prev_d).select(target_p, prev_d), target_p);
+                target_q =
+                    (!cond1).select(target_q.tp_gt(&prev_d).select(target_q, prev_d), target_q);
             }
-            for j in u..n {
-                a_mat[i][j] = b[j - u];
-                d_mat[i][j] = e[j - u];
+
+            #[cfg(not(feature = "leak-resist"))]
+            if j == prev_target.ind as usize {
+                target_p = target_p.max(prev_target.post_d);
+                target_q = target_q.max(prev_target.post_d);
+            } else {
+                target_p = target_p.max(prev_d);
+                target_q = target_q.max(prev_d);
             }
 
-            // Reverse pass (for caching pr and qr)
-            p = i;
-            q = i;
-            for j in (0..n).rev() {
-                let dki = if i == 0 || j == n - 1 {
-                    0
-                } else {
-                    d_mat[i - 1][j + 1] as usize
-                };
-                let aki = if i == 0 { j } else { a_mat[i - 1][j] as usize };
-
-                if dki > p {
-                    p = dki;
-                }
-                if dki > q {
-                    q = dki;
-                }
-                if x[i][aki] == 0 {
-                    p = 0;
-                } else {
-                    q = 0;
+            if cur_x_col[prev_a as usize] == 0 {
+                #[cfg(feature = "leak-resist")]
+                {
+                    let cond1 = target_u.tp_eq(&(cur_target.ind + 1));
+                    cur_target.post_d = cond1.select(target_p, cur_target.post_d);
                 }
 
-                pr_mat[i][j] = p;
-                qr_mat[i][j] = q;
+                #[cfg(not(feature = "leak-resist"))]
+                if target_u == cur_target.ind + 1 {
+                    cur_target.post_d = target_p;
+                }
+
+                target_p = ZERO;
+                target_u += 1;
+            } else {
+                #[cfg(feature = "leak-resist")]
+                {
+                    let cond1 = target_v.tp_eq(&(cur_target.ind + 1));
+                    cur_target.post_d = cond1.select(target_q, cur_target.post_d);
+                }
+
+                #[cfg(not(feature = "leak-resist"))]
+                if target_v == cur_target.ind + 1 {
+                    cur_target.post_d = target_q;
+                }
+
+                target_q = ZERO;
+                target_v += 1;
             }
         }
     }
 
-    println!(
-        "PBWT construction in {} ms",
-        (Instant::now() - now).as_millis()
-    );
-    let now = Instant::now();
+    let capacity = 2 * s;
+    let mut saved_d = SmallORAM::<UInt>::with_capacity(capacity);
+    let mut saved_a = SmallORAM::<UInt>::with_capacity(capacity);
+    let pre_min;
+    let post_max;
 
-    /* ORAM construction (performed in enclave) */
-    //let oram_creator = LeakyORAMCreator;
-    let oram_creator = LinearScanningORAMCreator;
-    //let oram_creator = PathORAMCreator::with_stash_size(13);
-
-    let mut pbwt_oram_1 = Vec::with_capacity(m);
-    let mut pbwt_oram_2 = Vec::with_capacity(m);
-    let mut write_value_1 = OramValue1::default();
-    let mut write_value_2 = OramValue2::default();
-    for i in 0..m {
-        let mut write_values_1 = Vec::with_capacity(n + 1);
-        let mut write_values_2 = Vec::with_capacity(n + 1);
-        for j in 0..(n + 1) {
-            if j == 0 {
-                write_value_1.u = 0;
-                write_value_1.p = i as u32;
-                write_value_1.q = i as u32;
-            } else {
-                write_value_1.u = u_mat[i][j - 1] as u32;
-                write_value_1.p = p_mat[i][j - 1] as u32;
-                write_value_1.q = q_mat[i][j - 1] as u32;
-            }
-
-            if j == n {
-                write_value_1.pr = i as u32;
-                write_value_1.qr = i as u32;
-            } else {
-                write_value_1.pr = pr_mat[i][j] as u32;
-                write_value_1.qr = qr_mat[i][j] as u32;
-            }
-            write_value_2.div = if j == 0 { i } else { d_mat[i][j - 1] as usize } as u32;
-            write_values_1.push(write_value_1.clone());
-            write_values_2.push(write_value_2.clone());
-        }
-        write_value_2.div = i as u32;
-        write_values_2.push(write_value_2.clone());
-        pbwt_oram_1.push(SmallORAM::<_>::from_iter(
-            write_values_1.iter().map(|v| unsafe { v.as_slice() }),
-            std::mem::size_of::<OramValue1>(),
-            oram_creator.clone(),
-        ));
-
-        pbwt_oram_2.push(SmallORAM::<_>::from_iter(
-            write_values_2.iter().map(|v| unsafe { v.as_slice() }),
-            std::mem::size_of::<OramValue2>(),
-            oram_creator.clone(),
-        ));
+    #[cfg(feature = "leak-resist")]
+    {
+        let s = UInt::protect(s as u32);
+        pre_min = cur_target.ind.tp_gt_eq(&s).select(ZERO, s - cur_target.ind);
+        post_max = (cur_target.ind + s)
+            .tp_lt_eq(&(n as u32 - 1))
+            .select(2 * s - 1, s + n as u32 - 1 - cur_target.ind);
     }
 
-    println!(
-        "ORAM conversion in {} ms",
-        (Instant::now() - now).as_millis()
-    );
-    let now = Instant::now();
-
-    /* PBWT querying */
-    let mut a_target = vec![0; m];
-    let mut d_pre_target = vec![0; m];
-    let mut d_post_target = vec![0; m];
-    let mut neighbors = vec![vec![0; s]; m];
-    a_target[0] = if t[0] == 0 { u_mat[0][n - 1] } else { n };
-    if t[0] == 0 {
-        d_pre_target[0] = if u_mat[0][n - 1] > 0 { 0 } else { 1 };
-        d_post_target[0] = 1;
-    } else {
-        d_pre_target[0] = if (u_mat[0][n - 1] as usize) < n { 0 } else { 1 };
-        d_post_target[0] = 1;
+    #[cfg(not(feature = "leak-resist"))]
+    {
+        pre_min = if cur_target.ind as usize >= s {
+            0
+        } else {
+            s - cur_target.ind as usize
+        };
+        post_max = if cur_target.ind as usize + s <= n - 1 {
+            2 * s - 1
+        } else {
+            n + s - 1 - cur_target.ind as usize
+        };
     }
 
-    for i in 1..m {
-        let prev_a = a_target[i - 1];
-        //assert!((prev_a as usize) < n + 1);
-
-        // Oblivious
-        let read_value = pbwt_oram_1[i].read(TpU32::protect(prev_a as u32));
-        let read_value = unsafe { OramValue1::from_slice(read_value.as_slice()) };
-        let u_lookup = read_value.u as usize;
-        let p_lookup = read_value.p as usize;
-        let q_lookup = read_value.q as usize;
-        let pr_lookup = read_value.pr as usize;
-        let qr_lookup = read_value.qr as usize;
-
-        a_target[i] = if t[i] == 0 {
-            u_lookup
-        } else {
-            u_mat[i][n - 1] + (prev_a - u_lookup)
-        };
-
-        d_pre_target[i] = if t[i] == 0 {
-            p_lookup.max(d_pre_target[i - 1])
-        } else {
-            q_lookup.max(d_pre_target[i - 1])
-        };
-
-        d_post_target[i] = if t[i] == 0 {
-            pr_lookup.max(d_post_target[i - 1])
-        } else {
-            qr_lookup.max(d_post_target[i - 1])
-        };
-
-        // neighbor finding
-        let mut pre_ind = (a_target[i] as i32) - 1;
-        let mut pre_div = d_pre_target[i];
-        let mut post_ind = a_target[i] as i32;
-        let mut post_div = d_post_target[i];
-        for l in 0..s {
-            let chosen = (pre_ind < 0) || (post_ind < (n as i32) && post_div < pre_div);
-            let mut ind = if chosen { post_ind } else { pre_ind };
-            neighbors[i][l] = ind as u32;
-
-            if chosen {
-                ind += 1;
-            } else {
-                ind -= 1;
-            }
-
-            // Oblivious
-            let div;
-            if chosen {
-                // Oblivious
-                let read_value = pbwt_oram_2[i].read(TpU32::protect(ind as u32 + 1));
-                let read_value = unsafe { OramValue2::from_slice(read_value.as_slice()) };
-                div = read_value.div as usize
-            } else {
-                let read_value = pbwt_oram_2[i].read(TpU32::protect(ind as u32 + 2));
-                let read_value = unsafe { OramValue2::from_slice(read_value.as_slice()) };
-                div = read_value.div as usize
-            }
-
-            if chosen {
-                post_ind = ind;
-                post_div = post_div.max(div);
-            } else {
-                pre_ind = ind;
-                pre_div = pre_div.max(div);
-            }
-        }
-    }
-
-    println!(
-        "Neighbor finding in {} ms",
-        (Instant::now() - now).as_millis()
-    );
-
-    /* Output */
     for j in 0..n {
-        if (j + 1 + 5 < a_target[m - 1] as usize) || (j + 1 > a_target[m - 1] as usize + 5) {
-            continue;
+        #[cfg(feature = "leak-resist")]
+        {
+            let k = UInt::protect(j as u32);
+            let s = UInt::protect(s as u32);
+            let capacity = UInt::protect(capacity as u32);
+            let cond1 = cur_target.ind.tp_gt(&k);
+            let dif = cond1.select(cur_target.ind - k, k - cur_target.ind);
+            let cond2 = cond1.select(dif.tp_lt_eq(&s), dif.tp_lt(&s));
+            let i = cond2.select(cond1.select(s - dif, s + dif), capacity);
+            saved_d.write(UInt::protect(cur_col.d[j]), i);
+            saved_a.write(UInt::protect(cur_col.a[j]), i);
         }
 
-        print_marker(d_mat[m - 1][j]);
-
-        for i in 0..m {
-            print!("{}", x[i][a_mat[m - 1][j] as usize]);
-        }
-        let mut flag = false;
-        for l in 0..s {
-            if neighbors[m - 1][l] as usize == j {
-                flag = true;
+        #[cfg(not(feature = "leak-resist"))]
+        if j < cur_target.ind as usize {
+            let dif = cur_target.ind as usize - j;
+            if dif <= s {
+                saved_d.write(cur_col.d[j], (s - dif) as u32);
+                saved_a.write(cur_col.a[j], (s - dif) as u32);
             }
-        }
-        if flag {
-            print!("\tneighbor");
-        }
-        print!("\n");
-
-        if j + 1 == a_target[m - 1] as usize {
-            println!("------------");
-            print_marker(d_pre_target[m - 1]);
-            for i in 0..m {
-                print!("{}", t[i]);
+        } else {
+            let dif = j - cur_target.ind as usize;
+            if dif < s {
+                saved_d.write(cur_col.d[j], (s + dif) as u32);
+                saved_a.write(cur_col.a[j], (s + dif) as u32);
             }
-            print!("\ttarget");
-            print!("\n");
-            print_marker(d_post_target[m - 1]);
-            println!("------------");
         }
     }
 
-    for i in 1..m {
-        print!("Neighbors at pos {}: ", i);
-        for l in 0..s {
-            print!("\t{}", neighbors[i][l]);
+    // neighbor finding
+    let mut pre_ind;
+    let mut post_ind;
+    let mut pre_div = cur_target.d;
+    let mut post_div = cur_target.post_d;
+
+    #[cfg(feature = "leak-resist")]
+    {
+        let s = UInt::protect(s as u32);
+        pre_ind = s - 1;
+        post_ind = s;
+    }
+
+    #[cfg(not(feature = "leak-resist"))]
+    {
+        pre_ind = s - 1;
+        post_ind = s;
+    }
+
+    let mut new_neighbors = Vec::with_capacity(s);
+    for _ in 0..s {
+        #[cfg(feature = "leak-resist")]
+        {
+            let chosen_post =
+                pre_ind.tp_lt(&pre_min) | post_ind.tp_lt_eq(&post_max) & post_div.tp_lt(&pre_div);
+            let mut ind = chosen_post.select(post_ind, pre_ind);
+            new_neighbors.push(saved_a.read(ind));
+            let cannot_advance =
+                (chosen_post & (ind.tp_eq(&post_max))) | (!chosen_post & (ind.tp_eq(&pre_min)));
+            ind = (!cannot_advance).select(chosen_post.select(ind + 1, ind - 1), ind);
+            let div = (!cannot_advance).select(
+                chosen_post.select(saved_d.read(ind), saved_d.read(ind + 1)),
+                UInt::protect(i as u32),
+            );
+            pre_div = chosen_post.select(pre_div, pre_div.tp_gt(&div).select(pre_div, div));
+            post_div = chosen_post.select(post_div.tp_gt(&div).select(post_div, div), post_div);
+            pre_ind = chosen_post.select(pre_ind, ind);
+            post_ind = chosen_post.select(ind, post_ind);
         }
-        print!("\n");
+
+        #[cfg(not(feature = "leak-resist"))]
+        {
+            let chosen_post = (pre_ind < pre_min) || (post_ind <= post_max && post_div < pre_div);
+            let mut ind = if chosen_post { post_ind } else { pre_ind };
+            new_neighbors.push(saved_a.read(ind as u32));
+
+            let cannot_advance =
+                (chosen_post && (ind == post_max)) || (!chosen_post && (ind == pre_min));
+
+            ind = if chosen_post && !cannot_advance {
+                ind + 1
+            } else if !chosen_post && !cannot_advance {
+                ind - 1
+            } else {
+                ind
+            };
+
+            let div = if chosen_post && !cannot_advance {
+                saved_d.read(ind as u32)
+            } else if !chosen_post && !cannot_advance {
+                saved_d.read(ind as u32 + 1)
+            } else {
+                i as u32
+            };
+
+            pre_div = if chosen_post {
+                pre_div
+            } else {
+                pre_div.max(div)
+            };
+
+            post_div = if chosen_post {
+                post_div.max(div)
+            } else {
+                post_div
+            };
+
+            pre_ind = if chosen_post { pre_ind } else { ind };
+            post_ind = if chosen_post { ind } else { post_ind };
+        }
+    }
+
+    (cur_target, new_neighbors)
+}
+
+struct PBWT<'a> {
+    prev_col: PBWTColumn,
+    x: ArrayView2<'a, u8>,
+    m: usize,
+    n: usize,
+    cur_i: usize,
+}
+
+impl<'a> PBWT<'a> {
+    pub fn new(x: ArrayView2<'a, u8>) -> Self {
+        let n = x.nrows();
+        let m = x.ncols();
+        let prev_col = PBWTColumn {
+            a: Array1::<u32>::from_iter(0..n as u32),
+            d: unsafe { Array1::<u32>::uninit(n).assume_init() },
+        };
+        Self {
+            prev_col,
+            x,
+            m,
+            n,
+            cur_i: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for PBWT<'a> {
+    type Item = (PBWTColumn, u32);
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut cur_col = PBWTColumn {
+            a: unsafe { Array1::<u32>::uninit(self.n).assume_init() },
+            d: unsafe { Array1::<u32>::uninit(self.n).assume_init() },
+        };
+
+        if self.cur_i >= self.m {
+            None
+        } else {
+            let i = self.cur_i;
+            self.cur_i += 1;
+            let n_zeros = self.x.row(i).iter().filter(|&&v| v == 0).count();
+            // original PBWT
+            let mut u = 0;
+            let mut v = n_zeros;
+            let mut p = i + 1;
+            let mut q = i + 1;
+
+            for j in 0..self.n {
+                let prev_a = self.prev_col.a[j] as usize;
+                let prev_d = self.prev_col.d[j] as usize;
+                p = p.max(prev_d);
+                q = q.max(prev_d);
+                if self.x[[i, prev_a]] == 0 {
+                    cur_col.a[u] = prev_a as u32;
+                    cur_col.d[u] = p as u32;
+                    u += 1;
+                    p = 0;
+                } else {
+                    cur_col.a[v] = prev_a as u32;
+                    cur_col.d[v] = q as u32;
+                    v += 1;
+                    q = 0;
+                }
+            }
+            self.prev_col = cur_col.clone();
+            Some((cur_col, n_zeros as u32))
+        }
+    }
+}
+
+fn pbwt(x: &[Vec<u8>], t: &[Vec<Genotype>], s: usize) -> Vec<Vec<Vec<UInt>>> {
+    let m = x.len();
+    let n = x[0].len();
+    let n_targets = t.len();
+
+    let x = Array2::from_shape_vec((m, n), x.iter().flatten().cloned().collect()).unwrap();
+    let t = t
+        .iter()
+        .map(|v| Array1::from_vec(v.to_vec()))
+        .collect::<Vec<_>>();
+
+    let start = Instant::now();
+
+    let mut pbwt = PBWT::new(x.view());
+
+    let mut prev_col = PBWTColumn {
+        a: Array1::<u32>::from_iter(0..n as u32),
+        d: unsafe { Array1::<u32>::uninit(n).assume_init() },
+    };
+
+    let mut prev_target = (0..n_targets)
+        .map(|_| Target {
+            ind: ZERO,
+            d: ZERO,
+            post_d: ZERO,
+        })
+        .collect::<Vec<_>>();
+
+    let mut neighbors: Vec<Vec<Vec<UInt>>> = vec![Vec::with_capacity(m); n_targets];
+
+    for i in 0..m {
+        let (cur_col, cur_n_zeros) = pbwt.next().unwrap();
+
+        for j in 0..n_targets {
+            let (cur_target, new_neighbors) = find_neighbors(
+                x.row(i),
+                cur_n_zeros as u32,
+                t[j][i],
+                i as u32,
+                s,
+                &prev_target[j],
+                &cur_col,
+                &prev_col,
+            );
+            prev_target[j] = cur_target;
+            neighbors[j].push(new_neighbors);
+        }
+        //let (cur_target, new_neighbors) = find_neighbors(
+        //x.row(i),
+        //cur_n_zeros as u32,
+        //t[i],
+        //i as u32,
+        //s,
+        //&prev_target,
+        //&cur_col,
+        //&prev_col,
+        //);
+
+        //prev_target = cur_target;
+        prev_col = cur_col;
+    }
+
+    println!("time = {} ms", (Instant::now() - start).as_millis());
+    neighbors
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use rand::Rng;
+    use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn pbwt_lookup() {
+        let mut rng = rand::thread_rng();
+
+        let n = 100;
+        let m = 100;
+        let n_targets = 2;
+        let s = 4;
+
+        let mut x = vec![vec![0 as u8; n]; m]; // ref panel
+        let mut t = vec![vec![0 as u8; m]; n_targets]; // target
+
+        for i in 0..m {
+            for j in 0..n {
+                x[i][j] = rng.gen_range(0..2);
+            }
+            for j in 0..n_targets {
+                t[j][i] = rng.gen_range(0..2);
+            }
+        }
+
+        #[cfg(feature = "leak-resist")]
+        let t = t
+            .into_iter()
+            .map(|v| {
+                v.into_iter()
+                    .map(|w| Genotype::protect(w))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        let results = pbwt(&x, &t, s);
+
+        for (result, single_t) in results.into_iter().zip(t.iter()) {
+            for (i, r) in (0..m).zip(result.into_iter()) {
+                #[cfg(feature = "leak-resist")]
+                let r = r.into_iter().map(|v| v.expose()).collect::<Vec<_>>();
+                let mut r = r.into_iter().collect::<HashSet<_>>();
+                let mut check_answer = HashMap::<usize, HashSet<u32>>::new();
+                let suffix_t = &single_t[..i + 1];
+                let suffix_x = &x[..i + 1];
+                for i in 0..n {
+                    let mut n_matches = 0;
+                    for (&a, b) in suffix_t.iter().rev().zip(suffix_x.iter().rev()) {
+                        #[cfg(feature = "leak-resist")]
+                        let a = a.expose();
+                        if a == b[i] {
+                            n_matches += 1;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    let entry = check_answer
+                        .entry(n_matches)
+                        .or_insert_with(|| HashSet::new());
+                    entry.insert(i as u32);
+                }
+
+                let mut all_lens = check_answer.keys().into_iter().cloned().collect::<Vec<_>>();
+                all_lens.sort_unstable_by(|a, b| b.cmp(a));
+
+                for j in all_lens {
+                    if r.is_empty() {
+                        break;
+                    }
+                    if !check_answer.contains_key(&j) {
+                        continue;
+                    }
+                    assert!(check_answer[&j].is_subset(&r) || r.is_subset(&check_answer[&j]));
+                    r = r.difference(&check_answer[&j]).cloned().collect();
+                }
+                assert!(r.is_empty());
+            }
+        }
     }
 }
