@@ -1,38 +1,30 @@
 use crate::pbwt::{PBWTColumn, PBWT};
-use ndarray::{Array1, ArrayView1, ArrayView2};
+use ndarray::{ArrayView1, ArrayView2};
 use std::time::Instant;
+use crate::{Genotype, UInt};
 
 #[cfg(feature = "leak-resist")]
 mod inner {
+    use super::*;
     pub use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpOrd};
-    use tp_fixedpoint::timing_shield::{TpU32, TpU8};
-    pub type Genotype = TpU8;
-    pub type UInt = TpU32;
     pub const ZERO: UInt = unsafe { std::mem::transmute(0u32) };
 }
 
 #[cfg(not(feature = "leak-resist"))]
 mod inner {
-    pub type Genotype = u8;
-    pub type UInt = u32;
     pub const ZERO: u32 = 0;
 }
 
 use inner::*;
 
-pub fn find_neighbors(x: ArrayView2<u8>, t: ArrayView2<Genotype>, s: usize) -> Vec<Vec<Vec<UInt>>> {
+pub fn find_neighbors(x: ArrayView2<i8>, t: ArrayView2<Genotype>, s: usize) -> Vec<Vec<Vec<UInt>>> {
     let m = x.nrows();
-    let n = x.ncols();
     let n_targets = t.nrows();
 
     let start = Instant::now();
 
     let mut pbwt = PBWT::new(x.view());
-
-    let mut prev_col = PBWTColumn {
-        a: Array1::<u32>::from_iter(0..n as u32),
-        d: unsafe { Array1::<u32>::uninit(n).assume_init() },
-    };
+    let mut prev_col = pbwt.get_init_col().unwrap();
 
     let mut prev_target = (0..n_targets)
         .map(|_| Target {
@@ -48,16 +40,18 @@ pub fn find_neighbors(x: ArrayView2<u8>, t: ArrayView2<Genotype>, s: usize) -> V
         let (cur_col, cur_n_zeros) = pbwt.next().unwrap();
 
         for j in 0..n_targets {
-            let (cur_target, new_neighbors) = find_neighbors_single_marker(
+            let cur_target = find_target_single_marker(
                 x.row(i),
                 cur_n_zeros as u32,
                 t[[j, i]],
                 i as u32,
-                s,
                 &prev_target[j],
-                &cur_col,
                 &prev_col,
             );
+
+            let new_neighbors =
+                find_neighbors_single_marker(i as u32, s, &cur_target, &cur_col, &prev_col);
+
             prev_target[j] = cur_target;
             neighbors[j].push(new_neighbors);
         }
@@ -123,16 +117,14 @@ struct Target {
     post_d: UInt,
 }
 
-fn find_neighbors_single_marker(
-    cur_x_col: ArrayView1<u8>,
+fn find_target_single_marker(
+    cur_x_col: ArrayView1<i8>,
     cur_n_zeros: u32,
     cur_t: Genotype,
     i: u32,
-    s: usize,
     prev_target: &Target,
-    cur_col: &PBWTColumn,
     prev_col: &PBWTColumn,
-) -> (Target, Vec<UInt>) {
+) -> Target {
     let n = prev_col.a.len();
     let mut cur_target = Target {
         ind: ZERO,
@@ -284,6 +276,17 @@ fn find_neighbors_single_marker(
             }
         }
     }
+    cur_target
+}
+
+fn find_neighbors_single_marker(
+    i: u32,
+    s: usize,
+    cur_target: &Target,
+    cur_col: &PBWTColumn,
+    prev_col: &PBWTColumn,
+) -> Vec<UInt> {
+    let n = prev_col.a.len();
 
     let capacity = 2 * s;
     let mut saved_d = SmallORAM::<UInt>::with_capacity(capacity);
@@ -426,7 +429,7 @@ fn find_neighbors_single_marker(
         }
     }
 
-    (cur_target, new_neighbors)
+    new_neighbors
 }
 
 #[cfg(test)]
@@ -445,8 +448,8 @@ mod test {
         let n_targets = 3;
         let s = 5;
 
-        let mut x = Array2::<u8>::zeros((m, n)); // ref panel
-        let mut t = Array2::<u8>::zeros((n_targets, m)); // ref panel
+        let mut x = Array2::<i8>::zeros((m, n)); // ref panel
+        let mut t = Array2::<i8>::zeros((n_targets, m)); // ref panel
 
         for v in x.iter_mut() {
             *v = rng.gen_range(0..2);

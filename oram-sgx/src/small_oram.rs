@@ -66,8 +66,11 @@ where
     }
     // Assuming reading from a cache line is safe
     pub fn read(&mut self, index: TpU32) -> Vec<u8> {
-        let (block_index, index_in_block) =
-            tp_u32_div(index, self.values_per_block as u32, self.n_values as u32);
+        let (block_index, index_in_block) = tp_u32_div(
+            index,
+            TpU32::protect(self.values_per_block as u32),
+            self.n_values as u32,
+        );
         let block = self.backend.read_block(block_index);
         let mut result = vec![0u8; self.value_size];
         let exposed_i = index_in_block.expose() as usize;
@@ -89,8 +92,11 @@ where
     }
 
     pub fn modify_block_with(&mut self, index: TpU32, func: impl Fn(&mut [u8])) {
-        let (block_index, index_in_block) =
-            tp_u32_div(index, self.values_per_block as u32, self.n_values as u32);
+        let (block_index, index_in_block) = tp_u32_div(
+            index,
+            TpU32::protect(self.values_per_block as u32),
+            self.n_values as u32,
+        );
         let exposed_i = index_in_block.expose() as usize;
         let value_size = self.value_size;
         self.backend.fast_modify_block_with(block_index, |block| {

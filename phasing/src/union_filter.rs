@@ -34,7 +34,7 @@ where
     }
 
     pub fn set(&mut self, index: TpU32) {
-        let (byte_index, bit_index) = tp_u32_div(index, 8, self.n_bits as u32);
+        let (byte_index, bit_index) = tp_u32_div(index, TpU32::protect(8), self.n_bits as u32);
         let set_byte = 1 << bit_index.expose();
         //println!("second_byte = {:0b}", set_byte);
         //let second_byte = ((self.s_mask as u16) >> (8 - bit_index)) as u8;

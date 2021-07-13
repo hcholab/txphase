@@ -18,4 +18,3 @@ pub fn gen_target_sample(n_markers: usize, mut rng: impl Rng) -> Vec<u8> {
         .map(|_| rng.gen_range(0..2))
         .collect()
 }
- 

@@ -8,14 +8,14 @@ pub struct PBWTColumn {
 
 pub struct PBWT<'a> {
     prev_col: PBWTColumn,
-    x: ArrayView2<'a, u8>,
+    x: ArrayView2<'a, i8>,
     m: usize,
     n: usize,
     cur_i: usize,
 }
 
 impl<'a> PBWT<'a> {
-    pub fn new(x: ArrayView2<'a, u8>) -> Self {
+    pub fn new(x: ArrayView2<'a, i8>) -> Self {
         let n = x.nrows();
         let m = x.ncols();
         let prev_col = PBWTColumn {
@@ -30,19 +30,26 @@ impl<'a> PBWT<'a> {
             cur_i: 0,
         }
     }
+
+    pub fn get_init_col(&mut self) -> Option<PBWTColumn> {
+        if self.cur_i == 0 {
+            Some(self.prev_col.to_owned())
+        } else {
+            None
+        }
+    }
 }
 
 impl<'a> Iterator for PBWT<'a> {
     type Item = (PBWTColumn, u32);
     fn next(&mut self) -> Option<Self::Item> {
-        let mut cur_col = PBWTColumn {
-            a: unsafe { Array1::<u32>::uninit(self.n).assume_init() },
-            d: unsafe { Array1::<u32>::uninit(self.n).assume_init() },
-        };
-
         if self.cur_i >= self.m {
             None
         } else {
+            let mut cur_col = PBWTColumn {
+                a: unsafe { Array1::<u32>::uninit(self.n).assume_init() },
+                d: unsafe { Array1::<u32>::uninit(self.n).assume_init() },
+            };
             let i = self.cur_i;
             self.cur_i += 1;
             let n_zeros = self.x.row(i).iter().filter(|&&v| v == 0).count();
