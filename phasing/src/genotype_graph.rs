@@ -1,11 +1,11 @@
-use crate::{Bool, Genotype, Real, U8};
+use crate::{Bool, Genotype, Real, UInt, U8};
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3};
-use rand::{distributions::Distribution, Rng};
+use rand::Rng;
+use std::time::Instant;
 
 #[cfg(feature = "leak-resist")]
 mod inner {
     use super::*;
-    pub(crate) use crate::UInt;
     pub use tp_fixedpoint::timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd};
     pub struct SortItem {
         pub dip: Real,
@@ -146,6 +146,7 @@ impl GenotypeGraph {
 
     // TODO: limit merges to maximum of MAX_AMBIGUOUS het sites within a block
     pub fn prune(&mut self, tprob: ArrayView3<Real>) {
+        let now = Instant::now();
         const MCMC_PRUNE_PROB_THRES: f32 = 0.999; // "mcmc-prune" parameter in ShapeIt4
         const MAX_AMBIGUOUS: usize = 22; // "MAX_AMB" constant in ShapeIt4 (utils/otools.h)
 
@@ -330,6 +331,10 @@ impl GenotypeGraph {
                 }
             }
         }
+        println!(
+            "Genotype graph pruning: {} ms",
+            (Instant::now() - now).as_millis()
+        );
     }
 
     // Forward sampling. Returns paired indices (diploid) into target genotype graph
@@ -352,7 +357,17 @@ impl GenotypeGraph {
         let n = x.ncols();
         let p = self.p;
 
+        println!("== Backward pass ==");
+        let now = Instant::now();
+
         let bprob = self.backward_pass(x, rprob, eprob);
+
+        println!("Backward pass: {} ms", (Instant::now() - now).as_millis());
+        println!("");
+
+        println!("== Forward sampling ==");
+        let mut sum_time = vec![0; 6];
+        let now_all = Instant::now();
 
         //let mut phase_ind = vec![vec![0 as u8; m]; 2];
         let mut phase_ind = unsafe { Array2::<U8>::uninit((2, m)).assume_init() };
@@ -361,9 +376,12 @@ impl GenotypeGraph {
         // Save belief over the first block in tprob[0][0]
 
         let mut firstprob = unsafe { Array1::<Real>::uninit(p).assume_init() };
+
+        let now = Instant::now();
         for h1 in 0..p {
             firstprob[h1] = bprob.slice(s![0, h1, ..]).iter().sum();
         }
+        sum_time[0] = (Instant::now() - now).as_nanos();
 
         let mut tprob = None;
         if trans_prob_flag > 0 {
@@ -423,7 +441,7 @@ impl GenotypeGraph {
                 #[cfg(not(feature = "leak-resist"))]
                 {
                     fprob[[h1, h2]] =
-                        emission_prob(x[[0, h2]], graph.graph[[0, graph_ind as usize]], eprob);
+                        emission_prob(x[[0, h2]], self.graph[[0, graph_ind as usize]], eprob);
                 }
             }
         }
@@ -433,8 +451,10 @@ impl GenotypeGraph {
             let mut weights = unsafe { Array2::<Real>::uninit((psub, p)).assume_init() };
 
             for j in 0..psub {
+                let now = Instant::now();
                 // Transition i-1 -> i
                 let fsum = fprob.row(j).iter().sum();
+                sum_time[1] += (Instant::now() - now).as_nanos();
                 for h2 in 0..n {
                     fprob_next[[j, h2]] =
                         transition_prob(fprob[[j, h2]], fsum, 1.0 / (n as f32), rprob);
@@ -442,7 +462,9 @@ impl GenotypeGraph {
 
                 // Multiply with backward prob and integrate to get transition prob from hap j to h1
                 for h1 in 0..p {
+                    let now = Instant::now();
                     let iprod = inner_prod(fprob_next.row(j), bprob.slice(s![i, h1, ..]));
+                    sum_time[2] += (Instant::now() - now).as_nanos();
 
                     // If not between blocks, set to identity matrix
                     let ind = if trans_prob_flag > 0 {
@@ -468,10 +490,18 @@ impl GenotypeGraph {
 
                     #[cfg(not(feature = "leak-resist"))]
                     {
-                        if ind as usize == h1 {
-                            weights[[j, h1]] = if graph.block_head[i] { iprod } else { 1.0 };
+                        weights[[j, h1]] = if ind as usize == h1 {
+                            if self.block_head[i] {
+                                iprod
+                            } else {
+                                1.0
+                            }
                         } else {
-                            weights[[j, h1]] = if graph.block_head[i] { iprod } else { 0.0 };
+                            if self.block_head[i] {
+                                iprod
+                            } else {
+                                0.0
+                            }
                         }
                     }
                 }
@@ -512,13 +542,13 @@ impl GenotypeGraph {
 
             #[cfg(not(feature = "leak-resist"))]
             {
-                phase_ind[[0, i]] = if graph.block_head[i] {
+                phase_ind[[0, i]] = if self.block_head[i] {
                     ind1 as u8
                 } else {
                     phase_ind[[0, i - 1]]
                 };
 
-                phase_ind[[1, i]] = if graph.block_head[i] {
+                phase_ind[[1, i]] = if self.block_head[i] {
                     ind2 as u8
                 } else {
                     phase_ind[[1, i - 1]]
@@ -529,16 +559,34 @@ impl GenotypeGraph {
             if trans_prob_flag > 0 {
                 if trans_prob_flag == 1 {
                     for h1 in 0..psub {
+                        let now = Instant::now();
+                        #[cfg(feature = "leak-resist")]
+                        let tsum = {
+                            let mut buf = weights.row(h1).as_slice().unwrap().to_vec();
+                            Real::checked_sum_in_place(&mut buf)
+                        };
+
+                        #[cfg(not(feature = "leak-resist"))]
                         let tsum: Real = weights.row(h1).iter().sum();
+
+                        sum_time[3] += (Instant::now() - now).as_nanos();
                         for h2 in 0..p {
                             tprob.as_mut().unwrap()[[i, h1, h2]] = weights[[h1, h2]] / tsum;
                         }
                     }
                 } else {
-                    let mut tsum: Real = weights.row(0).iter().sum();
-                    for h1 in 1..psub {
-                        tsum += weights.row(h1).iter().sum::<Real>();
-                    }
+                    let now = Instant::now();
+
+                    #[cfg(feature = "leak-resist")]
+                    let tsum = {
+                        let mut buf = weights.as_slice().unwrap().to_vec();
+                        Real::checked_sum_in_place(&mut buf)
+                    };
+
+                    #[cfg(not(feature = "leak-resist"))]
+                    let tsum = weights.iter().sum::<Real>();
+
+                    sum_time[4] += (Instant::now() - now).as_nanos();
                     for h1 in 0..psub {
                         for h2 in 0..p {
                             tprob.as_mut().unwrap()[[i, h1, h2]] = weights[[h1, h2]] / tsum;
@@ -576,7 +624,7 @@ impl GenotypeGraph {
                     #[cfg(not(feature = "leak-resist"))]
                     {
                         fprob_next[[h1, h2]] *=
-                            emission_prob(x[[i, h2]], graph.graph[[i, graph_ind as usize]], eprob);
+                            emission_prob(x[[i, h2]], self.graph[[i, graph_ind as usize]], eprob);
                     }
                 }
             }
@@ -589,10 +637,9 @@ impl GenotypeGraph {
             }
 
             // Renormalize (TODO: replace with lazy normalization)
-            let mut fsum: Real = fprob.row(0).iter().sum();
-            for h1 in 1..psub {
-                fsum += fprob.row(h1).iter().sum::<Real>();
-            }
+            let now = Instant::now();
+            let fsum = fprob.iter().sum::<Real>();
+            sum_time[5] += (Instant::now() - now).as_nanos();
             for h1 in 0..psub {
                 for h2 in 0..n {
                     fprob[[h1, h2]] /= fsum;
@@ -600,10 +647,20 @@ impl GenotypeGraph {
             }
         }
 
+        for (i, t) in sum_time.iter().enumerate() {
+            println!("Summation {}: {} ms", i, t / 1000000);
+        }
+        println!(
+            "Forward sampling: {} ms",
+            (Instant::now() - now_all).as_millis()
+        );
+        println!("");
+
         (phase_ind, tprob)
     }
 
     pub fn get_haps(&self, phase_ind: ArrayView2<U8>) -> Array2<Genotype> {
+        let now = Instant::now();
         let m = self.graph.nrows();
 
         let mut phased = unsafe { Array2::<Genotype>::uninit((2, m)).assume_init() };
@@ -618,14 +675,17 @@ impl GenotypeGraph {
 
                 #[cfg(not(feature = "leak-resist"))]
                 {
-                    phased[[hap, i]] = graph.graph[[i, phase_ind[[hap, i]] as usize]];
+                    phased[[hap, i]] = self.graph[[i, phase_ind[[hap, i]] as usize]];
                 }
             }
         }
+        println!("Get haplotypes: {} ms", (Instant::now() - now).as_millis());
         phased
     }
 
     fn backward_pass(&self, x: ArrayView2<Genotype>, rprob: f32, eprob: f32) -> Array3<Real> {
+        let mut sum_time = 0;
+
         let m = x.nrows();
         let n = x.ncols();
         let p = self.p;
@@ -645,12 +705,16 @@ impl GenotypeGraph {
             // i -> i+1 transition
             let mut h1sum = unsafe { Array1::<Real>::uninit(n).assume_init() };
             for h1 in 0..p {
+                let now = Instant::now();
                 let h2sum = bprob.slice(s![i + 1, h1, ..]).iter().sum();
+                sum_time += (Instant::now() - now).as_nanos();
+
                 for h2 in 0..n {
                     bprob[[i, h1, h2]] =
                         transition_prob(bprob[[i + 1, h1, h2]], h2sum, 1.0 / (n as f32), rprob);
                 }
 
+                let now = Instant::now();
                 // Add to aggregate sum over h1
                 for h2 in 0..n {
                     if h1 == 0 {
@@ -659,6 +723,7 @@ impl GenotypeGraph {
                         h1sum[h2] += bprob[[i, h1, h2]];
                     }
                 }
+                sum_time += (Instant::now() - now).as_nanos();
             }
 
             // If i+1 is block head, then replace bprob with its sum over h1
@@ -672,7 +737,7 @@ impl GenotypeGraph {
                     }
                     #[cfg(not(feature = "leak-resist"))]
                     {
-                        if graph.block_head[i + 1] {
+                        if self.block_head[i + 1] {
                             bprob[[i, h1, h2]] = h1sum[h2];
                         }
                     }
@@ -686,14 +751,18 @@ impl GenotypeGraph {
                 }
             }
 
+            let now = Instant::now();
             // renormalize (TODO: replace with lazy normalization)
             let bsum: Real = bprob.slice(s![i, .., ..]).iter().sum();
+            sum_time += (Instant::now() - now).as_nanos();
+
             for h1 in 0..p {
                 for h2 in 0..n {
                     bprob[[i, h1, h2]] /= bsum;
                 }
             }
         }
+        println!("Summation: {} ms", sum_time / 1000000);
         bprob
     }
 }
@@ -783,10 +852,18 @@ fn constrained_paired_sample(
     let n = weights1.len();
     let mut combined = unsafe { Array1::<Real>::uninit(n).assume_init() };
     for i in 0..n {
-        combined[i] = weights1[i] * weights2[n - 1 - i];
+        #[cfg(feature = "leak-resist")]
+        {
+            combined[i] = (weights1[i].is_nan() | weights2[n - 1 - i].is_nan())
+                .select(Real::NAN, weights1[i] * weights2[n - 1 - i]);
+        }
+
+        #[cfg(not(feature = "leak-resist"))]
+        {
+            combined[i] = weights1[i] * weights2[n - 1 - i];
+        }
     }
 
-    // TODO fix this
     let ind1 = sample_real(combined.view(), rng);
 
     #[cfg(feature = "leak-resist")]
@@ -800,37 +877,61 @@ fn constrained_paired_sample(
     }
 }
 
-// TODO make this side channel resilient
 fn sample_real(weights: ArrayView1<Real>, rng: &mut impl Rng) -> UInt {
-    #[cfg(feature = "leak-resist")]
-    let weights = Array1::from_vec(
-        weights
-            .iter()
-            .map(|v| v.leaky_into_f32())
-            .collect::<Vec<_>>(),
-    );
-
-    #[cfg(not(feature = "leak-resist"))]
-    let weights = weights.to_owned();
-
-    let dist = rand::distributions::WeightedIndex::new(weights.into_raw_vec());
+    let mut total_weight = weights[0];
+    let mut cumulative_weights: Vec<Real> = Vec::with_capacity(weights.len());
+    cumulative_weights.push(total_weight);
+    for &w in weights.iter().skip(1) {
+        #[cfg(feature = "leak-resist")]
+        {
+            total_weight = w.is_nan().select(
+                total_weight,
+                total_weight.is_nan().select(w, total_weight + w),
+            );
+        }
+        #[cfg(not(feature = "leak-resist"))]
+        {
+            total_weight += w;
+        }
+        cumulative_weights.push(total_weight);
+    }
 
     #[cfg(feature = "leak-resist")]
     {
-        if dist.is_err() {
-            return UInt::protect(0);
-        } else {
-            UInt::protect(dist.unwrap().sample(rng) as u32)
+        let chosen_weight = Real::leaky_from_f32(rng.gen_range(0.0..1.0)) * total_weight;
+        let mut index = UInt::protect(0);
+        let mut done = Bool::protect(false);
+        for w in cumulative_weights {
+            done = (w.tp_gt(&chosen_weight) & !w.is_nan()).select(Bool::protect(true), done);
+            index = (!done).select(index + 1, index);
         }
+        index
     }
 
     #[cfg(not(feature = "leak-resist"))]
     {
-        if dist.is_err() {
-            return 0;
-        } else {
-            dist.unwrap().sample(rng) as u32
-        }
+        //println!("total_weight = {} ", total_weight);
+        //let chosen_weight = rng.gen_range(0.0..1.0) * total_weight;
+        //println!("chosen = {}", chosen_weight);
+        //let mut index = 0;
+        //for w in cumulative_weights {
+        //if w > chosen_weight {
+        //break;
+        //}
+        //index += 1;
+        //}
+        //index
+        let chosen_weight = rng.gen_range(0.0..1.0) * total_weight;
+        use std::cmp::Ordering;
+        cumulative_weights
+            .binary_search_by(|w| {
+                if *w <= chosen_weight {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            })
+            .unwrap_err() as u32
     }
 }
 
@@ -873,6 +974,9 @@ fn inner_prod(v1: ArrayView1<Real>, v2: ArrayView1<Real>) -> Real {
 
 #[cfg(test)]
 mod ref_algs {
+    use rand::distributions::{Distribution, WeightedIndex};
+    use rand::Rng;
+
     // First return object encodes the graph (2^het_per_block by M matrix)
     // Second return object encodes a boolean vector indicating block starting positions
     pub fn construct_geno_graph(t: &[u8], het_per_block: i32) -> (Vec<Vec<u8>>, Vec<bool>) {
@@ -983,6 +1087,297 @@ mod ref_algs {
         }
     }
 
+    pub fn backward_pass(
+        x: &Vec<Vec<u8>>,
+        graph: &Vec<Vec<u8>>,
+        block_head: &Vec<bool>,
+        rprob: f32,
+        eprob: f32,
+    ) -> Vec<Vec<Vec<f32>>> {
+        let m = x.len();
+        let n = x[0].len();
+        let p = graph[0].len();
+
+        let mut bprob = vec![vec![vec![0.0 as f32; n]; p]; m]; // backward prob
+
+        // initialization (uniform over ref haplotypes + emission at last position)
+        for h1 in 0..p {
+            for h2 in 0..n {
+                bprob[m - 1][h1][h2] = emission_prob(x[m - 1][h2], graph[m - 1][h1], eprob);
+            }
+        }
+
+        // backward pass
+        for i in (0..m - 1).rev() {
+            // i -> i+1 transition
+            let mut h1sum = vec![0.0; n];
+            for h1 in 0..p {
+                let h2sum = sum_vec(bprob[i + 1][h1].as_slice());
+                for h2 in 0..n {
+                    bprob[i][h1][h2] =
+                        transition_prob(bprob[i + 1][h1][h2], h2sum, 1.0 / (n as f32), rprob);
+                }
+
+                // Add to aggregate sum over h1
+                for h2 in 0..n {
+                    h1sum[h2] += bprob[i][h1][h2];
+                }
+            }
+
+            // If i+1 is block head, then replace bprob with its sum over h1
+            // (between blocks, any transition between different values of h1 is possible)
+            for h1 in 0..p {
+                for h2 in 0..n {
+                    bprob[i][h1][h2] = mutex2f32(block_head[i + 1], h1sum[h2], bprob[i][h1][h2]);
+                }
+            }
+
+            // emission at i
+            for h1 in 0..p {
+                for h2 in 0..n {
+                    bprob[i][h1][h2] *= emission_prob(x[i][h2], graph[i][h1], eprob);
+                }
+            }
+
+            // renormalize (TODO: replace with lazy normalization)
+            let mut bsum = 0.0;
+            for h1 in 0..p {
+                bsum += sum_vec(bprob[i][h1].as_slice());
+            }
+            for h1 in 0..p {
+                for h2 in 0..n {
+                    bprob[i][h1][h2] /= bsum;
+                }
+            }
+        }
+        bprob
+    }
+
+    // Forward sampling. Returns paired indices (diploid) into target genotype graph
+    // Optionally returns transition probabilities between adjacent positions in 2nd slot
+    // If not returning trans probs only compute forward probabilities needed for sampled states
+    //
+    // If trans_prob_flag = 0, do not return trans prob and run a focused forward pass
+    // If trans_prob_flag = 1, output p(x1), p(x2|x1), p(x3|x2) ... where xi denotes
+    // index into target genotype graph at position i
+    // If trans_prob_flag = 2, output p(x1), p(x1,x2), p(x2,x3) ... instead
+    pub fn forward_sampling(
+        bprob: &Vec<Vec<Vec<f32>>>,
+        x: &Vec<Vec<u8>>,
+        graph: &Vec<Vec<u8>>,
+        block_head: &Vec<bool>,
+        rprob: f32,
+        eprob: f32,
+        rng: &mut impl Rng,
+        trans_prob_flag: usize,
+    ) -> (Vec<Vec<u8>>, Vec<Vec<Vec<f32>>>) {
+        let m = x.len();
+        let n = x[0].len();
+        let p = graph[0].len();
+
+        let mut phase_ind = vec![vec![0 as u8; m]; 2];
+
+        // p x p matrix at each pos i for transition between i-1 and i
+        // Save belief over the first block in tprob[0][0]
+
+        let mut firstprob = vec![0.0 as f32; p];
+        for h1 in 0..p {
+            firstprob[h1] = sum_vec(bprob[0][h1].as_slice());
+        }
+
+        let mut tprob = vec![vec![vec![0.0 as f32; 1]; 1]; 1];
+        if trans_prob_flag > 0 {
+            tprob = vec![vec![vec![0.0 as f32; p]; p]; m];
+            for h1 in 0..p {
+                tprob[0][0][h1] = firstprob[h1];
+            }
+        }
+
+        // Sample first position
+        let (ind1, ind2) =
+            constrained_paired_sample(firstprob.as_slice(), firstprob.as_slice(), rng);
+        phase_ind[0][0] = ind1 as u8;
+        phase_ind[1][0] = ind2 as u8;
+
+        let psub = if trans_prob_flag == 0 { 2 } else { p };
+
+        // Initialize forward prob
+        let mut fprob_next = vec![vec![0.0 as f32; n]; psub];
+        let mut fprob = vec![vec![0.0 as f32; n]; psub];
+
+        // Emission at first position
+        for h1 in 0..psub {
+            for h2 in 0..n {
+                let graph_ind = if trans_prob_flag == 0 {
+                    phase_ind[h1][0] as usize
+                } else {
+                    h1
+                };
+
+                fprob[h1][h2] = emission_prob(x[0][h2], graph[0][graph_ind], eprob);
+            }
+        }
+
+        for i in 1..m {
+            // Combine fprob (from i-1) and bprob[i] to get transition probs
+            let mut weights = vec![vec![0.0; p]; psub];
+
+            for j in 0..psub {
+                // Transition i-1 -> i
+                let fsum = sum_vec(fprob[j].as_slice());
+                for h2 in 0..n {
+                    fprob_next[j][h2] =
+                        transition_prob(fprob[j][h2], fsum, 1.0 / (n as f32), rprob);
+                }
+
+                // Multiply with backward prob and integrate to get transition prob from hap j to h1
+                for h1 in 0..p {
+                    let iprod = inner_prod(fprob_next[j].as_slice(), bprob[i][h1].as_slice());
+
+                    // If not between blocks, set to identity matrix
+                    let ind = if trans_prob_flag > 0 {
+                        j
+                    } else {
+                        phase_ind[j][i - 1] as usize
+                    };
+                    if ind == h1 {
+                        weights[j][h1] = mutex2f32(block_head[i], iprod, 1.0);
+                    } else {
+                        weights[j][h1] = mutex2f32(block_head[i], iprod, 0.0);
+                    }
+                }
+            }
+
+            let (h1, h2) = if trans_prob_flag > 0 {
+                (phase_ind[0][i - 1] as usize, phase_ind[1][i - 1] as usize)
+            } else {
+                (0, 1)
+            };
+
+            let (ind1, ind2) =
+                constrained_paired_sample(weights[h1].as_slice(), weights[h2].as_slice(), rng);
+
+            // If i is NOT block head, then just keep the previous indices
+            phase_ind[0][i] = mutex2u8(block_head[i], ind1 as u8, phase_ind[0][i - 1]);
+            phase_ind[1][i] = mutex2u8(block_head[i], ind2 as u8, phase_ind[1][i - 1]);
+
+            // Copy and renormalize
+            if trans_prob_flag > 0 {
+                let mut tsum = 0.0;
+                if trans_prob_flag == 1 {
+                    for h1 in 0..psub {
+                        tsum = sum_vec(weights[h1].as_slice());
+                        for h2 in 0..p {
+                            tprob[i][h1][h2] = weights[h1][h2] / tsum;
+                        }
+                    }
+                } else {
+                    for h1 in 0..psub {
+                        tsum += sum_vec(weights[h1].as_slice());
+                    }
+
+                    for h1 in 0..psub {
+                        for h2 in 0..p {
+                            tprob[i][h1][h2] = weights[h1][h2] / tsum;
+                        }
+                    }
+                }
+            }
+
+            // Add emission at i (with the sampled haplotypes) to fprob_next
+            for h1 in 0..psub {
+                for h2 in 0..n {
+                    let graph_ind = if trans_prob_flag == 0 {
+                        phase_ind[h1][i] as usize
+                    } else {
+                        h1
+                    };
+
+                    fprob_next[h1][h2] *= emission_prob(x[i][h2], graph[i][graph_ind], eprob);
+                }
+            }
+
+            // Update fprob
+            for h1 in 0..psub {
+                for h2 in 0..n {
+                    fprob[h1][h2] = fprob_next[h1][h2];
+                }
+            }
+
+            // Renormalize (TODO: replace with lazy normalization)
+            let mut fsum = 0.0;
+            for h1 in 0..psub {
+                fsum += sum_vec(fprob[h1].as_slice());
+            }
+            for h1 in 0..psub {
+                for h2 in 0..n {
+                    fprob[h1][h2] /= fsum;
+                }
+            }
+        }
+
+        (phase_ind, tprob)
+    }
+
+    fn emission_prob(x_geno: u8, t_geno: u8, error_prob: f32) -> f32 {
+        mutex2f32(x_geno == t_geno, 1.0 - error_prob, error_prob)
+    }
+
+    fn transition_prob(
+        prev_prob: f32,
+        total_prob: f32,
+        uniform_frac: f32,
+        recomb_prob: f32,
+    ) -> f32 {
+        prev_prob * (1.0 - recomb_prob) + total_prob * recomb_prob * uniform_frac
+    }
+
+    fn inner_prod(v1: &[f32], v2: &[f32]) -> f32 {
+        let mut out = 0.0;
+        for i in 0..v1.len() {
+            out += v1[i] * v2[i];
+        }
+        out
+    }
+
+    fn sum_vec(v: &[f32]) -> f32 {
+        let mut out = 0.0;
+        for i in 0..v.len() {
+            out += v[i]
+        }
+        out
+    }
+
+    // TODO make this side channel resilient
+    fn sample(weights: &[f32], rng: &mut impl Rng) -> usize {
+        let dist = WeightedIndex::new(&*weights).unwrap();
+        dist.sample(rng)
+    }
+
+    // Only pairs of indices that add up to n (length of the weight vectors) are allowed
+    // Weight of a pair is the product of the two weights (joint probability)
+    fn constrained_paired_sample(
+        weights1: &[f32],
+        weights2: &[f32],
+        rng: &mut impl Rng,
+    ) -> (usize, usize) {
+        let n = weights1.len();
+        let mut combined = vec![0.0; n];
+        for i in 0..n {
+            combined[i] = weights1[i] * weights2[n - 1 - i];
+        }
+        let ind1 = sample(combined.as_slice(), rng);
+        (ind1, n - 1 - ind1)
+    }
+
+    fn mutex2f32(b: bool, v1: f32, v0: f32) -> f32 {
+        if b {
+            return v1;
+        } else {
+            return v0;
+        }
+    }
+
     fn mutex2bool(b: bool, v1: bool, v0: bool) -> bool {
         if b {
             return v1;
@@ -1011,12 +1406,22 @@ mod ref_algs {
 #[cfg(test)]
 mod test {
     use super::*;
-    use rand::Rng;
+    use rand::{Rng, SeedableRng};
 
     #[test]
     fn genotype_graph_test() {
+        let n = 20;
         let m = 200;
-        let mut rng = rand::thread_rng();
+
+        // hmm parameters
+        let rprob = 0.05; // recombination
+        let eprob = 0.01; // error
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
+
+        let ref_x = (0..m)
+            .map(|_| (0..n).map(|_| rng.gen_range(0..2)).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+
         let t = (0..m)
             .map(|_| rng.gen_range(0..2) as u8)
             .collect::<Vec<_>>();
@@ -1026,11 +1431,19 @@ mod test {
         let (mut ref_graph, mut ref_head) =
             ref_algs::construct_geno_graph(t.as_slice(), HET_PER_BLOCK as i32);
 
+        // Building
+
         #[cfg(feature = "leak-resist")]
-        let t = Array1::from_shape_fn(m, |i| Genotype::protect(t[i] as i8));
+        let (x, t) = (
+            Array2::from_shape_fn((m, n), |(i, j)| Genotype::protect(ref_x[i][j] as i8)),
+            Array1::from_shape_fn(m, |i| Genotype::protect(t[i] as i8)),
+        );
 
         #[cfg(not(feature = "leak-resist"))]
-        let t = Array1::from_shape_fn(m, |i| t[i] as i8);
+        let (x, t) = (
+            Array2::from_shape_fn((m, n), |(i, j)| ref_x[i][j] as i8),
+            Array1::from_shape_fn(m, |i| t[i] as i8),
+        );
 
         let mut graph = GenotypeGraph::build(t.view());
 
@@ -1064,6 +1477,8 @@ mod test {
             assert_eq!(graph.block_head.as_slice().unwrap(), ref_head.as_slice());
             assert_eq!(graph_graph, ref_graph);
         }
+
+        // Pruning
 
         let ref_tprobs = (0..m)
             .map(|_| {
@@ -1114,6 +1529,108 @@ mod test {
                 .collect::<Vec<_>>();
             assert_eq!(graph.block_head.as_slice().unwrap(), ref_head.as_slice());
             assert_eq!(graph_graph, ref_graph);
+        }
+
+        // Backward pass
+        let ref_bprob = ref_algs::backward_pass(&ref_x, &ref_graph, &ref_head, rprob, eprob);
+        let bprob = graph.backward_pass(x.view(), rprob, eprob);
+
+        for ((i, j), k) in (0..m).zip(0..p).zip(0..n) {
+            #[cfg(feature = "leak-resist")]
+            assert!((ref_bprob[i][j][k] - bprob[[i, j, k]].leaky_into_f32()).abs() < 1e-3);
+            #[cfg(not(feature = "leak-resist"))]
+            assert!((ref_bprob[i][j][k] - bprob[[i, j, k]]).abs() < f32::EPSILON);
+        }
+
+        // Forward sampling 0
+
+        let mut seeded_rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
+        let mut ref_seeded_rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
+
+        let (phase_ind_1, tprobs_1) =
+            graph.forward_sampling(x.view(), rprob, eprob, &mut seeded_rng, 0);
+        let (ref_phase_ind_1, _) = ref_algs::forward_sampling(
+            &ref_bprob,
+            &ref_x,
+            &ref_graph,
+            &ref_head,
+            rprob,
+            eprob,
+            &mut ref_seeded_rng,
+            0,
+        );
+
+        assert!(tprobs_1.is_none());
+
+        for (i, j) in (0..2).zip(0..m) {
+            #[cfg(feature = "leak-resist")]
+            assert_eq!(phase_ind_1[[i, j]].expose(), ref_phase_ind_1[i][j]);
+
+            #[cfg(not(feature = "leak-resist"))]
+            assert_eq!(phase_ind_1[[i, j]], ref_phase_ind_1[i][j]);
+        }
+
+        // Forward sampling 1
+
+        let (phase_ind_2, tprobs_2) =
+            graph.forward_sampling(x.view(), rprob, eprob, &mut seeded_rng, 1);
+        let tprobs_2 = tprobs_2.unwrap();
+        let (ref_phase_ind_2, ref_tprobs_2) = ref_algs::forward_sampling(
+            &ref_bprob,
+            &ref_x,
+            &ref_graph,
+            &ref_head,
+            rprob,
+            eprob,
+            &mut ref_seeded_rng,
+            1,
+        );
+
+        for (i, j) in (0..2).zip(0..m) {
+            #[cfg(feature = "leak-resist")]
+            assert_eq!(phase_ind_2[[i, j]].expose(), ref_phase_ind_2[i][j]);
+
+            #[cfg(not(feature = "leak-resist"))]
+            assert_eq!(phase_ind_2[[i, j]], ref_phase_ind_2[i][j]);
+        }
+
+        for ((i, j), k) in (0..m).zip(0..p).zip(0..p) {
+            #[cfg(feature = "leak-resist")]
+            assert!((tprobs_2[[i, j, k]].leaky_into_f32() - ref_tprobs_2[i][j][k]).abs() < 1e-2);
+
+            #[cfg(not(feature = "leak-resist"))]
+            assert!((tprobs_2[[i, j, k]] - ref_tprobs_2[i][j][k]).abs() < 1e-6);
+        }
+
+        // Forward sampling 2
+        let (phase_ind_3, tprobs_3) =
+            graph.forward_sampling(x.view(), rprob, eprob, &mut seeded_rng, 2);
+        let tprobs_3 = tprobs_3.unwrap();
+        let (ref_phase_ind_3, ref_tprobs_3) = ref_algs::forward_sampling(
+            &ref_bprob,
+            &ref_x,
+            &ref_graph,
+            &ref_head,
+            rprob,
+            eprob,
+            &mut ref_seeded_rng,
+            2,
+        );
+
+        for (i, j) in (0..2).zip(0..m) {
+            #[cfg(feature = "leak-resist")]
+            assert_eq!(phase_ind_3[[i, j]].expose(), ref_phase_ind_3[i][j]);
+
+            #[cfg(not(feature = "leak-resist"))]
+            assert_eq!(phase_ind_3[[i, j]], ref_phase_ind_3[i][j]);
+        }
+
+        for ((i, j), k) in (0..m).zip(0..p).zip(0..p) {
+            #[cfg(feature = "leak-resist")]
+            assert!((tprobs_3[[i, j, k]].leaky_into_f32() - ref_tprobs_3[i][j][k]).abs() < 1e-2);
+
+            #[cfg(not(feature = "leak-resist"))]
+            assert!((tprobs_3[[i, j, k]] - ref_tprobs_3[i][j][k]).abs() < 1e-6);
         }
     }
 

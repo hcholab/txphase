@@ -3,10 +3,10 @@
 mod neighbors_finding;
 mod pbwt;
 //mod initialize;
-mod union_filter;
 mod genotype_graph;
-mod viterbi;
+mod union_filter;
 mod utils;
+mod viterbi;
 
 #[cfg(feature = "leak-resist")]
 mod inner {
@@ -94,6 +94,7 @@ fn hmm() {
         _x
     };
 
+    println!("=== Burn-in iteration ===",);
     let now = Instant::now();
     let (phase_ind, _) = geno_graph.forward_sampling(x.view(), rprob, eprob, &mut rng, 0);
     let mut _phased = geno_graph.get_haps(phase_ind.view());
@@ -101,31 +102,30 @@ fn hmm() {
         "Burn-in iteration: {} ms",
         (Instant::now() - now).as_millis()
     );
+    println!("",);
+    println!("",);
 
+    println!("=== Pruning iteration ===",);
     let now = Instant::now();
     //TODO update ref
     let (phase_ind, tprob) = geno_graph.forward_sampling(x.view(), rprob, eprob, &mut rng, 2);
-
     _phased = geno_graph.get_haps(phase_ind.view());
     geno_graph.prune(tprob.unwrap().view());
     println!(
         "Pruning iteration: {} ms",
         (Instant::now() - now).as_millis()
     );
+    println!("",);
+    println!("",);
 
-    let num_main_iter = 3;
+    let num_main_iter = 2;
     let p = 1 << genotype_graph::HET_PER_BLOCK;
     let mut tprob_agg = unsafe { Array3::uninit((m, p, p)).assume_init() };
     for i in 0..num_main_iter {
+        println!("=== Main iteration {} ===", i);
         let now = Instant::now();
         //update_ref_panel(&x, &phased);
-        let (phase_ind, tprob) = geno_graph.forward_sampling(
-            x.view(),
-            rprob,
-            eprob,
-            &mut rng,
-            1,
-        );
+        let (phase_ind, tprob) = geno_graph.forward_sampling(x.view(), rprob, eprob, &mut rng, 1);
 
         _phased = geno_graph.get_haps(phase_ind.view());
 
@@ -140,6 +140,8 @@ fn hmm() {
             i,
             (Instant::now() - now).as_millis()
         );
+        println!("",);
+        println!("",);
     }
 
     let now = Instant::now();

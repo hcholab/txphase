@@ -16,6 +16,9 @@ ndarray = {version = "0.15", features = ["approx"]}
 bitvec = "0.22"
 tp-fixedpoint = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/tp-fixedpoint", optional = true }
 
+[dev-dependencies]
+rand_chacha = "0.3"
+
 [package.metadata.fortanix-sgx]
 # stack size (in bytes) for each thread, the default stack size is 0x20000.
 stack-size=0x200000
