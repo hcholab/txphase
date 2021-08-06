@@ -1,4 +1,4 @@
-use crate::{Bool, Genotype, Real, UInt, U8};
+use crate::{tp_convert_to, tp_value, Bool, Genotype, Real, UInt, U8};
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3};
 use rand::Rng;
 use std::time::Instant;
@@ -58,11 +58,7 @@ impl GenotypeGraph {
         let mut graph = unsafe { Array2::<Genotype>::uninit((m, p)).assume_init() };
         let mut block_head = unsafe { Array1::<Bool>::uninit(m).assume_init() };
 
-        #[cfg(feature = "leak-resist")]
-        let mut cur_het_count = UInt::protect(HET_PER_BLOCK as u32);
-
-        #[cfg(not(feature = "leak-resist"))]
-        let mut cur_het_count = HET_PER_BLOCK;
+        let mut cur_het_count = tp_value!(HET_PER_BLOCK, u32);
 
         for i in 0..m {
             #[cfg(feature = "leak-resist")]
@@ -99,7 +95,7 @@ impl GenotypeGraph {
 
             #[cfg(not(feature = "leak-resist"))]
             {
-                let head_flag = cur_het_count == HET_PER_BLOCK;
+                let head_flag = cur_het_count == HET_PER_BLOCK as u32;
                 block_head[i] = head_flag;
                 // Reset if at block head
                 if head_flag {
@@ -127,15 +123,7 @@ impl GenotypeGraph {
             }
         }
 
-        #[cfg(feature = "leak-resist")]
-        {
-            block_head[0] = Bool::protect(false); // Skip first position
-        }
-
-        #[cfg(not(feature = "leak-resist"))]
-        {
-            block_head[0] = false; // Skip first position
-        }
+        block_head[0] = tp_value!(false, bool);
 
         Self {
             graph,
@@ -156,21 +144,9 @@ impl GenotypeGraph {
         // Backward pass to identify where to merge adjacent blocks and the new haps
         let mut ind1_cache = unsafe { Array2::<U8>::uninit((m, p)).assume_init() };
         let mut ind2_cache = unsafe { Array2::<U8>::uninit((m, p)).assume_init() };
-        let mut merge_head;
-        let mut merge_flag;
+        let mut merge_head = vec![tp_value!(false, bool); m];
+        let mut merge_flag = tp_value!(false, bool);
         let mut new_merge_flag;
-
-        #[cfg(feature = "leak-resist")]
-        {
-            merge_head = vec![Bool::protect(false); m];
-            merge_flag = Bool::protect(false);
-        }
-
-        #[cfg(not(feature = "leak-resist"))]
-        {
-            merge_head = vec![false; m];
-            merge_flag = false;
-        }
 
         for i in (0..m - 1).rev() {
             let (ind1, ind2, prob) = select_top_k(tprob.slice(s![i, .., ..]), p);
@@ -231,26 +207,16 @@ impl GenotypeGraph {
         let mut ind1 = unsafe { Array1::<U8>::uninit(p).assume_init() };
         let mut ind2 = unsafe { Array1::<U8>::uninit(p).assume_init() };
         let mut ind = unsafe { Array1::<U8>::uninit(p).assume_init() };
-        let mut block_counter;
-
-        #[cfg(feature = "leak-resist")]
-        {
-            block_counter = UInt::protect(0);
-        }
-
-        #[cfg(not(feature = "leak-resist"))]
-        {
-            block_counter = 0;
-        }
+        let mut block_counter = tp_value!(0, i8);
 
         for i in 0..m {
             #[cfg(feature = "leak-resist")]
             {
-                block_counter = merge_head[i].select(UInt::protect(2), block_counter);
+                block_counter = merge_head[i].select(tp_value!(2, i8), block_counter);
                 block_counter = (!merge_head[i] & self.block_head[i]).select(
                     (block_counter)
                         .tp_gt(&1)
-                        .select(block_counter - 1, UInt::protect(0)),
+                        .select(block_counter - 1, tp_value!(0, i8)),
                     block_counter,
                 );
                 for j in 0..p {
@@ -369,42 +335,28 @@ impl GenotypeGraph {
         let mut sum_time = vec![0; 6];
         let now_all = Instant::now();
 
-        //let mut phase_ind = vec![vec![0 as u8; m]; 2];
         let mut phase_ind = unsafe { Array2::<U8>::uninit((2, m)).assume_init() };
 
         // p x p matrix at each pos i for transition between i-1 and i
         // Save belief over the first block in tprob[0][0]
-
-        let mut firstprob = unsafe { Array1::<Real>::uninit(p).assume_init() };
-
         let now = Instant::now();
-        for h1 in 0..p {
-            firstprob[h1] = bprob.slice(s![0, h1, ..]).iter().sum();
-        }
+        let firstprob = Array1::from_shape_fn(p, |i| bprob.slice(s![0, i, ..]).iter().sum());
         sum_time[0] = (Instant::now() - now).as_nanos();
 
         let mut tprob = None;
         if trans_prob_flag > 0 {
-            //tprob = Some(vec![vec![vec![0.0 as f32; p]; p]; m]);
             tprob = Some(unsafe { Array3::<Real>::uninit((m, p, p)).assume_init() });
-            for h1 in 0..p {
-                tprob.as_mut().unwrap()[[0, 0, h1]] = firstprob[h1];
-            }
+            tprob
+                .as_mut()
+                .unwrap()
+                .slice_mut(s![0, 0, ..])
+                .assign(&firstprob);
         }
 
         // Sample first position
         let (ind1, ind2) = constrained_paired_sample(firstprob.view(), firstprob.view(), rng);
-        #[cfg(feature = "leak-resist")]
-        {
-            phase_ind[[0, 0]] = ind1.as_u8();
-            phase_ind[[1, 0]] = ind2.as_u8();
-        }
-
-        #[cfg(not(feature = "leak-resist"))]
-        {
-            phase_ind[[0, 0]] = ind1 as u8;
-            phase_ind[[1, 0]] = ind2 as u8;
-        }
+        phase_ind[[0, 0]] = tp_convert_to!(ind1, u8);
+        phase_ind[[1, 0]] = tp_convert_to!(ind2, u8);
 
         let psub = if trans_prob_flag == 0 { 2 } else { p };
 
@@ -418,14 +370,7 @@ impl GenotypeGraph {
                 let graph_ind = if trans_prob_flag == 0 {
                     phase_ind[[h1, 0]]
                 } else {
-                    #[cfg(feature = "leak-resist")]
-                    {
-                        U8::protect(h1 as u8)
-                    }
-                    #[cfg(not(feature = "leak-resist"))]
-                    {
-                        h1 as u8
-                    }
+                    tp_value!(h1, u8)
                 };
 
                 // TODO make oblivious
@@ -468,14 +413,7 @@ impl GenotypeGraph {
 
                     // If not between blocks, set to identity matrix
                     let ind = if trans_prob_flag > 0 {
-                        #[cfg(feature = "leak-resist")]
-                        {
-                            U8::protect(j as u8)
-                        }
-                        #[cfg(not(feature = "leak-resist"))]
-                        {
-                            j as u8
-                        }
+                        tp_value!(j, u8)
                     } else {
                         phase_ind[[j, i - 1]]
                     };
@@ -507,18 +445,10 @@ impl GenotypeGraph {
                 }
             }
 
-            #[cfg(feature = "leak-resist")]
             let (h1, h2) = if trans_prob_flag > 0 {
                 (phase_ind[[0, i - 1]], phase_ind[[1, i - 1]])
             } else {
-                (U8::protect(0), U8::protect(1))
-            };
-
-            #[cfg(not(feature = "leak-resist"))]
-            let (h1, h2) = if trans_prob_flag > 0 {
-                (phase_ind[[0, i - 1]], phase_ind[[1, i - 1]])
-            } else {
-                (0, 1)
+                (tp_value!(0, u8), tp_value!(1, u8))
             };
 
             // TODO fix this
@@ -570,9 +500,11 @@ impl GenotypeGraph {
                         let tsum: Real = weights.row(h1).iter().sum();
 
                         sum_time[3] += (Instant::now() - now).as_nanos();
-                        for h2 in 0..p {
-                            tprob.as_mut().unwrap()[[i, h1, h2]] = weights[[h1, h2]] / tsum;
-                        }
+                        tprob
+                            .as_mut()
+                            .unwrap()
+                            .slice_mut(s![i, h1, ..])
+                            .assign(&(&weights.slice(s![h1, ..]) / tsum))
                     }
                 } else {
                     let now = Instant::now();
@@ -587,11 +519,11 @@ impl GenotypeGraph {
                     let tsum = weights.iter().sum::<Real>();
 
                     sum_time[4] += (Instant::now() - now).as_nanos();
-                    for h1 in 0..psub {
-                        for h2 in 0..p {
-                            tprob.as_mut().unwrap()[[i, h1, h2]] = weights[[h1, h2]] / tsum;
-                        }
-                    }
+                    tprob
+                        .as_mut()
+                        .unwrap()
+                        .slice_mut(s![i, .., ..])
+                        .assign(&(&weights.slice(s![.., ..]) / tsum));
                 }
             }
 
@@ -601,18 +533,10 @@ impl GenotypeGraph {
                     let graph_ind = if trans_prob_flag == 0 {
                         phase_ind[[h1, i]]
                     } else {
-                        #[cfg(feature = "leak-resist")]
-                        {
-                            U8::protect(h1 as u8)
-                        }
-                        #[cfg(not(feature = "leak-resist"))]
-                        {
-                            h1 as u8
-                        }
+                        tp_value!(h1, u8)
                     };
 
                     //TODO fix this
-
                     #[cfg(feature = "leak-resist")]
                     {
                         fprob_next[[h1, h2]] *= emission_prob(
@@ -630,21 +554,13 @@ impl GenotypeGraph {
             }
 
             // Update fprob
-            for h1 in 0..psub {
-                for h2 in 0..n {
-                    fprob[[h1, h2]] = fprob_next[[h1, h2]];
-                }
-            }
+            fprob.assign(&fprob_next);
 
             // Renormalize (TODO: replace with lazy normalization)
             let now = Instant::now();
             let fsum = fprob.iter().sum::<Real>();
             sum_time[5] += (Instant::now() - now).as_nanos();
-            for h1 in 0..psub {
-                for h2 in 0..n {
-                    fprob[[h1, h2]] /= fsum;
-                }
-            }
+            fprob /= fsum;
         }
 
         for (i, t) in sum_time.iter().enumerate() {
@@ -667,7 +583,7 @@ impl GenotypeGraph {
 
         for hap in 0..2 {
             for i in 0..m {
-                //TODO fix this
+                //TODO: fix this
                 #[cfg(feature = "leak-resist")]
                 {
                     phased[[hap, i]] = self.graph[[i, phase_ind[[hap, i]].expose() as usize]];
@@ -703,7 +619,6 @@ impl GenotypeGraph {
         // backward pass
         for i in (0..m - 1).rev() {
             // i -> i+1 transition
-            let mut h1sum = unsafe { Array1::<Real>::uninit(n).assume_init() };
             for h1 in 0..p {
                 let now = Instant::now();
                 let h2sum = bprob.slice(s![i + 1, h1, ..]).iter().sum();
@@ -713,18 +628,12 @@ impl GenotypeGraph {
                     bprob[[i, h1, h2]] =
                         transition_prob(bprob[[i + 1, h1, h2]], h2sum, 1.0 / (n as f32), rprob);
                 }
-
-                let now = Instant::now();
-                // Add to aggregate sum over h1
-                for h2 in 0..n {
-                    if h1 == 0 {
-                        h1sum[h2] = bprob[[i, h1, h2]];
-                    } else {
-                        h1sum[h2] += bprob[[i, h1, h2]];
-                    }
-                }
-                sum_time += (Instant::now() - now).as_nanos();
             }
+
+            // Add to aggregate sum over h1
+            let now = Instant::now();
+            let h1sum = Array1::from_shape_fn(n, |j| bprob.slice(s![i, .., j]).iter().sum());
+            sum_time += (Instant::now() - now).as_nanos();
 
             // If i+1 is block head, then replace bprob with its sum over h1
             // (between blocks, any transition between different values of h1 is possible)
@@ -756,11 +665,10 @@ impl GenotypeGraph {
             let bsum: Real = bprob.slice(s![i, .., ..]).iter().sum();
             sum_time += (Instant::now() - now).as_nanos();
 
-            for h1 in 0..p {
-                for h2 in 0..n {
-                    bprob[[i, h1, h2]] /= bsum;
-                }
-            }
+            bprob
+                .slice_mut(s![i, .., ..])
+                .iter_mut()
+                .for_each(|x| *x /= bsum);
         }
         println!("Summation: {} ms", sum_time / 1000000);
         bprob
@@ -781,7 +689,6 @@ fn select_top_k(tab: ArrayView2<Real>, k: usize) -> (Array1<U8>, Array1<U8>, Rea
             let dip = tab[[i, j]] * tab[[p - 1 - i, p - 1 - j]];
             #[cfg(feature = "leak-resist")]
             {
-                //elems.push((dip, U8::protect(i as u8), U8::protect(j as u8)));
                 elems.push(SortItem {
                     dip,
                     i: U8::protect(i as u8),
@@ -864,20 +771,12 @@ fn constrained_paired_sample(
         }
     }
 
-    let ind1 = sample_real(combined.view(), rng);
+    let ind1 = weighted_sample(combined.view(), rng);
 
-    #[cfg(feature = "leak-resist")]
-    {
-        (ind1, UInt::protect(n as u32) - 1 - ind1)
-    }
-
-    #[cfg(not(feature = "leak-resist"))]
-    {
-        (ind1, n as u32 - 1 - ind1)
-    }
+    (ind1, tp_value!(n, u32) - 1 - ind1)
 }
 
-fn sample_real(weights: ArrayView1<Real>, rng: &mut impl Rng) -> UInt {
+fn weighted_sample(weights: ArrayView1<Real>, rng: &mut impl Rng) -> UInt {
     let mut total_weight = weights[0];
     let mut cumulative_weights: Vec<Real> = Vec::with_capacity(weights.len());
     cumulative_weights.push(total_weight);
@@ -910,17 +809,6 @@ fn sample_real(weights: ArrayView1<Real>, rng: &mut impl Rng) -> UInt {
 
     #[cfg(not(feature = "leak-resist"))]
     {
-        //println!("total_weight = {} ", total_weight);
-        //let chosen_weight = rng.gen_range(0.0..1.0) * total_weight;
-        //println!("chosen = {}", chosen_weight);
-        //let mut index = 0;
-        //for w in cumulative_weights {
-        //if w > chosen_weight {
-        //break;
-        //}
-        //index += 1;
-        //}
-        //index
         let chosen_weight = rng.gen_range(0.0..1.0) * total_weight;
         use std::cmp::Ordering;
         cumulative_weights
@@ -935,6 +823,7 @@ fn sample_real(weights: ArrayView1<Real>, rng: &mut impl Rng) -> UInt {
     }
 }
 
+#[inline]
 fn emission_prob(x_geno: Genotype, t_geno: Genotype, error_prob: f32) -> Real {
     #[cfg(feature = "leak-resist")]
     {
@@ -954,6 +843,7 @@ fn emission_prob(x_geno: Genotype, t_geno: Genotype, error_prob: f32) -> Real {
     }
 }
 
+#[inline]
 fn transition_prob(prev_prob: Real, total_prob: Real, uniform_frac: f32, recomb_prob: f32) -> Real {
     #[cfg(feature = "leak-resist")]
     {
@@ -1627,7 +1517,7 @@ mod test {
 
         for ((i, j), k) in (0..m).zip(0..p).zip(0..p) {
             #[cfg(feature = "leak-resist")]
-            assert!((tprobs_3[[i, j, k]].leaky_into_f32() - ref_tprobs_3[i][j][k]).abs() < 1e-2);
+            assert!((tprobs_3[[i, j, k]].leaky_into_f32() - ref_tprobs_3[i][j][k]).abs() < 1e-4);
 
             #[cfg(not(feature = "leak-resist"))]
             assert!((tprobs_3[[i, j, k]] - ref_tprobs_3[i][j][k]).abs() < 1e-6);

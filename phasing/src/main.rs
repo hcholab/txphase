@@ -7,6 +7,7 @@ mod genotype_graph;
 mod union_filter;
 mod utils;
 mod viterbi;
+mod small_oram;
 
 #[cfg(feature = "leak-resist")]
 mod inner {
