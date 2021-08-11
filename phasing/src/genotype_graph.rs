@@ -1,5 +1,5 @@
 use crate::{tp_convert_to, tp_value, Bool, Genotype, Real, UInt, U8};
-use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3};
+use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, Zip};
 use rand::Rng;
 use std::time::Instant;
 
@@ -180,7 +180,7 @@ impl GenotypeGraph {
 
                 // If merge is not on, we're at a head and prob over threshold, start a new merge
                 new_merge_flag = self.block_head[i]
-                    & prob.tp_gt(&Real::leaky_from_f32(MCMC_PRUNE_PROB_THRES))
+                    & prob.tp_gt(&Real::protect_f32(MCMC_PRUNE_PROB_THRES))
                     & !merge_flag;
 
                 // If at head then merge_flag is set to new_merge_flag, otherwise carry over
@@ -314,8 +314,10 @@ impl GenotypeGraph {
     pub fn forward_sampling(
         &self,
         x: ArrayView2<Genotype>,
-        rprob: f32,
-        eprob: f32,
+        rprob: Real,
+        rev_rprob: Real,
+        eprob: Real,
+        rev_eprob: Real,
         rng: &mut impl Rng,
         trans_prob_flag: usize,
     ) -> (Array2<U8>, Option<Array3<Real>>) {
@@ -326,7 +328,7 @@ impl GenotypeGraph {
         println!("== Backward pass ==");
         let now = Instant::now();
 
-        let bprob = self.backward_pass(x, rprob, eprob);
+        let bprob = self.backward_pass(x, rprob, rev_rprob, eprob, rev_eprob);
 
         println!("Backward pass: {} ms", (Instant::now() - now).as_millis());
         println!("");
@@ -380,16 +382,26 @@ impl GenotypeGraph {
                         x[[0, h2]],
                         self.graph[[0, graph_ind.expose() as usize]],
                         eprob,
+                        rev_eprob,
                     );
                 }
 
                 #[cfg(not(feature = "leak-resist"))]
                 {
-                    fprob[[h1, h2]] =
-                        emission_prob(x[[0, h2]], self.graph[[0, graph_ind as usize]], eprob);
+                    fprob[[h1, h2]] = emission_prob(
+                        x[[0, h2]],
+                        self.graph[[0, graph_ind as usize]],
+                        eprob,
+                        rev_eprob,
+                    );
                 }
             }
         }
+
+        let uniform_frac = 1.0 / (n as f32);
+
+        #[cfg(feature = "leak-resist")]
+        let uniform_frac = Real::protect_f32(uniform_frac);
 
         for i in 1..m {
             // Combine fprob (from i-1) and bprob[i] to get transition probs
@@ -402,7 +414,7 @@ impl GenotypeGraph {
                 sum_time[1] += (Instant::now() - now).as_nanos();
                 for h2 in 0..n {
                     fprob_next[[j, h2]] =
-                        transition_prob(fprob[[j, h2]], fsum, 1.0 / (n as f32), rprob);
+                        transition_prob(fprob[[j, h2]], fsum, uniform_frac, rprob, rev_rprob);
                 }
 
                 // Multiply with backward prob and integrate to get transition prob from hap j to h1
@@ -420,10 +432,20 @@ impl GenotypeGraph {
 
                     #[cfg(feature = "leak-resist")]
                     {
-                        weights[[j, h1]] = ind.tp_eq(&U8::protect(h1 as u8)).select(
-                            self.block_head[i].select(iprod, Real::leaky_from_f32(1.0)),
-                            self.block_head[i].select(iprod, Real::NAN),
-                        );
+                        #[cfg(feature = "leak-resist-fast")]
+                        {
+                            weights[[j, h1]] = ind.tp_eq(&U8::protect(h1 as u8)).select(
+                                self.block_head[i].select(iprod, Real::protect_f32(1.0)),
+                                self.block_head[i].select(iprod, Real::protect_f32(0.0)),
+                            );
+                        }
+                        #[cfg(not(feature = "leak-resist-fast"))]
+                        {
+                            weights[[j, h1]] = ind.tp_eq(&U8::protect(h1 as u8)).select(
+                                self.block_head[i].select(iprod, Real::protect_f32(1.0)),
+                                self.block_head[i].select(iprod, Real::NAN),
+                            );
+                        }
                     }
 
                     #[cfg(not(feature = "leak-resist"))]
@@ -491,9 +513,16 @@ impl GenotypeGraph {
                     for h1 in 0..psub {
                         let now = Instant::now();
                         #[cfg(feature = "leak-resist")]
-                        let tsum = {
-                            let mut buf = weights.row(h1).as_slice().unwrap().to_vec();
-                            Real::checked_sum_in_place(&mut buf)
+                        let tsum: Real = {
+                            #[cfg(not(feature = "leak-resist-fast"))]
+                            {
+                                let mut buf = weights.row(h1).as_slice().unwrap().to_vec();
+                                Real::checked_sum_in_place(&mut buf)
+                            }
+                            #[cfg(feature = "leak-resist-fast")]
+                            {
+                                weights.row(h1).iter().sum()
+                            }
                         };
 
                         #[cfg(not(feature = "leak-resist"))]
@@ -511,8 +540,15 @@ impl GenotypeGraph {
 
                     #[cfg(feature = "leak-resist")]
                     let tsum = {
-                        let mut buf = weights.as_slice().unwrap().to_vec();
-                        Real::checked_sum_in_place(&mut buf)
+                        #[cfg(not(feature = "leak-resist-fast"))]
+                        {
+                            let mut buf = weights.as_slice().unwrap().to_vec();
+                            Real::checked_sum_in_place(&mut buf)
+                        }
+                        #[cfg(feature = "leak-resist-fast")]
+                        {
+                            weights.iter().sum::<Real>()
+                        }
                     };
 
                     #[cfg(not(feature = "leak-resist"))]
@@ -543,12 +579,17 @@ impl GenotypeGraph {
                             x[[i, h2]],
                             self.graph[[i, graph_ind.expose() as usize]],
                             eprob,
+                            rev_eprob,
                         );
                     }
                     #[cfg(not(feature = "leak-resist"))]
                     {
-                        fprob_next[[h1, h2]] *=
-                            emission_prob(x[[i, h2]], self.graph[[i, graph_ind as usize]], eprob);
+                        fprob_next[[h1, h2]] *= emission_prob(
+                            x[[i, h2]],
+                            self.graph[[i, graph_ind as usize]],
+                            eprob,
+                            rev_eprob,
+                        );
                     }
                 }
             }
@@ -599,9 +640,14 @@ impl GenotypeGraph {
         phased
     }
 
-    fn backward_pass(&self, x: ArrayView2<Genotype>, rprob: f32, eprob: f32) -> Array3<Real> {
-        let mut sum_time = 0;
-
+    fn backward_pass(
+        &self,
+        x: ArrayView2<Genotype>,
+        rprob: Real,
+        rev_rprob: Real,
+        eprob: Real,
+        rev_eprob: Real,
+    ) -> Array3<Real> {
         let m = x.nrows();
         let n = x.ncols();
         let p = self.p;
@@ -609,68 +655,70 @@ impl GenotypeGraph {
         let mut bprob = unsafe { Array3::<Real>::uninit((m, p, n)).assume_init() };
 
         // initialization (uniform over ref haplotypes + emission at last position)
-        for h1 in 0..p {
-            for h2 in 0..n {
-                bprob[[m - 1, h1, h2]] =
-                    emission_prob(x[[m - 1, h2]], self.graph[[m - 1, h1]], eprob);
-            }
-        }
+        Zip::from(bprob.slice_mut(s![m - 1, .., ..]).rows_mut())
+            .and(self.graph.row(m - 1))
+            .for_each(|mut a, &b| {
+                Zip::from(&mut a).and(x.row(m - 1)).for_each(|c, &d| {
+                    *c = emission_prob(d, b, eprob, rev_eprob);
+                });
+            });
+
+        let uniform_frac = 1.0 / (n as f32);
+
+        #[cfg(feature = "leak-resist")]
+        let uniform_frac = Real::protect_f32(uniform_frac);
 
         // backward pass
         for i in (0..m - 1).rev() {
             // i -> i+1 transition
-            for h1 in 0..p {
-                let now = Instant::now();
-                let h2sum = bprob.slice(s![i + 1, h1, ..]).iter().sum();
-                sum_time += (Instant::now() - now).as_nanos();
-
-                for h2 in 0..n {
-                    bprob[[i, h1, h2]] =
-                        transition_prob(bprob[[i + 1, h1, h2]], h2sum, 1.0 / (n as f32), rprob);
-                }
-            }
+            let (mut bprob_cur, bprob_next) =
+                bprob.multi_slice_mut((s![i, .., ..], s![i + 1, .., ..]));
+            Zip::from(bprob_cur.rows_mut())
+                .and(bprob_next.rows())
+                .for_each(|mut a, b| {
+                    let sum: Real = b.iter().sum();
+                    Zip::from(&mut a).and(&b).for_each(|c, &d| {
+                        *c = transition_prob(d, sum, uniform_frac, rprob, rev_rprob);
+                    });
+                });
 
             // Add to aggregate sum over h1
-            let now = Instant::now();
-            let h1sum = Array1::from_shape_fn(n, |j| bprob.slice(s![i, .., j]).iter().sum());
-            sum_time += (Instant::now() - now).as_nanos();
+            let bprob_cur_t = bprob.slice(s![i, .., ..]).t().to_owned();
+            let sums = Array1::from_shape_fn(n, |j| bprob_cur_t.row(j).iter().sum());
 
             // If i+1 is block head, then replace bprob with its sum over h1
-            // (between blocks, any transition between different values of h1 is possible)
-            for h1 in 0..p {
-                for h2 in 0..n {
+            let next_block_head = self.block_head[i + 1];
+            Zip::from(bprob.slice_mut(s![i, .., ..]).rows_mut()).for_each(|mut a| {
+                Zip::from(&mut a).and(&sums).for_each(|b, c| {
                     #[cfg(feature = "leak-resist")]
                     {
-                        bprob[[i, h1, h2]] =
-                            self.block_head[i + 1].select(h1sum[h2], bprob[[i, h1, h2]]);
+                        *b = next_block_head.select(*c, *b);
                     }
                     #[cfg(not(feature = "leak-resist"))]
                     {
-                        if self.block_head[i + 1] {
-                            bprob[[i, h1, h2]] = h1sum[h2];
+                        if next_block_head {
+                            *b = *c;
                         }
                     }
-                }
-            }
+                });
+            });
 
             // emission at i
-            for h1 in 0..p {
-                for h2 in 0..n {
-                    bprob[[i, h1, h2]] *= emission_prob(x[[i, h2]], self.graph[[i, h1]], eprob);
-                }
-            }
+            Zip::from(bprob.slice_mut(s![i, .., ..]).rows_mut())
+                .and(self.graph.row(i))
+                .for_each(|mut a, &b| {
+                    Zip::from(&mut a).and(x.row(i)).for_each(|c, &d| {
+                        *c *= emission_prob(d, b, eprob, rev_eprob);
+                    });
+                });
 
-            let now = Instant::now();
-            // renormalize (TODO: replace with lazy normalization)
+            // renormalize
             let bsum: Real = bprob.slice(s![i, .., ..]).iter().sum();
-            sum_time += (Instant::now() - now).as_nanos();
-
             bprob
                 .slice_mut(s![i, .., ..])
                 .iter_mut()
                 .for_each(|x| *x /= bsum);
         }
-        println!("Summation: {} ms", sum_time / 1000000);
         bprob
     }
 }
@@ -761,8 +809,15 @@ fn constrained_paired_sample(
     for i in 0..n {
         #[cfg(feature = "leak-resist")]
         {
-            combined[i] = (weights1[i].is_nan() | weights2[n - 1 - i].is_nan())
-                .select(Real::NAN, weights1[i] * weights2[n - 1 - i]);
+            #[cfg(not(feature = "leak-resist-fast"))]
+            {
+                combined[i] = (weights1[i].is_nan() | weights2[n - 1 - i].is_nan())
+                    .select(Real::NAN, weights1[i] * weights2[n - 1 - i]);
+            }
+            #[cfg(feature = "leak-resist-fast")]
+            {
+                combined[i] = weights1[i] * weights2[n - 1 - i];
+            }
         }
 
         #[cfg(not(feature = "leak-resist"))]
@@ -783,10 +838,17 @@ fn weighted_sample(weights: ArrayView1<Real>, rng: &mut impl Rng) -> UInt {
     for &w in weights.iter().skip(1) {
         #[cfg(feature = "leak-resist")]
         {
-            total_weight = w.is_nan().select(
-                total_weight,
-                total_weight.is_nan().select(w, total_weight + w),
-            );
+            #[cfg(not(feature = "leak-resist-fast"))]
+            {
+                total_weight = w.is_nan().select(
+                    total_weight,
+                    total_weight.is_nan().select(w, total_weight + w),
+                );
+            }
+            #[cfg(feature = "leak-resist-fast")]
+            {
+                total_weight += w;
+            }
         }
         #[cfg(not(feature = "leak-resist"))]
         {
@@ -797,14 +859,23 @@ fn weighted_sample(weights: ArrayView1<Real>, rng: &mut impl Rng) -> UInt {
 
     #[cfg(feature = "leak-resist")]
     {
-        let chosen_weight = Real::leaky_from_f32(rng.gen_range(0.0..1.0)) * total_weight;
+        let chosen_weight = Real::protect_f32(rng.gen_range(0.0..1.0)) * total_weight;
         let mut index = UInt::protect(0);
         let mut done = Bool::protect(false);
         for w in cumulative_weights {
-            done = (w.tp_gt(&chosen_weight) & !w.is_nan()).select(Bool::protect(true), done);
+            #[cfg(not(feature = "leak-resist-fast"))]
+            {
+                done = (w.tp_gt(&chosen_weight) & !w.is_nan()).select(Bool::protect(true), done);
+            }
+            #[cfg(feature = "leak-resist-fast")]
+            {
+                done = w.tp_gt(&chosen_weight).select(Bool::protect(true), done);
+            }
             index = (!done).select(index + 1, index);
         }
         index
+            .tp_eq(&(weights.len() as u32))
+            .select(UInt::protect(0), index)
     }
 
     #[cfg(not(feature = "leak-resist"))]
@@ -823,38 +894,39 @@ fn weighted_sample(weights: ArrayView1<Real>, rng: &mut impl Rng) -> UInt {
     }
 }
 
-#[inline]
-fn emission_prob(x_geno: Genotype, t_geno: Genotype, error_prob: f32) -> Real {
+#[inline(always)]
+fn emission_prob(
+    x_geno: Genotype,
+    t_geno: Genotype,
+    error_prob: Real,
+    rev_error_prob: Real,
+) -> Real {
     #[cfg(feature = "leak-resist")]
     {
-        x_geno.tp_eq(&t_geno).select(
-            Real::leaky_from_f32(1.0 - error_prob),
-            Real::leaky_from_f32(error_prob),
-        )
+        x_geno.tp_eq(&t_geno).select(rev_error_prob, error_prob)
+        //let cond = x_geno.tp_eq(&t_geno);
+        //rev_error_prob * cond.as_u32() + error_prob * (!cond).as_u32()
     }
 
     #[cfg(not(feature = "leak-resist"))]
     {
         if x_geno == t_geno {
-            1.0 - error_prob
+            rev_error_prob
         } else {
             error_prob
         }
     }
 }
 
-#[inline]
-fn transition_prob(prev_prob: Real, total_prob: Real, uniform_frac: f32, recomb_prob: f32) -> Real {
-    #[cfg(feature = "leak-resist")]
-    {
-        prev_prob * Real::leaky_from_f32(1.0 - recomb_prob)
-            + total_prob * Real::leaky_from_f32(recomb_prob * uniform_frac)
-    }
-
-    #[cfg(not(feature = "leak-resist"))]
-    {
-        prev_prob * (1.0 - recomb_prob) + total_prob * recomb_prob * uniform_frac
-    }
+#[inline(always)]
+fn transition_prob(
+    prev_prob: Real,
+    total_prob: Real,
+    uniform_frac: Real,
+    recomb_prob: Real,
+    rev_recomb_prob: Real,
+) -> Real {
+    prev_prob * rev_recomb_prob + total_prob * recomb_prob * uniform_frac
 }
 
 fn inner_prod(v1: ArrayView1<Real>, v2: ArrayView1<Real>) -> Real {
@@ -1303,9 +1375,22 @@ mod test {
         let n = 20;
         let m = 200;
 
+        let ref_rprob = 0.05;
+        let ref_eprob = 0.01;
         // hmm parameters
-        let rprob = 0.05; // recombination
-        let eprob = 0.01; // error
+        let rprob = ref_rprob; // recombination
+        let rev_rprob = 1. - ref_rprob; // recombination
+        let eprob = ref_eprob; // error
+        let rev_eprob = 1. - eprob; // error
+
+        #[cfg(feature = "leak-resist")]
+        let (rprob, rev_rprob, eprob, rev_eprob) = (
+            Real::protect_f32(rprob),
+            Real::protect_f32(rev_rprob),
+            Real::protect_f32(eprob),
+            Real::protect_f32(rev_eprob),
+        );
+
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
 
         let ref_x = (0..m)
@@ -1380,7 +1465,7 @@ mod test {
 
         #[cfg(feature = "leak-resist")]
         let tprobs = Array3::from_shape_fn((m, p, p), |(i, j, k)| {
-            Real::leaky_from_f32(ref_tprobs[i][j][k])
+            Real::protect_f32(ref_tprobs[i][j][k])
         });
 
         #[cfg(not(feature = "leak-resist"))]
@@ -1422,12 +1507,13 @@ mod test {
         }
 
         // Backward pass
-        let ref_bprob = ref_algs::backward_pass(&ref_x, &ref_graph, &ref_head, rprob, eprob);
-        let bprob = graph.backward_pass(x.view(), rprob, eprob);
+        let ref_bprob =
+            ref_algs::backward_pass(&ref_x, &ref_graph, &ref_head, ref_rprob, ref_eprob);
+        let bprob = graph.backward_pass(x.view(), rprob, rev_rprob, eprob, rev_eprob);
 
         for ((i, j), k) in (0..m).zip(0..p).zip(0..n) {
             #[cfg(feature = "leak-resist")]
-            assert!((ref_bprob[i][j][k] - bprob[[i, j, k]].leaky_into_f32()).abs() < 1e-3);
+            assert!((ref_bprob[i][j][k] - bprob[[i, j, k]].expose_into_f32()).abs() < 1e-3);
             #[cfg(not(feature = "leak-resist"))]
             assert!((ref_bprob[i][j][k] - bprob[[i, j, k]]).abs() < f32::EPSILON);
         }
@@ -1437,15 +1523,22 @@ mod test {
         let mut seeded_rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
         let mut ref_seeded_rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
 
-        let (phase_ind_1, tprobs_1) =
-            graph.forward_sampling(x.view(), rprob, eprob, &mut seeded_rng, 0);
+        let (phase_ind_1, tprobs_1) = graph.forward_sampling(
+            x.view(),
+            rprob,
+            rev_rprob,
+            eprob,
+            rev_eprob,
+            &mut seeded_rng,
+            0,
+        );
         let (ref_phase_ind_1, _) = ref_algs::forward_sampling(
             &ref_bprob,
             &ref_x,
             &ref_graph,
             &ref_head,
-            rprob,
-            eprob,
+            ref_rprob,
+            ref_eprob,
             &mut ref_seeded_rng,
             0,
         );
@@ -1462,16 +1555,23 @@ mod test {
 
         // Forward sampling 1
 
-        let (phase_ind_2, tprobs_2) =
-            graph.forward_sampling(x.view(), rprob, eprob, &mut seeded_rng, 1);
+        let (phase_ind_2, tprobs_2) = graph.forward_sampling(
+            x.view(),
+            rprob,
+            rev_rprob,
+            eprob,
+            rev_eprob,
+            &mut seeded_rng,
+            1,
+        );
         let tprobs_2 = tprobs_2.unwrap();
         let (ref_phase_ind_2, ref_tprobs_2) = ref_algs::forward_sampling(
             &ref_bprob,
             &ref_x,
             &ref_graph,
             &ref_head,
-            rprob,
-            eprob,
+            ref_rprob,
+            ref_eprob,
             &mut ref_seeded_rng,
             1,
         );
@@ -1486,23 +1586,30 @@ mod test {
 
         for ((i, j), k) in (0..m).zip(0..p).zip(0..p) {
             #[cfg(feature = "leak-resist")]
-            assert!((tprobs_2[[i, j, k]].leaky_into_f32() - ref_tprobs_2[i][j][k]).abs() < 1e-2);
+            assert!((tprobs_2[[i, j, k]].expose_into_f32() - ref_tprobs_2[i][j][k]).abs() < 1e-2);
 
             #[cfg(not(feature = "leak-resist"))]
             assert!((tprobs_2[[i, j, k]] - ref_tprobs_2[i][j][k]).abs() < 1e-6);
         }
 
         // Forward sampling 2
-        let (phase_ind_3, tprobs_3) =
-            graph.forward_sampling(x.view(), rprob, eprob, &mut seeded_rng, 2);
+        let (phase_ind_3, tprobs_3) = graph.forward_sampling(
+            x.view(),
+            rprob,
+            rev_rprob,
+            eprob,
+            rev_eprob,
+            &mut seeded_rng,
+            2,
+        );
         let tprobs_3 = tprobs_3.unwrap();
         let (ref_phase_ind_3, ref_tprobs_3) = ref_algs::forward_sampling(
             &ref_bprob,
             &ref_x,
             &ref_graph,
             &ref_head,
-            rprob,
-            eprob,
+            ref_rprob,
+            ref_eprob,
             &mut ref_seeded_rng,
             2,
         );
@@ -1517,7 +1624,7 @@ mod test {
 
         for ((i, j), k) in (0..m).zip(0..p).zip(0..p) {
             #[cfg(feature = "leak-resist")]
-            assert!((tprobs_3[[i, j, k]].leaky_into_f32() - ref_tprobs_3[i][j][k]).abs() < 1e-4);
+            assert!((tprobs_3[[i, j, k]].expose_into_f32() - ref_tprobs_3[i][j][k]).abs() < 1e-4);
 
             #[cfg(not(feature = "leak-resist"))]
             assert!((tprobs_3[[i, j, k]] - ref_tprobs_3[i][j][k]).abs() < 1e-6);
@@ -1534,7 +1641,7 @@ mod test {
 
         #[cfg(feature = "leak-resist")]
         let prob_matrix =
-            Array2::from_shape_fn((p, p), |(i, j)| Real::leaky_from_f32(ref_prob_matrix[i][j]));
+            Array2::from_shape_fn((p, p), |(i, j)| Real::protect_f32(ref_prob_matrix[i][j]));
 
         #[cfg(not(feature = "leak-resist"))]
         let prob_matrix = Array2::from_shape_fn((p, p), |(i, j)| ref_prob_matrix[i][j]);
@@ -1546,11 +1653,58 @@ mod test {
         let (ind1, ind2, sum) = (
             Array1::from_shape_fn(p, |i| ind1[i].expose()),
             Array1::from_shape_fn(p, |i| ind2[i].expose()),
-            sum.leaky_into_f32(),
+            sum.expose_into_f32(),
         );
 
         assert_eq!(ind1.as_slice().unwrap(), ref_ind1.as_slice());
         assert_eq!(ind2.as_slice().unwrap(), ref_ind2.as_slice());
         assert!((sum - ref_sum).abs() < 1e-3);
+    }
+
+    #[test]
+    fn backward_pass_bench() {
+        let n = 10000;
+        let m = 1000;
+
+        // hmm parameters
+        let rprob = 0.05; // recombination
+        let eprob = 0.01; // error
+        let rev_rprob = 1. - rprob; // recombination
+        let rev_eprob = 1. - eprob; // error
+
+        #[cfg(feature = "leak-resist")]
+        let (rprob, rev_rprob, eprob, rev_eprob) = (
+            Real::protect_f32(rprob),
+            Real::protect_f32(rev_rprob),
+            Real::protect_f32(eprob),
+            Real::protect_f32(rev_eprob),
+        );
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
+
+        let ref_x = (0..m)
+            .map(|_| (0..n).map(|_| rng.gen_range(0..2)).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+
+        let t = (0..m)
+            .map(|_| rng.gen_range(0..2) as u8)
+            .collect::<Vec<_>>();
+
+        // Building
+
+        #[cfg(feature = "leak-resist")]
+        let (x, t) = (
+            Array2::from_shape_fn((m, n), |(i, j)| Genotype::protect(ref_x[i][j] as i8)),
+            Array1::from_shape_fn(m, |i| Genotype::protect(t[i] as i8)),
+        );
+
+        #[cfg(not(feature = "leak-resist"))]
+        let (x, t) = (
+            Array2::from_shape_fn((m, n), |(i, j)| ref_x[i][j] as i8),
+            Array1::from_shape_fn(m, |i| t[i] as i8),
+        );
+
+        let graph = GenotypeGraph::build(t.view());
+
+        graph.backward_pass(x.view(), rprob, rev_rprob, eprob, rev_eprob);
     }
 }
