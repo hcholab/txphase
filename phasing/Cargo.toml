@@ -8,6 +8,7 @@ edition = "2018"
 [features]
 default = ["leak-resist"]
 leak-resist = ["tp-fixedpoint"] 
+leak-resist-fast = ["leak-resist"] 
 
 [dependencies]
 rand = "0.8"
@@ -26,7 +27,7 @@ stack-size=0x200000
 # heap size (in bytes), the default heap size is 0x2000000.
 #heap-size=0x800000000
 #heap-size=0x400000000
-heap-size=0x20000000
+heap-size=0x40000000
 # the default number of threads is equal to the number of available CPUs of
 # the current system.
 # Gotcha: Don't forget to count the main thread when counting number of

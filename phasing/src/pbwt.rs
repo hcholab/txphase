@@ -16,8 +16,8 @@ pub struct PBWT<'a> {
 
 impl<'a> PBWT<'a> {
     pub fn new(x: ArrayView2<'a, i8>) -> Self {
-        let n = x.nrows();
-        let m = x.ncols();
+        let n = x.ncols();
+        let m = x.nrows();
         let prev_col = PBWTColumn {
             a: Array1::<u32>::from_iter(0..n as u32),
             d: unsafe { Array1::<u32>::uninit(n).assume_init() },

@@ -1,21 +1,11 @@
 use crate::pbwt::{PBWTColumn, PBWT};
+use crate::small_oram::SmallORAM;
+use crate::{tp_value, Genotype, UInt};
 use ndarray::{ArrayView1, ArrayView2};
 use std::time::Instant;
-use crate::{Genotype, UInt};
 
 #[cfg(feature = "leak-resist")]
-mod inner {
-    use super::*;
-    pub use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpOrd};
-    pub const ZERO: UInt = unsafe { std::mem::transmute(0u32) };
-}
-
-#[cfg(not(feature = "leak-resist"))]
-mod inner {
-    pub const ZERO: u32 = 0;
-}
-
-use inner::*;
+use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpOrd};
 
 pub fn find_neighbors(x: ArrayView2<i8>, t: ArrayView2<Genotype>, s: usize) -> Vec<Vec<Vec<UInt>>> {
     let m = x.nrows();
@@ -23,16 +13,10 @@ pub fn find_neighbors(x: ArrayView2<i8>, t: ArrayView2<Genotype>, s: usize) -> V
 
     let start = Instant::now();
 
-    let mut pbwt = PBWT::new(x.view());
+    let mut pbwt = PBWT::new(x);
     let mut prev_col = pbwt.get_init_col().unwrap();
 
-    let mut prev_target = (0..n_targets)
-        .map(|_| Target {
-            ind: ZERO,
-            d: ZERO,
-            post_d: ZERO,
-        })
-        .collect::<Vec<_>>();
+    let mut prev_target = vec![Target::default(); n_targets];
 
     let mut neighbors: Vec<Vec<Vec<UInt>>> = vec![Vec::with_capacity(m); n_targets];
 
@@ -49,8 +33,8 @@ pub fn find_neighbors(x: ArrayView2<i8>, t: ArrayView2<Genotype>, s: usize) -> V
                 &prev_col,
             );
 
-            let new_neighbors =
-                find_neighbors_single_marker(i as u32, s, &cur_target, &cur_col, &prev_col);
+            let (new_neighbors, _) =
+                find_neighbors_single_marker(i as u32, s, &cur_target, &cur_col, &prev_col, false);
 
             prev_target[j] = cur_target;
             neighbors[j].push(new_neighbors);
@@ -63,61 +47,33 @@ pub fn find_neighbors(x: ArrayView2<i8>, t: ArrayView2<Genotype>, s: usize) -> V
     neighbors
 }
 
-pub struct SmallORAM<T: 'static + Clone> {
-    slice_inner: &'static mut [T],
-    inner: Box<oram_sgx::align::A64Bytes<64>>,
-    capacity: UInt,
-    _phantom: std::marker::PhantomData<T>,
+#[derive(Clone)]
+pub struct Target {
+    pub ind: UInt,
+    pub d: UInt,
+    pub post_d: UInt,
 }
 
-impl<T: 'static + Clone> SmallORAM<T> {
-    pub fn with_capacity(capacity: usize) -> Self {
-        assert!((capacity + 1) <= 64 / std::mem::size_of::<T>());
-        let mut inner = Box::new(oram_sgx::align::A64Bytes::default());
-        let inner_ptr = inner.as_mut_slice() as *mut _ as *mut T;
-        let slice_inner = unsafe { std::slice::from_raw_parts_mut(inner_ptr, capacity + 1) };
-
-        let capacity = capacity as u32;
-        #[cfg(feature = "leak-resist")]
-        let capacity = UInt::protect(capacity);
-
+impl Default for Target {
+    fn default() -> Self {
         Self {
-            slice_inner,
-            inner,
-            capacity,
-            _phantom: std::marker::PhantomData,
+            ind: tp_value!(0, u32),
+            d: tp_value!(0, u32),
+            post_d: tp_value!(0, u32),
         }
     }
+}
 
-    pub fn write(&mut self, v: T, i: UInt) {
-        #[cfg(feature = "leak-resist")]
-        let i = i.tp_gt_eq(&self.capacity).select(self.capacity, i).expose();
-
-        #[cfg(not(feature = "leak-resist"))]
-        assert!(i < self.capacity);
-
-        self.slice_inner[i as usize] = v;
-    }
-
-    pub fn read(&self, i: UInt) -> T {
-        #[cfg(feature = "leak-resist")]
-        let i = i.tp_gt(&self.capacity).select(self.capacity, i).expose();
-
-        #[cfg(not(feature = "leak-resist"))]
-        assert!(i < self.capacity);
-
-        self.slice_inner[i as usize].clone()
+#[cfg(feature = "leak-resist")]
+impl tp_fixedpoint::timing_shield::TpCondSwap for Target {
+    fn tp_cond_swap(cond: TpBool, a: &mut Self, b: &mut Self) {
+        cond.cond_swap(&mut a.ind, &mut b.ind);
+        cond.cond_swap(&mut a.d, &mut b.d);
+        cond.cond_swap(&mut a.post_d, &mut b.post_d);
     }
 }
 
-#[derive(Clone)]
-struct Target {
-    ind: UInt,
-    d: UInt,
-    post_d: UInt,
-}
-
-fn find_target_single_marker(
+pub fn find_target_single_marker(
     cur_x_col: ArrayView1<i8>,
     cur_n_zeros: u32,
     cur_t: Genotype,
@@ -126,31 +82,13 @@ fn find_target_single_marker(
     prev_col: &PBWTColumn,
 ) -> Target {
     let n = prev_col.a.len();
-    let mut cur_target = Target {
-        ind: ZERO,
-        d: ZERO,
-        post_d: ZERO,
-    };
+    let mut cur_target = Target::default();
 
     // oblivious PBWT lookup
-    let mut target_u = ZERO;
-    let mut target_v: UInt;
-    let mut target_p: UInt;
-    let mut target_q: UInt;
-
-    #[cfg(feature = "leak-resist")]
-    {
-        target_v = UInt::protect(cur_n_zeros);
-        target_p = UInt::protect(i + 1);
-        target_q = UInt::protect(i + 1);
-    }
-
-    #[cfg(not(feature = "leak-resist"))]
-    {
-        target_v = cur_n_zeros;
-        target_p = i + 1;
-        target_q = i + 1;
-    }
+    let mut target_u = tp_value!(0, u32);
+    let mut target_v = tp_value!(cur_n_zeros, u32);
+    let mut target_p = tp_value!(i + 1, u32);
+    let mut target_q = tp_value!(i + 1, u32);
 
     for j in 0..n + 1 {
         #[cfg(feature = "leak-resist")]
@@ -179,10 +117,10 @@ fn find_target_single_marker(
             );
             cur_target.post_d = (cond1 & cond3).select(UInt::protect(i + 1), cur_target.post_d);
 
-            target_p = (cond1 & cond2).select(ZERO, target_p);
+            target_p = (cond1 & cond2).select(tp_value!(0, u32), target_p);
             target_u = (cond1 & cond2).select(target_u + 1, target_u);
 
-            target_q = (cond1 & !cond2).select(ZERO, target_q);
+            target_q = (cond1 & !cond2).select(tp_value!(0, u32), target_q);
             target_v = (cond1 & !cond2).select(target_v + 1, target_v);
         }
 
@@ -257,7 +195,7 @@ fn find_target_single_marker(
                     cur_target.post_d = target_p;
                 }
 
-                target_p = ZERO;
+                target_p = tp_value!(0, u32);
                 target_u += 1;
             } else {
                 #[cfg(feature = "leak-resist")]
@@ -271,7 +209,7 @@ fn find_target_single_marker(
                     cur_target.post_d = target_q;
                 }
 
-                target_q = ZERO;
+                target_q = tp_value!(0, u32);
                 target_v += 1;
             }
         }
@@ -279,13 +217,14 @@ fn find_target_single_marker(
     cur_target
 }
 
-fn find_neighbors_single_marker(
+pub fn find_neighbors_single_marker(
     i: u32,
     s: usize,
     cur_target: &Target,
     cur_col: &PBWTColumn,
     prev_col: &PBWTColumn,
-) -> Vec<UInt> {
+    with_divs: bool,
+) -> (Vec<UInt>, Option<Vec<UInt>>) {
     let n = prev_col.a.len();
 
     let capacity = 2 * s;
@@ -297,7 +236,10 @@ fn find_neighbors_single_marker(
     #[cfg(feature = "leak-resist")]
     {
         let s = UInt::protect(s as u32);
-        pre_min = cur_target.ind.tp_gt_eq(&s).select(ZERO, s - cur_target.ind);
+        pre_min = cur_target
+            .ind
+            .tp_gt_eq(&s)
+            .select(tp_value!(0, u32), s - cur_target.ind);
         post_max = (cur_target.ind + s)
             .tp_lt_eq(&(n as u32 - 1))
             .select(2 * s - 1, s + n as u32 - 1 - cur_target.ind);
@@ -308,12 +250,12 @@ fn find_neighbors_single_marker(
         pre_min = if cur_target.ind as usize >= s {
             0
         } else {
-            s - cur_target.ind as usize
+            s as u32 - cur_target.ind
         };
         post_max = if cur_target.ind as usize + s <= n - 1 {
-            2 * s - 1
+            2 * s as u32 - 1
         } else {
-            n + s - 1 - cur_target.ind as usize
+            n as u32 + s as u32 - 1 - cur_target.ind
         };
     }
 
@@ -322,27 +264,26 @@ fn find_neighbors_single_marker(
         {
             let k = UInt::protect(j as u32);
             let s = UInt::protect(s as u32);
-            let capacity = UInt::protect(capacity as u32);
             let cond1 = cur_target.ind.tp_gt(&k);
             let dif = cond1.select(cur_target.ind - k, k - cur_target.ind);
             let cond2 = cond1.select(dif.tp_lt_eq(&s), dif.tp_lt(&s));
-            let i = cond2.select(cond1.select(s - dif, s + dif), capacity);
-            saved_d.write(UInt::protect(cur_col.d[j]), i);
-            saved_a.write(UInt::protect(cur_col.a[j]), i);
+            let i = cond1.select(s - dif, s + dif);
+            saved_d.write(UInt::protect(cur_col.d[j]), i, cond2);
+            saved_a.write(UInt::protect(cur_col.a[j]), i, cond2);
         }
 
         #[cfg(not(feature = "leak-resist"))]
         if j < cur_target.ind as usize {
             let dif = cur_target.ind as usize - j;
             if dif <= s {
-                saved_d.write(cur_col.d[j], (s - dif) as u32);
-                saved_a.write(cur_col.a[j], (s - dif) as u32);
+                saved_d.write(cur_col.d[j], (s - dif) as u32, true);
+                saved_a.write(cur_col.a[j], (s - dif) as u32, true);
             }
         } else {
             let dif = j - cur_target.ind as usize;
             if dif < s {
-                saved_d.write(cur_col.d[j], (s + dif) as u32);
-                saved_a.write(cur_col.a[j], (s + dif) as u32);
+                saved_d.write(cur_col.d[j], (s + dif) as u32, true);
+                saved_a.write(cur_col.a[j], (s + dif) as u32, true);
             }
         }
     }
@@ -353,32 +294,33 @@ fn find_neighbors_single_marker(
     let mut pre_div = cur_target.d;
     let mut post_div = cur_target.post_d;
 
-    #[cfg(feature = "leak-resist")]
-    {
-        let s = UInt::protect(s as u32);
-        pre_ind = s - 1;
-        post_ind = s;
-    }
-
-    #[cfg(not(feature = "leak-resist"))]
-    {
-        pre_ind = s - 1;
-        post_ind = s;
-    }
+    pre_ind = tp_value!(s as u32 - 1, u32);
+    post_ind = tp_value!(s, u32);
 
     let mut new_neighbors = Vec::with_capacity(s);
+    let mut new_neighbor_divs = if with_divs {
+        Some(Vec::with_capacity(s))
+    } else {
+        None
+    };
     for _ in 0..s {
         #[cfg(feature = "leak-resist")]
         {
             let chosen_post =
                 pre_ind.tp_lt(&pre_min) | post_ind.tp_lt_eq(&post_max) & post_div.tp_lt(&pre_div);
             let mut ind = chosen_post.select(post_ind, pre_ind);
-            new_neighbors.push(saved_a.read(ind));
+            new_neighbors.push(saved_a.read(ind, TpBool::protect(true)));
+            if let Some(new_neighbor_divs) = new_neighbor_divs.as_mut() {
+                new_neighbor_divs.push(chosen_post.select(post_div, pre_div));
+            }
             let cannot_advance =
                 (chosen_post & (ind.tp_eq(&post_max))) | (!chosen_post & (ind.tp_eq(&pre_min)));
             ind = (!cannot_advance).select(chosen_post.select(ind + 1, ind - 1), ind);
             let div = (!cannot_advance).select(
-                chosen_post.select(saved_d.read(ind), saved_d.read(ind + 1)),
+                chosen_post.select(
+                    saved_d.read(ind, TpBool::protect(true)),
+                    saved_d.read(ind + 1, TpBool::protect(true)),
+                ),
                 UInt::protect(i as u32),
             );
             pre_div = chosen_post.select(pre_div, pre_div.tp_gt(&div).select(pre_div, div));
@@ -391,7 +333,10 @@ fn find_neighbors_single_marker(
         {
             let chosen_post = (pre_ind < pre_min) || (post_ind <= post_max && post_div < pre_div);
             let mut ind = if chosen_post { post_ind } else { pre_ind };
-            new_neighbors.push(saved_a.read(ind as u32));
+            new_neighbors.push(saved_a.read(ind as u32, true));
+            if let Some(new_neighbor_divs) = new_neighbor_divs.as_mut() {
+                new_neighbor_divs.push(if chosen_post { post_div } else { pre_div });
+            }
 
             let cannot_advance =
                 (chosen_post && (ind == post_max)) || (!chosen_post && (ind == pre_min));
@@ -405,9 +350,9 @@ fn find_neighbors_single_marker(
             };
 
             let div = if chosen_post && !cannot_advance {
-                saved_d.read(ind as u32)
+                saved_d.read(ind as u32, true)
             } else if !chosen_post && !cannot_advance {
-                saved_d.read(ind as u32 + 1)
+                saved_d.read(ind as u32 + 1, true)
             } else {
                 i as u32
             };
@@ -429,7 +374,7 @@ fn find_neighbors_single_marker(
         }
     }
 
-    new_neighbors
+    (new_neighbors, new_neighbor_divs)
 }
 
 #[cfg(test)]
