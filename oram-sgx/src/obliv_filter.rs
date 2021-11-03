@@ -19,7 +19,9 @@ pub fn obliv_filter<const N: usize>(
             .zip(obliv_items.into_iter().map(|v| v.split()))
         {
             tar.cmov(b, &src);
-            current_len = b.select(current_len + 1, current_len);
+            current_len = current_len
+                .tp_eq(&TpU32::protect(capacity as u32))
+                .select(current_len, b.select(current_len + 1, current_len));
         }
     }
     (filtered, current_len)

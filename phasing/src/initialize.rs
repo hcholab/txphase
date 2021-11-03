@@ -1,31 +1,33 @@
 use crate::neighbors_finding::{find_neighbors_single_marker, find_target_single_marker, Target};
 use crate::pbwt::{PBWTColumn, PBWT};
 use crate::{tp_value, Genotype, Int};
-use ndarray::{Array2, ArrayView1, ArrayView2};
+use ndarray::{Array1, Array2, ArrayView1};
 
 #[cfg(feature = "leak-resist")]
 use tp_fixedpoint::timing_shield::{TpEq, TpOrd};
 
 pub fn initialize(
-    x: ArrayView2<i8>,
+    x: impl Iterator<Item = Array1<i8>>,
     t: ArrayView1<Genotype>,
     missing_bitmask: &[bool],
+    npos: usize,
+    nhap: usize,
 ) -> Array2<Genotype> {
-    let m = x.nrows();
+    let m = npos;
 
-    let mut pbwt = PBWT::new(x);
+    let mut pbwt = PBWT::new(x, npos, nhap);
     let mut prev_col = pbwt.get_init_col().unwrap();
     let mut prev_target_0 = Target::default();
     let mut prev_target_1 = Target::default();
     let mut estm_haplotypes = Array2::<Genotype>::from_elem((2, m), tp_value!(-1, i8));
 
     for i in 0..m {
-        let (cur_col, cur_n_zeros) = pbwt.next().unwrap();
+        let (cur_col, cur_n_zeros, hap_row) = pbwt.next().unwrap();
 
         if missing_bitmask[i] {
             estm_haplotypes[[0, i]] = initialize_missing_single_target(
                 i,
-                x.row(i),
+                hap_row.view(),
                 cur_n_zeros,
                 &mut prev_target_0,
                 &prev_col,
@@ -33,7 +35,7 @@ pub fn initialize(
             );
             estm_haplotypes[[1, i]] = initialize_missing_single_target(
                 i,
-                x.row(i),
+                hap_row.view(),
                 cur_n_zeros,
                 &mut prev_target_1,
                 &prev_col,
@@ -45,7 +47,7 @@ pub fn initialize(
                 let cond = t[i].tp_eq(&1);
 
                 let target_0 = find_target_single_marker(
-                    x.row(i),
+                    hap_row.view(),
                     cur_n_zeros as u32,
                     t[i] >> 1,
                     i as u32,
@@ -54,7 +56,7 @@ pub fn initialize(
                 );
 
                 let target_1 = find_target_single_marker(
-                    x.row(i),
+                    hap_row.view(),
                     cur_n_zeros as u32,
                     t[i] >> 1,
                     i as u32,
@@ -64,7 +66,7 @@ pub fn initialize(
 
                 let (first, second) = initialize_het_single_marker(
                     i,
-                    x.row(i),
+                    hap_row.view(),
                     cur_n_zeros,
                     &mut prev_target_0,
                     &mut prev_target_1,
@@ -82,7 +84,7 @@ pub fn initialize(
             if t[i] == 1 {
                 let (first, second) = initialize_het_single_marker(
                     i,
-                    x.row(i),
+                    hap_row.view(),
                     cur_n_zeros,
                     &mut prev_target_0,
                     &mut prev_target_1,
@@ -93,7 +95,7 @@ pub fn initialize(
                 estm_haplotypes[[1, i]] = second;
             } else {
                 prev_target_0 = find_target_single_marker(
-                    x.row(i),
+                    hap_row.view(),
                     cur_n_zeros as u32,
                     t[i] / 2,
                     i as u32,
@@ -102,7 +104,7 @@ pub fn initialize(
                 );
 
                 prev_target_1 = find_target_single_marker(
-                    x.row(i),
+                    hap_row.view(),
                     cur_n_zeros as u32,
                     t[i] / 2,
                     i as u32,
@@ -147,7 +149,6 @@ fn initialize_het_single_marker(
     );
     #[cfg(feature = "leak-resist")]
     {
-        println!("s0, s1 = {}, {}", s0.expose(), s1.expose());
         let cond = s0.tp_gt(&s1);
         first = (!cond).as_i8();
         second = cond.as_i8();
@@ -300,12 +301,14 @@ mod test {
 
     #[test]
     fn initialize_test() {
-        let n = 100;
-        let m = 20;
+        let nhap = 100;
+        let npos = 20;
+
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
-        let x = ndarray::Array2::<i8>::from_shape_fn((m, n), |_| rng.gen_range(0..2));
-        let mut t = ndarray::Array1::from_shape_fn(m, |_| tp_value!(rng.gen_range(0..3), i8));
-        let missing_bitmask = (0..m)
+        let x_ref = ndarray::Array2::<i8>::from_shape_fn((npos, nhap), |_| rng.gen_range(0..2));
+        let x = (0..npos).map(|i| x_ref.row(i).to_owned());
+        let mut t = ndarray::Array1::from_shape_fn(npos, |_| tp_value!(rng.gen_range(0..3), i8));
+        let missing_bitmask = (0..npos)
             .map(|_| rng.gen_range(0..4) % 4 == 0)
             .collect::<Vec<_>>();
         for (&b, v) in missing_bitmask.iter().zip(t.iter_mut()) {
@@ -313,7 +316,7 @@ mod test {
                 *v = tp_value!(-1, i8);
             }
         }
-        let result = initialize(x.view(), t.view(), &missing_bitmask[..]);
+        let result = initialize(x, t.view(), &missing_bitmask[..], npos, nhap);
         let result_t = &result.row(0) + &result.row(1);
 
         #[cfg(feature = "leak-resist")]

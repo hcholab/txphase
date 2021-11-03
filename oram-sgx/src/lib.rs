@@ -1,4 +1,5 @@
 #![feature(llvm_asm)]
+#![feature(asm)]
 mod backend;
 mod bitonic_sort;
 mod obliv_filter;

@@ -1,39 +1,3 @@
-use rand::Rng;
-
-//#[macro_export]
-//macro_rules! branch {
-    //{
-        //if $($rest:tt)*
-    //} => {
-        //branch_parser! {
-            //predicate = ()
-            //rest = ($($rest)*)
-        //}
-    //};
-//}
-
-//#[macro_export]
-//macro_rules! branch_parser {
-    //{
-        //predicate = ($($predicate:tt)*)
-        //rest = ({ $($then:tt)* } else { $($else:tt)* })
-    //} => {
-        //println!("predicate: {}", stringify!($($predicate)*));
-        //println!("then: {}", stringify!($($then)*));
-        //println!("else: {}", stringify!($($else)*));
-    //};
-
-    //{
-        //predicate = ($($predicate:tt)*)
-        //rest = ($next:tt $($rest:tt)*)
-    //} => {
-        //branch_parser! {
-            //predicate = ($($predicate)* $next)
-            //rest = ($($rest)*)
-        //}
-    //};
-//}
-
 #[cfg(feature = "leak-resist")]
 mod inner {
     #[macro_export]
@@ -86,21 +50,66 @@ mod inner {
     }
 }
 
-pub fn gen_ref_panel(n_samples: usize, n_markers: usize, mut rng: impl Rng) -> Vec<Vec<u8>> {
-    (0..n_markers)
-        .into_iter()
-        .map(|_| {
-            (0..n_samples)
-                .into_iter()
-                .map(|_| rng.gen_range(0..2))
-                .collect()
-        })
-        .collect()
+use timing_shield::{TpOrd, TpU32};
+
+#[inline]
+pub fn next_log2(v: u32) -> u32 {
+    31 - v.next_power_of_two().leading_zeros()
 }
 
-pub fn gen_target_sample(n_markers: usize, mut rng: impl Rng) -> Vec<u8> {
-    (0..n_markers)
-        .into_iter()
-        .map(|_| rng.gen_range(0..2))
-        .collect()
+#[inline]
+pub fn log2(v: u32) -> u32 {
+    31 - v.leading_zeros()
+}
+
+// long division algorithm
+pub fn tp_u32_div(n: TpU32, d: TpU32, max_n: u32) -> (TpU32, TpU32) {
+    let n_bits = next_log2(max_n);
+    let mut q = TpU32::protect(0);
+    let mut r = TpU32::protect(0);
+    for i in (0..n_bits).rev() {
+        r <<= 1;
+        r |= (n >> i) & 1;
+        let cond = r.tp_gt_eq(&d);
+        r = cond.select(r - d, r);
+        q = cond.select(q | (1 << i), q);
+    }
+    (q, r)
+}
+
+pub fn tp_u32_shl(a: TpU32, b: TpU32, max_b: u32) -> TpU32 {
+    let mut out = a;
+    for i in 0..max_b {
+        out = b.tp_gt(&i).select(out << 1, out);
+    }
+    out
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn div_test() {
+        let max = 10000u32;
+        for n in 0..max {
+            let (q, r) = tp_u32_div(TpU32::protect(n), TpU32::protect(7), max);
+            assert_eq!(q.expose(), n / 7);
+            assert_eq!(r.expose(), n % 7);
+        }
+    }
+
+    #[test]
+    fn log2_test() {
+        for i in 1..1000u32 {
+            assert_eq!(log2(i), (i as f64).log2().floor() as u32);
+            assert_eq!(next_log2(i), (i as f64).log2().ceil() as u32);
+        }
+    }
+
+    #[test]
+    fn tp_u32_shl_test() {
+        let result = tp_u32_shl(TpU32::protect(1), TpU32::protect(3), 5);
+        assert_eq!(result.expose(), 8);
+    }
 }

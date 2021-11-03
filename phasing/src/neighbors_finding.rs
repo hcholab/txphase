@@ -1,19 +1,21 @@
 use crate::pbwt::{PBWTColumn, PBWT};
-use crate::small_oram::SmallORAM;
 use crate::{tp_value, Genotype, UInt};
-use ndarray::{ArrayView1, ArrayView2};
-use std::time::Instant;
+use ndarray::{Array1, ArrayView1, ArrayView2};
 
 #[cfg(feature = "leak-resist")]
 use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpOrd};
 
-pub fn find_neighbors(x: ArrayView2<i8>, t: ArrayView2<Genotype>, s: usize) -> Vec<Vec<Vec<UInt>>> {
-    let m = x.nrows();
+pub fn find_neighbors(
+    x: impl Iterator<Item = Array1<i8>>,
+    t: ArrayView2<Genotype>,
+    npos: usize,
+    nhap: usize,
+    s: usize,
+) -> Vec<Vec<Vec<UInt>>> {
+    let m = npos;
     let n_targets = t.nrows();
 
-    let start = Instant::now();
-
-    let mut pbwt = PBWT::new(x);
+    let mut pbwt = PBWT::new(x, npos, nhap);
     let mut prev_col = pbwt.get_init_col().unwrap();
 
     let mut prev_target = vec![Target::default(); n_targets];
@@ -21,11 +23,11 @@ pub fn find_neighbors(x: ArrayView2<i8>, t: ArrayView2<Genotype>, s: usize) -> V
     let mut neighbors: Vec<Vec<Vec<UInt>>> = vec![Vec::with_capacity(m); n_targets];
 
     for i in 0..m {
-        let (cur_col, cur_n_zeros) = pbwt.next().unwrap();
+        let (cur_col, cur_n_zeros, hap_row) = pbwt.next().unwrap();
 
         for j in 0..n_targets {
             let cur_target = find_target_single_marker(
-                x.row(i),
+                hap_row.view(),
                 cur_n_zeros as u32,
                 t[[j, i]],
                 i as u32,
@@ -43,7 +45,6 @@ pub fn find_neighbors(x: ArrayView2<i8>, t: ArrayView2<Genotype>, s: usize) -> V
         prev_col = cur_col;
     }
 
-    println!("time = {} ms", (Instant::now() - start).as_millis());
     neighbors
 }
 
@@ -228,13 +229,16 @@ pub fn find_neighbors_single_marker(
     let n = prev_col.a.len();
 
     let capacity = 2 * s;
-    let mut saved_d = SmallORAM::<UInt>::with_capacity(capacity);
-    let mut saved_a = SmallORAM::<UInt>::with_capacity(capacity);
+    let mut saved_a;
+    let mut saved_d;
     let pre_min;
     let post_max;
 
     #[cfg(feature = "leak-resist")]
     {
+        use crate::oram::SmallLSOram;
+        saved_a = SmallLSOram::new(capacity);
+        saved_d = SmallLSOram::new(capacity);
         let s = UInt::protect(s as u32);
         pre_min = cur_target
             .ind
@@ -247,6 +251,8 @@ pub fn find_neighbors_single_marker(
 
     #[cfg(not(feature = "leak-resist"))]
     {
+        saved_a = vec![0; capacity];
+        saved_d = vec![0; capacity];
         pre_min = if cur_target.ind as usize >= s {
             0
         } else {
@@ -268,22 +274,22 @@ pub fn find_neighbors_single_marker(
             let dif = cond1.select(cur_target.ind - k, k - cur_target.ind);
             let cond2 = cond1.select(dif.tp_lt_eq(&s), dif.tp_lt(&s));
             let i = cond1.select(s - dif, s + dif);
-            saved_d.write(UInt::protect(cur_col.d[j]), i, cond2);
-            saved_a.write(UInt::protect(cur_col.a[j]), i, cond2);
+            saved_d.cond_obliv_write(UInt::protect(cur_col.d[j]), i, cond2);
+            saved_a.cond_obliv_write(UInt::protect(cur_col.a[j]), i, cond2);
         }
 
         #[cfg(not(feature = "leak-resist"))]
         if j < cur_target.ind as usize {
             let dif = cur_target.ind as usize - j;
             if dif <= s {
-                saved_d.write(cur_col.d[j], (s - dif) as u32, true);
-                saved_a.write(cur_col.a[j], (s - dif) as u32, true);
+                saved_d[s - dif] = cur_col.d[j];
+                saved_a[s - dif] = cur_col.a[j];
             }
         } else {
             let dif = j - cur_target.ind as usize;
             if dif < s {
-                saved_d.write(cur_col.d[j], (s + dif) as u32, true);
-                saved_a.write(cur_col.a[j], (s + dif) as u32, true);
+                saved_d[s + dif] = cur_col.d[j];
+                saved_a[s + dif] = cur_col.a[j];
             }
         }
     }
@@ -309,7 +315,7 @@ pub fn find_neighbors_single_marker(
             let chosen_post =
                 pre_ind.tp_lt(&pre_min) | post_ind.tp_lt_eq(&post_max) & post_div.tp_lt(&pre_div);
             let mut ind = chosen_post.select(post_ind, pre_ind);
-            new_neighbors.push(saved_a.read(ind, TpBool::protect(true)));
+            new_neighbors.push(saved_a.obliv_read(ind));
             if let Some(new_neighbor_divs) = new_neighbor_divs.as_mut() {
                 new_neighbor_divs.push(chosen_post.select(post_div, pre_div));
             }
@@ -317,10 +323,7 @@ pub fn find_neighbors_single_marker(
                 (chosen_post & (ind.tp_eq(&post_max))) | (!chosen_post & (ind.tp_eq(&pre_min)));
             ind = (!cannot_advance).select(chosen_post.select(ind + 1, ind - 1), ind);
             let div = (!cannot_advance).select(
-                chosen_post.select(
-                    saved_d.read(ind, TpBool::protect(true)),
-                    saved_d.read(ind + 1, TpBool::protect(true)),
-                ),
+                chosen_post.select(saved_d.obliv_read(ind), saved_d.obliv_read(ind + 1)),
                 UInt::protect(i as u32),
             );
             pre_div = chosen_post.select(pre_div, pre_div.tp_gt(&div).select(pre_div, div));
@@ -333,7 +336,7 @@ pub fn find_neighbors_single_marker(
         {
             let chosen_post = (pre_ind < pre_min) || (post_ind <= post_max && post_div < pre_div);
             let mut ind = if chosen_post { post_ind } else { pre_ind };
-            new_neighbors.push(saved_a.read(ind as u32, true));
+            new_neighbors.push(saved_a[ind as usize]);
             if let Some(new_neighbor_divs) = new_neighbor_divs.as_mut() {
                 new_neighbor_divs.push(if chosen_post { post_div } else { pre_div });
             }
@@ -350,11 +353,11 @@ pub fn find_neighbors_single_marker(
             };
 
             let div = if chosen_post && !cannot_advance {
-                saved_d.read(ind as u32, true)
+                saved_d[ind as usize]
             } else if !chosen_post && !cannot_advance {
-                saved_d.read(ind as u32 + 1, true)
+                saved_d[ind as usize + 1]
             } else {
-                i as u32
+                i
             };
 
             pre_div = if chosen_post {
@@ -388,32 +391,16 @@ mod test {
     fn neighbors_finding_test() {
         let mut rng = rand::thread_rng();
 
-        let n = 100;
-        let m = 100;
+        let nhap = 100;
+        let npos = 200;
         let n_targets = 3;
         let s = 5;
 
-        let mut x = Array2::<i8>::zeros((m, n)); // ref panel
-        let mut t = Array2::<i8>::zeros((n_targets, m)); // ref panel
+        let x_ref = Array2::<i8>::from_shape_fn((npos, nhap), |_| rng.gen_range(0..2)); // ref panel
+        let x = (0..npos).map(|i| x_ref.row(i).to_owned());
+        let t = Array2::from_shape_fn((n_targets, npos), |_| tp_value!(rng.gen_range(0..2), i8));
 
-        for v in x.iter_mut() {
-            *v = rng.gen_range(0..2);
-        }
-
-        for v in t.iter_mut() {
-            *v = rng.gen_range(0..2);
-        }
-
-        #[cfg(feature = "leak-resist")]
-        let t = {
-            let mut _t = unsafe { Array2::<Genotype>::uninit(t.dim()).assume_init() };
-            for (a, &b) in _t.iter_mut().zip(t.iter()) {
-                *a = Genotype::protect(b);
-            }
-            _t
-        };
-
-        let results = find_neighbors(x.view(), t.view(), s);
+        let results = find_neighbors(x, t.view(), npos, nhap, s);
 
         for (result, single_t) in results.into_iter().zip(t.rows().into_iter()) {
             for (i, r) in result.into_iter().enumerate() {
@@ -421,7 +408,7 @@ mod test {
                 let r = r.into_iter().map(|v| v.expose()).collect::<Vec<_>>();
                 let mut r = r.into_iter().collect::<HashSet<_>>();
                 let mut check_answer = HashMap::<usize, HashSet<u32>>::new();
-                for j in 0..n {
+                for j in 0..nhap {
                     let mut n_matches = 0;
                     for k in (0..i + 1).rev() {
                         #[cfg(feature = "leak-resist")]
@@ -430,7 +417,7 @@ mod test {
                         #[cfg(not(feature = "leak-resist"))]
                         let a = single_t[k];
 
-                        if a == x[[k, j]] {
+                        if a == x_ref[[k, j]] {
                             n_matches += 1;
                         } else {
                             break;

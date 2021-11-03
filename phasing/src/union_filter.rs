@@ -5,7 +5,7 @@ use rand::Rng;
 use std::time::Instant;
 use timing_shield::{TpBool, TpU32};
 
-struct OblivBitmap<C: WriteOnlyORAMBackendCreator<64>>
+pub struct OblivBitmap<C: WriteOnlyORAMBackendCreator<64>>
 where
     <C as BaseORAMBackendCreator<64>>::ORAM: WriteOnlyORAMBackend<64>,
 {
@@ -20,8 +20,8 @@ impl<C: WriteOnlyORAMBackendCreator<64>> OblivBitmap<C>
 where
     <C as BaseORAMBackendCreator<64>>::ORAM: WriteOnlyORAMBackend<64>,
 {
-    pub fn new(n_bits: usize, s: usize, oram_backend_creator: C) -> Self {
-        assert!(s <= 8);
+    pub fn new(n_bits: usize, oram_backend_creator: C) -> Self {
+        //assert!(s <= 8);
         let n_bytes = (n_bits + 7) / 8;
         //let s_mask = (1u8 << s) - 1;
         Self {
@@ -110,7 +110,7 @@ pub fn union_filter() {
 
     let now = Instant::now();
     let oram_creator = LinearScanningORAMCreator;
-    let mut bitmap = OblivBitmap::new(n_samples, s, oram_creator);
+    let mut bitmap = OblivBitmap::new(n_samples, oram_creator);
     let init_ms = (Instant::now() - now).as_millis();
     println!(
         "Initialize oblivious bitmap of size {} samples: {} ms",
@@ -149,9 +149,7 @@ mod test {
         use std::collections::HashSet;
         let n_bits = 100;
         let n_indices = 10;
-        let s = 4;
-        let mut bitmap = OblivBitmap::new(n_bits, s, LinearScanningORAMCreator);
-        //let mut bitmap = OblivBitmap::new(n_bits, s, LeakyORAMCreator);
+        let mut bitmap = OblivBitmap::new(n_bits, LinearScanningORAMCreator);
         let mut rng = rand::thread_rng();
         let random_indices = (0..n_indices)
             .map(|_| rng.gen_range(0..n_bits))

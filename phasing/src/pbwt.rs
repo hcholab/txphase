@@ -1,4 +1,4 @@
-use ndarray::{Array1, ArrayView2};
+use ndarray::Array1;
 
 #[derive(Clone)]
 pub struct PBWTColumn {
@@ -6,27 +6,28 @@ pub struct PBWTColumn {
     pub d: Array1<u32>,
 }
 
-pub struct PBWT<'a> {
+pub struct PBWT<R: Iterator<Item = Array1<i8>>> {
     prev_col: PBWTColumn,
-    x: ArrayView2<'a, i8>,
-    m: usize,
-    n: usize,
+    x: R,
+    npos: usize,
+    nhap: usize,
     cur_i: usize,
 }
 
-impl<'a> PBWT<'a> {
-    pub fn new(x: ArrayView2<'a, i8>) -> Self {
-        let n = x.ncols();
-        let m = x.nrows();
+impl<R> PBWT<R>
+where
+    R: Iterator<Item = Array1<i8>>,
+{
+    pub fn new(x: R, npos: usize, nhap: usize) -> Self {
         let prev_col = PBWTColumn {
-            a: Array1::<u32>::from_iter(0..n as u32),
-            d: unsafe { Array1::<u32>::uninit(n).assume_init() },
+            a: Array1::<u32>::from_iter(0..nhap as u32),
+            d: unsafe { Array1::<u32>::uninit(nhap).assume_init() },
         };
         Self {
             prev_col,
             x,
-            m,
-            n,
+            npos,
+            nhap,
             cur_i: 0,
         }
     }
@@ -40,31 +41,35 @@ impl<'a> PBWT<'a> {
     }
 }
 
-impl<'a> Iterator for PBWT<'a> {
-    type Item = (PBWTColumn, u32);
+impl<R> Iterator for PBWT<R>
+where
+    R: Iterator<Item = Array1<i8>>,
+{
+    type Item = (PBWTColumn, u32, Array1<i8>);
     fn next(&mut self) -> Option<Self::Item> {
-        if self.cur_i >= self.m {
+        if self.cur_i >= self.npos {
             None
         } else {
             let mut cur_col = PBWTColumn {
-                a: unsafe { Array1::<u32>::uninit(self.n).assume_init() },
-                d: unsafe { Array1::<u32>::uninit(self.n).assume_init() },
+                a: unsafe { Array1::<u32>::uninit(self.nhap).assume_init() },
+                d: unsafe { Array1::<u32>::uninit(self.nhap).assume_init() },
             };
             let i = self.cur_i;
+            let hap_row = self.x.next().unwrap();
             self.cur_i += 1;
-            let n_zeros = self.x.row(i).iter().filter(|&&v| v == 0).count();
+            let n_zeros = hap_row.iter().filter(|&&v| v == 0).count();
             // original PBWT
             let mut u = 0;
             let mut v = n_zeros;
             let mut p = i + 1;
             let mut q = i + 1;
 
-            for j in 0..self.n {
+            for j in 0..self.nhap {
                 let prev_a = self.prev_col.a[j] as usize;
                 let prev_d = self.prev_col.d[j] as usize;
                 p = p.max(prev_d);
                 q = q.max(prev_d);
-                if self.x[[i, prev_a]] == 0 {
+                if hap_row[prev_a] == 0 {
                     cur_col.a[u] = prev_a as u32;
                     cur_col.d[u] = p as u32;
                     u += 1;
@@ -77,7 +82,7 @@ impl<'a> Iterator for PBWT<'a> {
                 }
             }
             self.prev_col = cur_col.clone();
-            Some((cur_col, n_zeros as u32))
+            Some((cur_col, n_zeros as u32, hap_row))
         }
     }
 }
