@@ -3,6 +3,13 @@ use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, Zip
 use rand::Rng;
 use std::time::Instant;
 
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum TransProbOption {
+    Burnin,
+    Prune,
+    Main,
+}
+
 #[cfg(feature = "leak-resist")]
 mod inner {
     use super::*;
@@ -335,17 +342,13 @@ impl GenotypeGraph {
         eprob: Real,
         rev_eprob: Real,
         rng: &mut impl Rng,
-        trans_prob_flag: usize,
+        trans_prob_option: TransProbOption,
     ) -> (Array2<U8>, Option<Array3<Real>>) {
-        let mut times = vec![0; 10];
         let m = x.nrows();
         let n = x.ncols();
         let p = self.p;
 
-        let now = Instant::now();
         let bprob = self.backward_pass(x, rprob, rev_rprob, eprob, rev_eprob);
-        println!("bw:\t{} ms", (Instant::now() - now).as_millis());
-
         let mut phase_ind = unsafe { Array2::<U8>::uninit((2, m)).assume_init() };
 
         // p x p matrix at each pos i for transition between i-1 and i
@@ -353,7 +356,7 @@ impl GenotypeGraph {
         let firstprob = Array1::from_shape_fn(p, |i| bprob.slice(s![0, i, ..]).iter().sum());
 
         let mut tprob = None;
-        if trans_prob_flag > 0 {
+        if trans_prob_option != TransProbOption::Burnin {
             tprob = Some(unsafe { Array3::<Real>::uninit((m, p, p)).assume_init() });
             tprob
                 .as_mut()
@@ -367,7 +370,11 @@ impl GenotypeGraph {
         phase_ind[[0, 0]] = tp_convert_to!(ind1, u8);
         phase_ind[[1, 0]] = tp_convert_to!(ind2, u8);
 
-        let psub = if trans_prob_flag == 0 { 2 } else { p };
+        let psub = if trans_prob_option == TransProbOption::Burnin {
+            2
+        } else {
+            p
+        };
 
         // Initialize forward prob
         let mut fprob = unsafe { Array2::<Real>::uninit((psub, n)).assume_init() };
@@ -376,7 +383,7 @@ impl GenotypeGraph {
         // Emission at first position
         for h1 in 0..psub {
             for h2 in 0..n {
-                let graph_ind = if trans_prob_flag == 0 {
+                let graph_ind = if trans_prob_option == TransProbOption::Burnin {
                     phase_ind[[h1, 0]]
                 } else {
                     tp_value!(h1, u8)
@@ -410,28 +417,27 @@ impl GenotypeGraph {
         let uniform_frac = Real::protect_f32(uniform_frac);
 
         for i in 1..m {
-            // Combine fprob (from i-1) and bprob[i] to get transition probs
-            let mut weights = unsafe { Array2::<Real>::uninit((psub, p)).assume_init() };
-
             for j in 0..psub {
                 // Transition i-1 -> i
-
-                let now = Instant::now();
                 let fsum = fprob.row(j).iter().sum();
                 for h2 in 0..n {
                     fprob_next[[j, h2]] =
                         transition_prob(fprob[[j, h2]], fsum, uniform_frac, rprob, rev_rprob);
                 }
-                times[0] += (Instant::now() - now).as_nanos();
+            }
 
+            // Renormalize
+            let fsum = fprob_next.iter().sum::<Real>();
+            fprob_next /= fsum;
+            
+            // Combine fprob (from i-1) and bprob[i] to get transition probs
+            let mut weights = unsafe { Array2::<Real>::uninit((psub, p)).assume_init() };
+            for j in 0..psub {
                 // Multiply with backward prob and integrate to get transition prob from hap j to h1
                 for h1 in 0..p {
-                    let now = Instant::now();
                     let iprod = inner_prod(fprob_next.row(j), bprob.slice(s![i, h1, ..]));
-                    times[1] += (Instant::now() - now).as_nanos();
-
                     // If not between blocks, set to identity matrix
-                    let ind = if trans_prob_flag > 0 {
+                    let ind = if trans_prob_option != TransProbOption::Burnin {
                         tp_value!(j, u8)
                     } else {
                         phase_ind[[j, i - 1]]
@@ -474,13 +480,11 @@ impl GenotypeGraph {
                 }
             }
 
-            let (h1, h2) = if trans_prob_flag > 0 {
+            let (h1, h2) = if trans_prob_option != TransProbOption::Burnin {
                 (phase_ind[[0, i - 1]], phase_ind[[1, i - 1]])
             } else {
                 (tp_value!(0, u8), tp_value!(1, u8))
             };
-
-            let now = Instant::now();
 
             #[cfg(feature = "leak-resist")]
             let weights_oram = crate::oram::DynamicLSOram::from_array(weights.view());
@@ -492,10 +496,10 @@ impl GenotypeGraph {
                 rng,
             );
 
+            println!("weights: {:?}", weights);
             #[cfg(not(feature = "leak-resist"))]
             let (ind1, ind2) =
                 constrained_paired_sample(weights.row(h1 as usize), weights.row(h2 as usize), rng);
-            times[1] += (Instant::now() - now).as_nanos();
 
             // If i is NOT block head, then just keep the previous indices
             #[cfg(feature = "leak-resist")]
@@ -519,10 +523,9 @@ impl GenotypeGraph {
                 };
             }
 
-            let now = Instant::now();
             // Copy and renormalize
-            if trans_prob_flag > 0 {
-                if trans_prob_flag == 1 {
+            match trans_prob_option {
+                TransProbOption::Main => {
                     for h1 in 0..psub {
                         #[cfg(feature = "leak-resist")]
                         let tsum: Real = {
@@ -546,7 +549,8 @@ impl GenotypeGraph {
                             .slice_mut(s![i, h1, ..])
                             .assign(&(&weights.slice(s![h1, ..]) / tsum))
                     }
-                } else {
+                }
+                TransProbOption::Prune => {
                     #[cfg(feature = "leak-resist")]
                     let tsum = {
                         #[cfg(not(feature = "leak-resist-fast"))]
@@ -569,14 +573,13 @@ impl GenotypeGraph {
                         .slice_mut(s![i, .., ..])
                         .assign(&(&weights.slice(s![.., ..]) / tsum));
                 }
+                TransProbOption::Burnin => {}
             }
-            times[2] += (Instant::now() - now).as_nanos();
 
-            let now = Instant::now();
             // Add emission at i (with the sampled haplotypes) to fprob_next
             for h1 in 0..psub {
                 for h2 in 0..n {
-                    let graph_ind = if trans_prob_flag == 0 {
+                    let graph_ind = if trans_prob_option == TransProbOption::Burnin {
                         phase_ind[[h1, i]]
                     } else {
                         tp_value!(h1, u8)
@@ -593,12 +596,6 @@ impl GenotypeGraph {
                     }
                     #[cfg(not(feature = "leak-resist"))]
                     {
-                        if i >= self.graph.nrows() {
-                            println!("nrows: {}, i: {}", self.graph.nrows(), i);
-                        }
-                        if graph_ind >= 8 {
-                            println!("graph_ind: {}", graph_ind);
-                        }
                         fprob_next[[h1, h2]] *= emission_prob(
                             x[[i, h2]],
                             self.graph[[i, graph_ind as usize]],
@@ -608,18 +605,9 @@ impl GenotypeGraph {
                     }
                 }
             }
-            times[3] += (Instant::now() - now).as_nanos();
 
             // Update fprob
             fprob.assign(&fprob_next);
-
-            // Renormalize (TODO: replace with lazy normalization)
-            let fsum = fprob.iter().sum::<Real>();
-            fprob /= fsum;
-        }
-
-        for (i, t) in times.into_iter().enumerate() {
-            println!("{}:\t{:.2} ms", i, t as f64 / 1000000.);
         }
 
         (phase_ind, tprob)
@@ -661,7 +649,6 @@ impl GenotypeGraph {
         eprob: Real,
         rev_eprob: Real,
     ) -> Array3<Real> {
-        let mut times = vec![0; 6];
         let m = x.nrows();
         let n = x.ncols();
         let p = self.p;
@@ -682,6 +669,12 @@ impl GenotypeGraph {
                     *c = emission_prob(d, b, eprob, rev_eprob);
                 });
             });
+        // renormalize
+        let bsum: Real = bprob.slice(s![m - 1, .., ..]).iter().sum();
+        bprob
+            .slice_mut(s![m - 1, .., ..])
+            .iter_mut()
+            .for_each(|x| *x /= bsum);
 
         let uniform_frac = 1.0 / (n as f32);
 
@@ -690,7 +683,6 @@ impl GenotypeGraph {
 
         // backward pass
         for i in (0..m - 1).rev() {
-            let now = Instant::now();
             // i -> i+1 transition
             let (mut bprob_cur, bprob_next) =
                 bprob.multi_slice_mut((s![i, .., ..], s![i + 1, .., ..]));
@@ -702,15 +694,11 @@ impl GenotypeGraph {
                         *c = transition_prob(d, sum, uniform_frac, rprob, rev_rprob);
                     });
                 });
-            times[0] += (Instant::now() - now).as_nanos();
 
-            let now = Instant::now();
             // Add to aggregate sum over h1
             let bprob_cur_t = bprob.slice(s![i, .., ..]);
             let sums = Array1::from_shape_fn(n, |j| bprob_cur_t.column(j).iter().sum());
-            times[1] += (Instant::now() - now).as_nanos();
 
-            let now = Instant::now();
             // If i+1 is block head, then replace bprob with its sum over h1
             let next_block_head = self.block_head[i + 1];
             Zip::from(bprob.slice_mut(s![i, .., ..]).rows_mut()).for_each(|mut a| {
@@ -727,9 +715,7 @@ impl GenotypeGraph {
                     }
                 });
             });
-            times[2] += (Instant::now() - now).as_nanos();
 
-            let now = Instant::now();
             #[cfg(feature = "leak-resist")]
             let row = Array1::from_vec(self.graph[i].as_vec());
 
@@ -743,19 +729,13 @@ impl GenotypeGraph {
                         *c *= emission_prob(d, b, eprob, rev_eprob);
                     });
                 });
-            times[3] += (Instant::now() - now).as_nanos();
 
-            let now = Instant::now();
             // renormalize
             let bsum: Real = bprob.slice(s![i, .., ..]).iter().sum();
             bprob
                 .slice_mut(s![i, .., ..])
                 .iter_mut()
                 .for_each(|x| *x /= bsum);
-            times[4] += (Instant::now() - now).as_nanos();
-        }
-        for (i, t) in times.into_iter().enumerate() {
-            println!("{}:\t{} ms", i, t as f64 / 1000000.);
         }
         bprob
     }

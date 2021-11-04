@@ -124,7 +124,7 @@ fn main() {
     assert_eq!(ref_panel_meta.n_markers, target_sample.len());
 
     {
-        let limit = 40000;
+        let limit = 10000;
         let mut s = 1;
         let mut block_limit = 0;
         for (i, block) in ref_panel_blocks.iter().enumerate() {
