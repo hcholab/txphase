@@ -9,6 +9,7 @@ use std::io::Write;
 use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::path::Path;
 use std::str::FromStr;
+use ndarray::ArrayView2;
 
 const SP_PORT: u16 = 1234;
 
@@ -124,7 +125,7 @@ fn main() {
     assert_eq!(ref_panel_meta.n_markers, target_sample.len());
 
     {
-        let limit = 10000;
+        let limit = 400000;
         let mut s = 1;
         let mut block_limit = 0;
         for (i, block) in ref_panel_blocks.iter().enumerate() {
@@ -161,23 +162,52 @@ fn main() {
     sp_stream.flush().unwrap();
 
     let phased: ndarray::Array2<i8> = bincode::deserialize_from(&mut sp_stream).unwrap();
+    write_vcf("init.vcf.gz", phased.view(), &ref_sites_bitmask, &input_bcf_header, &input_records_filtered);
+
+    let phased: ndarray::Array2<i8> = bincode::deserialize_from(&mut sp_stream).unwrap();
+    write_vcf("burnin1.vcf.gz", phased.view(), &ref_sites_bitmask, &input_bcf_header, &input_records_filtered);
+
+    //let phased: ndarray::Array2<i8> = bincode::deserialize_from(&mut sp_stream).unwrap();
+    //write_vcf("pruning.vcf.gz", phased.view(), &ref_sites_bitmask, &input_bcf_header, &input_records_filtered);
+
+    let phased: ndarray::Array2<i8> = bincode::deserialize_from(&mut sp_stream).unwrap();
+    write_vcf("burnin2.vcf.gz", phased.view(), &ref_sites_bitmask, &input_bcf_header, &input_records_filtered);
+
+    let phased: ndarray::Array2<i8> = bincode::deserialize_from(&mut sp_stream).unwrap();
+    write_vcf("burnin3.vcf.gz", phased.view(), &ref_sites_bitmask, &input_bcf_header, &input_records_filtered);
+
+    let phased: ndarray::Array2<i8> = bincode::deserialize_from(&mut sp_stream).unwrap();
+    write_vcf("burnin4.vcf.gz", phased.view(), &ref_sites_bitmask, &input_bcf_header, &input_records_filtered);
+
+    let phased: ndarray::Array2<i8> = bincode::deserialize_from(&mut sp_stream).unwrap();
+    write_vcf("burnin5.vcf.gz", phased.view(), &ref_sites_bitmask, &input_bcf_header, &input_records_filtered);
+
+    let phased: ndarray::Array2<i8> = bincode::deserialize_from(&mut sp_stream).unwrap();
+    write_vcf("burnin6.vcf.gz", phased.view(), &ref_sites_bitmask, &input_bcf_header, &input_records_filtered);
+
+    //let phased: ndarray::Array2<i8> = bincode::deserialize_from(&mut sp_stream).unwrap();
+    //write_vcf("main.vcf.gz", phased.view(), &ref_sites_bitmask, &input_bcf_header, &input_records_filtered);
+
+    eprintln!("Host: done");
+}
+
+fn write_vcf(file_name: &str, phased: ArrayView2<i8>, ref_sites_bitmask: &[bool], input_bcf_header: &bcf::header::HeaderView, input_records_filtered: &[bcf::record::Record]) {
+    use bcf::record::GenotypeAllele;
     let phased = phased
         .columns()
         .into_iter()
         .zip(ref_sites_bitmask.into_iter())
-        .filter(|(_, b)| *b)
+        .filter(|(_, b)| **b)
         .map(|(v, _)| (v[0], v[1]))
         .collect::<Vec<_>>();
 
     let mut out_vcf = bcf::Writer::from_path(
-        &Path::new("phased.vcf.gz"),
+        &Path::new(file_name),
         &bcf::header::Header::from_template(&input_bcf_header),
         false,
         bcf::Format::Vcf,
     )
     .unwrap();
-
-    use bcf::record::GenotypeAllele;
 
     for (genotype, input_record) in phased.into_iter().zip(input_records_filtered) {
         let mut new_record = out_vcf.empty_record();
@@ -194,7 +224,6 @@ fn main() {
         out_vcf.write(&new_record).unwrap();
     }
 
-    eprintln!("Host: done");
 }
 
 fn tcp_keep_connecting(addr: SocketAddr) -> TcpStream {

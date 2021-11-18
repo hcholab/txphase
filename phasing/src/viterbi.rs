@@ -12,6 +12,7 @@ use inner::*;
 // Takes in p(x1), p(x2|x1), ..., p(xn|xn-1)
 // Outputs most likely (paired) assignment using Viterbi algorithm
 pub fn viterbi(tprob: ArrayView3<Real>) -> Array2<U8> {
+    println!("{:?}", tprob);
     let m = tprob.shape()[0];
     let p = tprob.shape()[1];
 
@@ -61,9 +62,6 @@ pub fn viterbi(tprob: ArrayView3<Real>) -> Array2<U8> {
         }
 
         let sum: Real = maxprob_next.iter().sum();
-
-        #[cfg(not(feature = "leak-resist"))]
-        let sum = if sum < 1e-20 { sum * 1e10 } else { sum };
 
         maxprob = &maxprob_next / sum;
     }

@@ -222,7 +222,8 @@ impl GenotypeGraph {
                 merge_head[i] = (i == 0 || self.block_head[i]) && merge_flag;
 
                 // If merge is not on, we're at a head and prob over threshold, start a new merge
-                new_merge_flag = self.block_head[i] && prob > MCMC_PRUNE_PROB_THRES && !merge_flag;
+                new_merge_flag =
+                    self.block_head[i] && prob > MCMC_PRUNE_PROB_THRES as Real && !merge_flag;
 
                 // If at head then merge_flag is set to new_merge_flag, otherwise carry over
                 if self.block_head[i] {
@@ -353,7 +354,8 @@ impl GenotypeGraph {
 
         // p x p matrix at each pos i for transition between i-1 and i
         // Save belief over the first block in tprob[0][0]
-        let firstprob = Array1::from_shape_fn(p, |i| bprob.slice(s![0, i, ..]).iter().sum());
+        let firstprob =
+            Array1::<Real>::from_shape_fn(p, |i| bprob.slice(s![0, i, ..]).iter().sum());
 
         let mut tprob = None;
         if trans_prob_option != TransProbOption::Burnin {
@@ -421,15 +423,16 @@ impl GenotypeGraph {
                 // Transition i-1 -> i
                 let fsum = fprob.row(j).iter().sum();
                 for h2 in 0..n {
-                    fprob_next[[j, h2]] =
-                        transition_prob(fprob[[j, h2]], fsum, uniform_frac, rprob, rev_rprob);
+                    fprob_next[[j, h2]] = transition_prob(
+                        fprob[[j, h2]],
+                        fsum,
+                        uniform_frac.into(),
+                        rprob,
+                        rev_rprob,
+                    );
                 }
             }
 
-            // Renormalize
-            let fsum = fprob_next.iter().sum::<Real>();
-            fprob_next /= fsum;
-            
             // Combine fprob (from i-1) and bprob[i] to get transition probs
             let mut weights = unsafe { Array2::<Real>::uninit((psub, p)).assume_init() };
             for j in 0..psub {
@@ -496,7 +499,6 @@ impl GenotypeGraph {
                 rng,
             );
 
-            println!("weights: {:?}", weights);
             #[cfg(not(feature = "leak-resist"))]
             let (ind1, ind2) =
                 constrained_paired_sample(weights.row(h1 as usize), weights.row(h2 as usize), rng);
@@ -543,11 +545,20 @@ impl GenotypeGraph {
                         #[cfg(not(feature = "leak-resist"))]
                         let tsum: Real = weights.row(h1).iter().sum();
 
-                        tprob
-                            .as_mut()
-                            .unwrap()
-                            .slice_mut(s![i, h1, ..])
-                            .assign(&(&weights.slice(s![h1, ..]) / tsum))
+                        if tsum.abs() >= Real::EPSILON {
+                            tprob
+                                .as_mut()
+                                .unwrap()
+                                .slice_mut(s![i, h1, ..])
+                                .assign(&(&weights.slice(s![h1, ..]) / tsum));
+                            } else {
+                                tprob.as_mut().unwrap().slice_mut(s![i, h1, ..]).assign(
+                                    &(Array1::from_elem(
+                                            weights.slice(s![h1, ..]).dim(),
+                                            1.0 / weights.slice(s![h1, ..]).len() as Real,
+                                    )),
+                                );
+                        }
                     }
                 }
                 TransProbOption::Prune => {
@@ -605,6 +616,10 @@ impl GenotypeGraph {
                     }
                 }
             }
+
+            // Renormalize
+            let fsum = fprob_next.iter().sum::<Real>();
+            fprob_next /= fsum;
 
             // Update fprob
             fprob.assign(&fprob_next);
@@ -691,7 +706,7 @@ impl GenotypeGraph {
                 .for_each(|mut a, b| {
                     let sum: Real = b.iter().sum();
                     Zip::from(&mut a).and(&b).for_each(|c, &d| {
-                        *c = transition_prob(d, sum, uniform_frac, rprob, rev_rprob);
+                        *c = transition_prob(d, sum, uniform_frac.into(), rprob, rev_rprob);
                     });
                 });
 
@@ -823,6 +838,17 @@ fn constrained_paired_sample(
     rng: &mut impl Rng,
 ) -> (UInt, UInt) {
     let n = weights1.len();
+
+    let weights1 = {
+        let weights_sum = weights1.sum();
+        &weights1 / weights_sum
+    };
+
+    let weights2 = {
+        let weights_sum = weights2.sum();
+        &weights2 / weights_sum
+    };
+
     let mut combined = unsafe { Array1::<Real>::uninit(n).assume_init() };
     for i in 0..n {
         #[cfg(feature = "leak-resist")]
@@ -1550,7 +1576,7 @@ mod test {
             eprob,
             rev_eprob,
             &mut seeded_rng,
-            0,
+            TransProbOption::Burnin,
         );
         let (ref_phase_ind_1, _) = ref_algs::forward_sampling(
             &ref_bprob,
@@ -1582,9 +1608,11 @@ mod test {
             eprob,
             rev_eprob,
             &mut seeded_rng,
-            1,
+            TransProbOption::Main,
         );
+
         let tprobs_2 = tprobs_2.unwrap();
+
         let (ref_phase_ind_2, ref_tprobs_2) = ref_algs::forward_sampling(
             &ref_bprob,
             &ref_x,
@@ -1620,7 +1648,7 @@ mod test {
             eprob,
             rev_eprob,
             &mut seeded_rng,
-            2,
+            TransProbOption::Prune,
         );
         let tprobs_3 = tprobs_3.unwrap();
         let (ref_phase_ind_3, ref_tprobs_3) = ref_algs::forward_sampling(
@@ -1772,6 +1800,14 @@ mod test {
 
         let graph = GenotypeGraph::build(t.view());
 
-        graph.forward_sampling(x.view(), rprob, rev_rprob, eprob, rev_eprob, &mut rng, 0);
+        graph.forward_sampling(
+            x.view(),
+            rprob,
+            rev_rprob,
+            eprob,
+            rev_eprob,
+            &mut rng,
+            TransProbOption::Burnin,
+        );
     }
 }

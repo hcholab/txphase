@@ -32,17 +32,17 @@ mod inner {
     pub type Int = i32;
     pub type U8 = u8;
     pub type Bool = bool;
-    pub type Real = f32;
+    pub type Real = f64;
 }
 
 use inner::*;
 
+use crate::genotype_graph::TransProbOption;
 use genotype_graph::GenotypeGraph;
 use ndarray::{Array1, Array2, Array3, ArrayView2};
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::str::FromStr;
 use std::time::Instant;
-use crate::genotype_graph::TransProbOption;
 const HOST_PORT: u16 = 1234;
 
 struct HmmParams {
@@ -64,10 +64,10 @@ impl HmmParams {
             Real::protect_f32(rev_eprob),
         );
         Self {
-            eprob,
-            rev_eprob,
-            rprob,
-            rev_rprob,
+            eprob: eprob.into(),
+            rev_eprob: rev_eprob.into(),
+            rprob: rprob.into(),
+            rev_rprob: rev_rprob.into(),
         }
     }
 }
@@ -99,7 +99,7 @@ fn main() {
     assert_eq!(ref_panel_meta.n_markers, t.len());
 
     let s = 4;
-    let capacity = 400;
+    let capacity = 600;
     // hmm parameters
     let ref_eprob = 0.01; // error
     let ref_rprob = 0.05; // recombination
@@ -125,41 +125,55 @@ fn main() {
         ref_panel_meta.n_haps,
     );
 
-    println!("Initialization: {} ms", (Instant::now() - now).as_millis());
-    println!("",);
-    println!("",);
-
-    phased = burnin_iter(
-        phased.view(),
-        &geno_graph,
-        &ref_panel_meta,
-        &ref_panel_blocks,
-        s,
-        capacity,
-        &hmm_params,
-        &mut rng,
-    );
-
-    phased = pruning_iter(
-        phased.view(),
-        &mut geno_graph,
-        &ref_panel_meta,
-        &ref_panel_blocks,
-        s,
-        capacity,
-        &hmm_params,
-        &mut rng,
-    );
-
-
     {
         #[cfg(feature = "leak-resist")]
         let phased = Array2::from_shape_fn(phased.dim(), |(i, j)| phased[[i, j]].expose());
         bincode::serialize_into(&mut host_stream, &phased).unwrap();
     }
+
+    println!("Initialization: {} ms", (Instant::now() - now).as_millis());
+    println!("",);
+    println!("",);
+
+    for _ in 0..6 {
+        phased = burnin_iter(
+            phased.view(),
+            &geno_graph,
+            &ref_panel_meta,
+            &ref_panel_blocks,
+            s,
+            capacity,
+            &hmm_params,
+            &mut rng,
+        );
+
+        {
+            #[cfg(feature = "leak-resist")]
+            let phased = Array2::from_shape_fn(phased.dim(), |(i, j)| phased[[i, j]].expose());
+            bincode::serialize_into(&mut host_stream, &phased).unwrap();
+        }
+    }
+
+    //phased = pruning_iter(
+    //phased.view(),
+    //&mut geno_graph,
+    //&ref_panel_meta,
+    //&ref_panel_blocks,
+    //s,
+    //capacity,
+    //&hmm_params,
+    //&mut rng,
+    //);
+
+    //{
+    //#[cfg(feature = "leak-resist")]
+    //let phased = Array2::from_shape_fn(phased.dim(), |(i, j)| phased[[i, j]].expose());
+    //bincode::serialize_into(&mut host_stream, &phased).unwrap();
+    //}
+
     return;
 
-    let num_main_iter = 2;
+    let num_main_iter = 3;
     let p = 1 << genotype_graph::HET_PER_BLOCK;
     let mut tprob_agg = unsafe { Array3::uninit((ref_panel_meta.n_markers, p, p)).assume_init() };
     for i in 0..num_main_iter {
@@ -174,6 +188,8 @@ fn main() {
             &mut rng,
         );
 
+        //println!("tprob: {:?}", tprob);
+
         // Add tprob to aggregator
         if i == 0 {
             tprob_agg = tprob;
@@ -181,13 +197,22 @@ fn main() {
             tprob_agg += &tprob;
         }
         phased = estm;
+        //{
+        //#[cfg(feature = "leak-resist")]
+        //let phased = Array2::from_shape_fn(phased.dim(), |(i, j)| phased[[i, j]].expose());
+        //bincode::serialize_into(&mut host_stream, &phased).unwrap();
+        //}
     }
 
     let now = Instant::now();
     let phase_ind = crate::viterbi::viterbi(tprob_agg.view());
     println!("Viterbi: {} ms", (Instant::now() - now).as_millis());
     phased = geno_graph.get_haps(phase_ind.view());
-
+    {
+        #[cfg(feature = "leak-resist")]
+        let phased = Array2::from_shape_fn(phased.dim(), |(i, j)| phased[[i, j]].expose());
+        bincode::serialize_into(&mut host_stream, &phased).unwrap();
+    }
 }
 
 fn burnin_iter(
@@ -218,7 +243,8 @@ fn burnin_iter(
         hmm_params.eprob,
         hmm_params.rev_eprob,
         &mut rng,
-        TransProbOption::Burnin,
+        //TransProbOption::Burnin,
+        TransProbOption::Main,
     );
     let out = genotype_graph.get_haps(phase_ind.view());
     println!(
@@ -260,8 +286,6 @@ fn pruning_iter(
         TransProbOption::Prune,
     );
 
-    //println!("{:?}", tprob.as_ref().unwrap());
-
     let out = genotype_graph.get_haps(phase_ind.view());
     genotype_graph.prune(tprob.unwrap().view());
     println!(
@@ -271,7 +295,6 @@ fn pruning_iter(
     println!("",);
     out
 }
-
 
 fn main_iter(
     estimated_haps: ArrayView2<Genotype>,
@@ -321,7 +344,6 @@ fn update_ref_panel(
 ) -> Array2<Genotype> {
     const N: usize = 1000;
 
-    let mut filterd_ref_panel = Array2::<Genotype>::from_elem((npos, nhap), tp_value!(0, i8));
     let row_iter = block::RowIterator::from_blocks_iter(blocks.iter());
     let neighbors = neighbors_finding::find_neighbors(row_iter, t, npos, nhap, s);
 
@@ -347,6 +369,8 @@ fn update_ref_panel(
         bitmap
     };
 
+    //let mut filterd_ref_panel = Array2::<Genotype>::from_elem((npos, capacity), tp_value!(0, i8));
+    let mut filterd_ref_panel = Array2::<Genotype>::from_elem((0, 0), tp_value!(0, i8));
     let mut cur_pos = 0;
     for (f, block) in blocks.iter().enumerate() {
         let nskip = if f == 0 { 0 } else { 1 };
@@ -368,6 +392,11 @@ fn update_ref_panel(
             .map(|(v, _)| v)
             .take(capacity)
             .collect::<Vec<_>>();
+
+        if filterd_ref_panel.ncols() != filtered.len() {
+            filterd_ref_panel =
+                Array2::<Genotype>::from_elem((npos, filtered.len()), tp_value!(0, i8));
+        }
 
         // transpose
         for (i, hap) in filtered.into_iter().enumerate() {
