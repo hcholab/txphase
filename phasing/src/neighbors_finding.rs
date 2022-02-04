@@ -13,7 +13,7 @@ pub fn find_neighbors(
     s: usize,
 ) -> Vec<Vec<Vec<UInt>>> {
     let m = npos;
-    let n_targets = t.nrows();
+    let n_targets = t.ncols();
 
     let mut pbwt = PBWT::new(x, npos, nhap);
     let mut prev_col = pbwt.get_init_col().unwrap();
@@ -29,7 +29,7 @@ pub fn find_neighbors(
             let cur_target = find_target_single_marker(
                 hap_row.view(),
                 cur_n_zeros as u32,
-                t[[j, i]],
+                t[[i, j]],
                 i as u32,
                 &prev_target[j],
                 &prev_col,

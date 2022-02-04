@@ -1,49 +1,62 @@
 use crate::oram::DynamicLSOram;
 use bitvec::prelude::{BitSlice, Lsb0};
-use m3vcf::Block;
+use m3vcf::{Block, BlockView};
 use ndarray::{Array1, Array2, Zip};
 use oram_sgx::align::A64Bytes;
 
-pub struct RowIterator<'a, B>
+pub struct RowIterator<'a, 'b, B, F>
 where
-    B: Iterator<Item = &'a Block>,
+    B: Iterator<Item = BlockView<'a>>,
+    F: Iterator<Item = &'b bool>,
 {
     blocks_iterator: B,
     cur_i: usize,
     cur_block: ExpandedBlock,
+    filter: F,
 }
 
-impl<'a, B> RowIterator<'a, B>
+impl<'a, 'b, B, F> RowIterator<'a, 'b, B, F>
 where
-    B: Iterator<Item = &'a Block>,
+    B: Iterator<Item = BlockView<'a>>,
+    F: Iterator<Item = &'b bool>,
 {
-    pub fn from_blocks_iter(mut blocks_iterator: B) -> Self {
+    pub fn from_blocks_iter(mut blocks_iterator: B, filter: F) -> Self {
         let cur_block = ExpandedBlock::from_block_ref(blocks_iterator.next().unwrap());
         Self {
             blocks_iterator,
             cur_i: 0,
             cur_block,
+            filter,
         }
     }
 }
 
-impl<'a, B> Iterator for RowIterator<'a, B>
+impl<'a, 'b, B, F> Iterator for RowIterator<'a, 'b, B, F>
 where
-    B: Iterator<Item = &'a Block>,
+    B: Iterator<Item = BlockView<'a>>,
+    F: Iterator<Item = &'b bool>,
 {
     type Item = Array1<i8>;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.cur_i == self.cur_block.rhap.nrows() {
-            if let Some(new_block) = self.blocks_iterator.next() {
-                self.cur_block = ExpandedBlock::from_block_ref(new_block);
-                self.cur_i = 1; // skip the first overlapping position
+        loop {
+            if let Some(b) = self.filter.next() {
+                if self.cur_i == self.cur_block.rhap.nrows() {
+                    if let Some(new_block) = self.blocks_iterator.next() {
+                        self.cur_block = ExpandedBlock::from_block_ref(new_block);
+                        self.cur_i = 1; // skip the first overlapping position
+                    } else {
+                        return None;
+                    }
+                }
+                let i = self.cur_i;
+                self.cur_i += 1;
+                if *b {
+                    return Some(self.cur_block.rhap.row(i).to_owned());
+                }
             } else {
                 return None;
             }
         }
-        let i = self.cur_i;
-        self.cur_i += 1;
-        Some(self.cur_block.rhap.row(i).to_owned())
     }
 }
 
@@ -52,7 +65,7 @@ pub struct ExpandedBlock {
 }
 
 impl ExpandedBlock {
-    pub fn from_block_ref(block: &Block) -> Self {
+    pub fn from_block_ref<'a>(block: BlockView<'a>) -> Self {
         let n_ref_haps = block.indmap.len();
         let mut rhap = Array2::<i8>::zeros((block.nvar, n_ref_haps));
         Zip::from(rhap.rows_mut())
@@ -70,7 +83,10 @@ impl ExpandedBlock {
     }
 }
 
-pub fn block_to_aligned_transposed<const N: usize>(block: &Block, nhap: usize) -> Vec<A64Bytes<N>> {
+pub fn block_to_aligned_transposed<'a, const N: usize>(
+    block: &BlockView,
+    nhap: usize,
+) -> Vec<A64Bytes<N>> {
     let mut transposed = vec![A64Bytes::<N>::default(); nhap];
     Zip::indexed(block.rhap.rows()).for_each(|i, row| {
         let row = BitSlice::<Lsb0, u8>::from_slice(row.as_slice().unwrap()).unwrap();

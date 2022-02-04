@@ -4,13 +4,13 @@ use std::path::Path;
 #[derive(serde::Deserialize, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone)]
 pub struct Site {
     #[serde(rename = "#CHROM")]
-    chr: String,
+    pub chr: String,
     #[serde(rename = "POS")]
-    pos: u32,
+    pub pos: u32,
     #[serde(rename = "REF")]
-    allele_ref: String,
+    pub allele_ref: String,
     #[serde(rename = "ALT")]
-    allele_alt: String,
+    pub allele_alt: String,
 }
 
 impl Site {

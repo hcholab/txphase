@@ -12,7 +12,6 @@ use inner::*;
 // Takes in p(x1), p(x2|x1), ..., p(xn|xn-1)
 // Outputs most likely (paired) assignment using Viterbi algorithm
 pub fn viterbi(tprob: ArrayView3<Real>) -> Array2<U8> {
-    println!("{:?}", tprob);
     let m = tprob.shape()[0];
     let p = tprob.shape()[1];
 
@@ -97,9 +96,9 @@ pub fn viterbi(tprob: ArrayView3<Real>) -> Array2<U8> {
     }
 
     // Follow backtrace pointers to recover optimal sequence
-    let mut map_ind = unsafe { Array2::<U8>::uninit((2, m)).assume_init() };
-    map_ind[[0, m - 1]] = max_ind;
-    map_ind[[1, m - 1]] = (p as u8) - 1 - max_ind;
+    let mut map_ind = unsafe { Array2::<U8>::uninit((m, 2)).assume_init() };
+    map_ind[[m - 1, 0]] = max_ind;
+    map_ind[[m - 1, 1]] = (p as u8) - 1 - max_ind;
     for i in (1..m).rev() {
         #[cfg(feature = "leak-resist")]
         {
@@ -109,8 +108,8 @@ pub fn viterbi(tprob: ArrayView3<Real>) -> Array2<U8> {
         {
             max_ind = backtrace[[i, max_ind as usize]]; // TODO: Use linear ORAM!
         }
-        map_ind[[0, i - 1]] = max_ind;
-        map_ind[[1, i - 1]] = (p as u8) - 1 - max_ind;
+        map_ind[[i - 1, 0]] = max_ind;
+        map_ind[[i - 1, 1]] = (p as u8) - 1 - max_ind;
     }
 
     map_ind
@@ -118,26 +117,26 @@ pub fn viterbi(tprob: ArrayView3<Real>) -> Array2<U8> {
 
 #[cfg(test)]
 mod ref_alg {
-    pub fn viterbi(tprob: &Vec<Vec<Vec<f32>>>) -> Vec<Vec<u8>> {
+    pub fn viterbi(tprob: &Vec<Vec<Vec<f64>>>) -> Vec<Vec<u8>> {
         let m = tprob.len();
         let p = tprob[0].len();
 
         let mut backtrace = vec![vec![0 as u8; p]; m];
-        let mut maxprob_next = vec![0.0 as f32; p];
-        let mut maxprob = vec![0.0 as f32; p];
+        let mut maxprob_next = vec![0.0 as f64; p];
+        let mut maxprob = vec![0.0 as f64; p];
         for h1 in 0..p {
             maxprob[h1] = tprob[0][0][h1] * tprob[0][0][p - 1 - h1]; // p(x1), diploid prob
         }
 
         for i in 1..m {
             for h2 in 0..p {
-                let mut max_val = f32::NEG_INFINITY;
+                let mut max_val = f64::NEG_INFINITY;
                 let mut max_ind = 0 as u8;
 
                 for h1 in 0..p {
                     let val = maxprob[h1] * tprob[i][h1][h2] * tprob[i][p - 1 - h1][p - 1 - h2]; // diploid
                     let update = val > max_val;
-                    max_val = mutex2f32(update, val, max_val);
+                    max_val = mutex2f64(update, val, max_val);
                     max_ind = mutex2u8(update, h1 as u8, max_ind);
                 }
 
@@ -153,12 +152,12 @@ mod ref_alg {
         }
 
         // Find max value in the final vector
-        let mut max_val = f32::NEG_INFINITY;
+        let mut max_val = f64::NEG_INFINITY;
         let mut max_ind = 0 as u8;
         for h1 in 0..p {
             let val = maxprob[h1];
             let update = val > max_val;
-            max_val = mutex2f32(update, val, max_val);
+            max_val = mutex2f64(update, val, max_val);
             max_ind = mutex2u8(update, h1 as u8, max_ind);
         }
 
@@ -182,7 +181,7 @@ mod ref_alg {
         }
     }
 
-    fn mutex2f32(b: bool, v1: f32, v0: f32) -> f32 {
+    fn mutex2f64(b: bool, v1: f64, v0: f64) -> f64 {
         if b {
             return v1;
         } else {
@@ -190,7 +189,7 @@ mod ref_alg {
         }
     }
 
-    fn sum_vec(v: &[f32]) -> f32 {
+    fn sum_vec(v: &[f64]) -> f64 {
         let mut out = 0.0;
         for i in 0..v.len() {
             out += v[i]
@@ -226,7 +225,7 @@ mod test {
         });
 
         #[cfg(not(feature = "leak-resist"))]
-        let tprob = Array3::from_shape_fn((m, p, p), |(i, j, k)| ref_tprob[i][j][k]);
+        let tprob = Array3::<Real>::from_shape_fn((m, p, p), |(i, j, k)| ref_tprob[i][j][k]);
 
         let ref_results = ref_alg::viterbi(&ref_tprob)
             .into_iter()

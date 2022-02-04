@@ -67,13 +67,13 @@ impl<T: Clone> DynamicLSOram<T> {
         self.cond_obliv_read(index, TpBool::protect(true))
     }
 
-    pub fn obliv_filter(&self, filter: &[TpBool], capacity: usize) -> (Vec<Vec<T>>, TpU32) {
-        assert_eq!(filter.len(), self.inner.len());
-        //let mut filtered = vec![Vec::new(); capacity];
-        for (filter_chunk, data_chunk) in filter.chunks(capacity).zip(self.inner.chunks(capacity)) {
-        }
-        todo!()
-    }
+    //pub fn obliv_filter(&self, filter: &[TpBool], capacity: usize) -> (Vec<Vec<T>>, TpU32) {
+        //assert_eq!(filter.len(), self.inner.len());
+        ////let mut filtered = vec![Vec::new(); capacity];
+        //for (filter_chunk, data_chunk) in filter.chunks(capacity).zip(self.inner.chunks(capacity)) {
+        //}
+        //todo!()
+    //}
 
     //fn to_obliv_items<T>(
         //bitmap: &[TpBool],

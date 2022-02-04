@@ -21,10 +21,11 @@ bufstream = "0.1"
 oram-sgx = { path = "../oram-sgx" }
 tp-fixedpoint = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/tp-fixedpoint", optional = true }
 m3vcf = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/m3vcf" }
-timing-shield = "0.2"
-
-[dev-dependencies]
+timing-shield = { git = "https://github.com/ndokmai/rust-timing-shield" } 
 rand_chacha = "0.3"
+
+#[dev-dependencies]
+#rand_chacha = "0.3"
 
 [package.metadata.fortanix-sgx]
 # stack size (in bytes) for each thread, the default stack size is 0x20000.

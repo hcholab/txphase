@@ -1,4 +1,5 @@
 // modified from https://github.com/mobilecoinofficial/mc-oblivious/blob/master/aligned-cmov/src/cmov_impl_asm.rs
+use std::arch::asm;
 use timing_shield::{TpBool, TpCondSwap};
 
 #[repr(align(64))]
@@ -97,7 +98,12 @@ impl<const N: usize> TpCondSwap for A64Bytes<N> {
 // for pointers aligned to 8 byte boundary. Assumes count > 0
 #[inline]
 #[allow(unused)]
-pub unsafe fn cmov_byte_slice_a8(condition: bool, src: *const u64, dest: *mut u64, mut count: usize) {
+pub unsafe fn cmov_byte_slice_a8(
+    condition: bool,
+    src: *const u64,
+    dest: *mut u64,
+    mut count: usize,
+) {
     // Create a temporary to be assigned to a register for cmov
     // We also use it to pass the condition in, which is only needed in a register
     // before entering the loop.
@@ -123,17 +129,31 @@ pub unsafe fn cmov_byte_slice_a8(condition: bool, src: *const u64, dest: *mut u6
     //
     // The condition is passed in through temp, then neg moves the value to CF.
     // After that we don't need condition in a register, so temp register can be reused.
-    llvm_asm!("neg $0
-               loop_body_${:uid}:
-                 mov $0, [$3 + 8*$1 - 8]
-                 cmovc $0, [$2 + 8*$1 - 8]
-                 mov [$3 + 8*$1 - 8], $0
-                 dec $1
-                 jnz loop_body_${:uid}"
-            : "+&r"(temp), "+&r"(count)
-            : "r"(src), "r"(dest)
-            : "cc", "memory"
-            : "volatile", "intel");
+    asm!("neg {0}
+            2:
+            mov {0}, [{3} + 8*{1} - 8]
+            cmovc {0}, [{2} + 8*{1} - 8]
+            mov [{3} + 8*{1} - 8], {0} 
+            dec {1} 
+            jnz 2" ,
+            inout(reg) temp,
+            inout(reg) count,
+            in(reg) src,
+            in(reg) dest,
+            options(nostack),
+    );
+
+    //llvm_asm!("neg $0
+               //loop_body_${:uid}:
+                 //mov $0, [$3 + 8*$1 - 8]
+                 //cmovc $0, [$2 + 8*$1 - 8]
+                 //mov [$3 + 8*$1 - 8], $0
+                 //dec $1
+                 //jnz loop_body_${:uid}"
+            //: "+&r"(temp), "+&r"(count)
+            //: "r"(src), "r"(dest)
+            //: "cc", "memory"
+            //: "volatile", "intel");
     // cc is because we are setting flags in test
     // memory is because we are dereferencing a bunch of pointers in asm
     // volatile is because the output variable "temp" is not the true output
@@ -148,7 +168,12 @@ pub unsafe fn cmov_byte_slice_a8(condition: bool, src: *const u64, dest: *mut u6
 #[cfg(target_feature = "avx2")]
 #[inline]
 #[allow(unused)]
-pub unsafe fn cmov_byte_slice_a64(condition: bool, src: *const u64, dest: *mut u64, num_bytes: usize) {
+pub unsafe fn cmov_byte_slice_a64(
+    condition: bool,
+    src: *const u64,
+    dest: *mut u64,
+    num_bytes: usize,
+) {
     debug_assert!(
         num_bytes > 0,
         "num_bytes cannot be 0, caller must handle that"
@@ -192,21 +217,40 @@ pub unsafe fn cmov_byte_slice_a64(condition: bool, src: *const u64, dest: *mut u
     // TODO: Does unrolling the loop more help?
     let mut temp: u64 = condition as u64;
 
-    llvm_asm!("neg $0
-               vmovq xmm2, $0
-               vbroadcastsd ymm1, xmm2
-               mov $0, $3
-               loop_body2_${:uid}:
-                 vmovdqa ymm2, [$1 + $0 - 64]
-                 vpmaskmovq [$2 + $0 - 64], ymm1, ymm2
-                 vmovdqa ymm3, [$1 + $0 - 32]
-                 vpmaskmovq [$2 + $0 - 32], ymm1, ymm3
-                 sub $0, 64
-                 jnz loop_body2_${:uid}"
-            : "+&r"(temp)
-            : "r"(src), "r"(dest), "rmi"(num_bytes)
-            : "cc", "memory", "ymm1", "ymm2", "ymm3"
-            : "volatile", "intel");
+    asm!("neg {0}
+            vmovq xmm2, {0}
+            vbroadcastsd ymm1, xmm2
+            mov {0}, {3}
+            2:
+            vmovdqa ymm2, [{1} + {0} - 64]
+            vpmaskmovq [{2} + {0} - 64], ymm1, ymm2
+            vmovdqa ymm3, [{1} + {0} - 32]
+            vpmaskmovq [{2} + {0} - 32], ymm1, ymm3
+            sub {0}, 64
+            jnz 2 
+        ",
+        inout(reg) temp,
+        in(reg) src,
+        in(reg) dest,
+        in(reg) num_bytes,
+        options(nostack)
+    );
+
+    //llvm_asm!("neg $0
+               //vmovq xmm2, $0
+               //vbroadcastsd ymm1, xmm2
+               //mov $0, $3
+               //loop_body2_${:uid}:
+                 //vmovdqa ymm2, [$1 + $0 - 64]
+                 //vpmaskmovq [$2 + $0 - 64], ymm1, ymm2
+                 //vmovdqa ymm3, [$1 + $0 - 32]
+                 //vpmaskmovq [$2 + $0 - 32], ymm1, ymm3
+                 //sub $0, 64
+                 //jnz loop_body2_${:uid}"
+            //: "+&r"(temp)
+            //: "r"(src), "r"(dest), "rmi"(num_bytes)
+            //: "cc", "memory", "ymm1", "ymm2", "ymm3"
+            //: "volatile", "intel");
     // cc is because we are setting flags
     // memory is because we are dereferencing a bunch of pointers in asm
     // volatile is because the output variable "temp" is not the true output

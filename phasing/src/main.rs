@@ -1,15 +1,20 @@
-#![feature(llvm_asm)]
 #![allow(dead_code)]
-#![feature(destructuring_assignment)]
+//#![allow(unused)]
+#![allow(deprecated)]
 mod block;
 mod genotype_graph;
+mod genotypes;
 mod initialize;
+mod mcmc;
 mod neighbors_finding;
 mod oram;
 mod pbwt;
+mod ref_panel;
+mod sampling;
 mod union_filter;
 mod utils;
 mod viterbi;
+mod windows_split;
 
 #[cfg(feature = "leak-resist")]
 mod inner {
@@ -37,42 +42,17 @@ mod inner {
 
 use inner::*;
 
-use crate::genotype_graph::TransProbOption;
-use genotype_graph::GenotypeGraph;
-use ndarray::{Array1, Array2, Array3, ArrayView2};
+use crate::mcmc::*;
+use ndarray::Array1;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::str::FromStr;
-use std::time::Instant;
+
 const HOST_PORT: u16 = 1234;
 
-struct HmmParams {
-    pub eprob: Real,
-    pub rev_eprob: Real,
-    pub rprob: Real,
-    pub rev_rprob: Real,
-}
-
-impl HmmParams {
-    pub fn init(eprob: f32, rprob: f32) -> Self {
-        let rev_rprob = 1. - rprob;
-        let rev_eprob = 1. - eprob;
-        #[cfg(feature = "leak-resist")]
-        let (rprob, rev_rprob, eprob, rev_eprob) = (
-            Real::protect_f32(rprob),
-            Real::protect_f32(rev_rprob),
-            Real::protect_f32(eprob),
-            Real::protect_f32(rev_eprob),
-        );
-        Self {
-            eprob: eprob.into(),
-            rev_eprob: rev_eprob.into(),
-            rprob: rprob.into(),
-            rev_rprob: rev_rprob.into(),
-        }
-    }
-}
-
 fn main() {
+    let min_window_len_cm = 2.5;
+    let n_pos_window_overlap = 10;
+
     let (host_stream, _host_socket) = TcpListener::bind(SocketAddr::from((
         IpAddr::from_str("127.0.0.1").unwrap(),
         HOST_PORT,
@@ -83,334 +63,83 @@ fn main() {
 
     let mut host_stream = bufstream::BufStream::new(host_stream);
 
-    let ref_panel_meta: m3vcf::RefPanelMeta = bincode::deserialize_from(&mut host_stream).unwrap();
-    let ref_panel_blocks: Vec<m3vcf::Block> = bincode::deserialize_from(&mut host_stream).unwrap();
-    let t: Vec<i8> = bincode::deserialize_from(&mut host_stream).unwrap();
+    let ref_panel = {
+        let ref_panel_meta: m3vcf::RefPanelMeta =
+            bincode::deserialize_from(&mut host_stream).unwrap();
 
-    #[cfg(feature = "leak-resist")]
-    let t = t
-        .into_iter()
-        .map(|g| Genotype::protect(g))
-        .collect::<Vec<_>>();
+        let ref_panel_blocks: Vec<m3vcf::Block> =
+            bincode::deserialize_from(&mut host_stream).unwrap();
+        let sites_bitmask: Vec<bool> = bincode::deserialize_from(&mut host_stream).unwrap();
+        let cms: Vec<f32> = bincode::deserialize_from(&mut host_stream).unwrap();
+        ref_panel::RefPanel::new(ref_panel_meta, ref_panel_blocks, sites_bitmask, cms)
+    };
 
-    let t = Array1::<Genotype>::from_vec(t);
-    let missing_bitmask = vec![false; ref_panel_meta.n_markers];
+    let genotypes: Vec<i8> = bincode::deserialize_from(&mut host_stream).unwrap();
 
-    assert_eq!(ref_panel_meta.n_markers, t.len());
+    let genotypes_meta = {
+        genotypes::GenotypesMeta::new()
+    };
 
+    //#[cfg(feature = "leak-resist")]
+    //let genotypes = genotypes
+        //.into_iter()
+        //.map(|g| Genotype::protect(g))
+        //.collect::<Vec<_>>();
+
+    let genotypes = Array1::<Genotype>::from_vec(genotypes);
+
+    let windows =
+        windows_split::Windows::new(&ref_panel.cms, min_window_len_cm, n_pos_window_overlap);
+    // MCMC
     let s = 4;
     let capacity = 600;
     // hmm parameters
-    let ref_eprob = 0.01; // error
-    let ref_rprob = 0.05; // recombination
-    let hmm_params = HmmParams::init(ref_eprob, ref_rprob);
-
+    let eprob = 0.0001; // error
+    let n_eff = 15000; //effective size of the population
     let mut rng = rand::thread_rng();
+    //let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
 
-    let now = Instant::now();
-    let mut geno_graph = GenotypeGraph::build(t.view());
-    println!(
-        "Build genotype graph: {} ms",
-        (Instant::now() - now).as_millis()
+    let mut mcmc = mcmc::Mcmc::initialize(
+        &ref_panel,
+        &genotypes_meta,
+        genotypes.view(),
+        &windows,
+        eprob,
+        s,
+        capacity,
     );
 
-    println!("=== Initialization ===",);
-    let now = Instant::now();
-    let row_iter = block::RowIterator::from_blocks_iter(ref_panel_blocks.iter());
-    let mut phased = initialize::initialize(
-        row_iter,
-        t.view(),
-        &missing_bitmask,
-        ref_panel_meta.n_markers,
-        ref_panel_meta.n_haps,
-    );
+    mcmc.iteration(IterOption::Burnin, &mut rng);
+    let phased = mcmc.estimated_haps.to_owned();
 
-    {
-        #[cfg(feature = "leak-resist")]
-        let phased = Array2::from_shape_fn(phased.dim(), |(i, j)| phased[[i, j]].expose());
-        bincode::serialize_into(&mut host_stream, &phased).unwrap();
-    }
-
-    println!("Initialization: {} ms", (Instant::now() - now).as_millis());
-    println!("",);
-    println!("",);
-
-    for _ in 0..6 {
-        phased = burnin_iter(
-            phased.view(),
-            &geno_graph,
-            &ref_panel_meta,
-            &ref_panel_blocks,
-            s,
-            capacity,
-            &hmm_params,
-            &mut rng,
-        );
-
-        {
-            #[cfg(feature = "leak-resist")]
-            let phased = Array2::from_shape_fn(phased.dim(), |(i, j)| phased[[i, j]].expose());
-            bincode::serialize_into(&mut host_stream, &phased).unwrap();
-        }
-    }
-
-    //phased = pruning_iter(
-    //phased.view(),
-    //&mut geno_graph,
-    //&ref_panel_meta,
-    //&ref_panel_blocks,
-    //s,
-    //capacity,
-    //&hmm_params,
-    //&mut rng,
-    //);
-
-    //{
-    //#[cfg(feature = "leak-resist")]
-    //let phased = Array2::from_shape_fn(phased.dim(), |(i, j)| phased[[i, j]].expose());
-    //bincode::serialize_into(&mut host_stream, &phased).unwrap();
+    //for _ in 0..6 {
+        //mcmc.iteration(IterOption::Burnin, &mut rng);
     //}
 
-    return;
+    //for _ in 0..2 {
+        //mcmc.iteration(IterOption::Pruning, &mut rng);
+        //mcmc.iteration(IterOption::Burnin, &mut rng);
+    //}
 
-    let num_main_iter = 3;
-    let p = 1 << genotype_graph::HET_PER_BLOCK;
-    let mut tprob_agg = unsafe { Array3::uninit((ref_panel_meta.n_markers, p, p)).assume_init() };
-    for i in 0..num_main_iter {
-        let (estm, tprob) = main_iter(
-            phased.view(),
-            &geno_graph,
-            &ref_panel_meta,
-            &ref_panel_blocks,
-            s,
-            capacity,
-            &hmm_params,
-            &mut rng,
-        );
+    //let phased = mcmc.main_finalize(5, rng);
+    
+    bincode::serialize_into(&mut host_stream, &phased).unwrap();
+}
 
-        //println!("tprob: {:?}", tprob);
+fn analyze_graph(segment_start_markers: &[bool]) {
+    let mut lens = Vec::new();
+    let mut prev_len = 0;
 
-        // Add tprob to aggregator
-        if i == 0 {
-            tprob_agg = tprob;
-        } else {
-            tprob_agg += &tprob;
+    for (i, &b) in segment_start_markers.iter().enumerate() {
+        if b {
+            lens.push(i - prev_len);
+            prev_len = i;
         }
-        phased = estm;
-        //{
-        //#[cfg(feature = "leak-resist")]
-        //let phased = Array2::from_shape_fn(phased.dim(), |(i, j)| phased[[i, j]].expose());
-        //bincode::serialize_into(&mut host_stream, &phased).unwrap();
-        //}
     }
+    lens.push(segment_start_markers.len() - prev_len);
+    lens.sort();
 
-    let now = Instant::now();
-    let phase_ind = crate::viterbi::viterbi(tprob_agg.view());
-    println!("Viterbi: {} ms", (Instant::now() - now).as_millis());
-    phased = geno_graph.get_haps(phase_ind.view());
-    {
-        #[cfg(feature = "leak-resist")]
-        let phased = Array2::from_shape_fn(phased.dim(), |(i, j)| phased[[i, j]].expose());
-        bincode::serialize_into(&mut host_stream, &phased).unwrap();
-    }
-}
-
-fn burnin_iter(
-    estimated_haps: ArrayView2<Genotype>,
-    genotype_graph: &GenotypeGraph,
-    ref_panel_meta: &m3vcf::RefPanelMeta,
-    ref_panel_blocks: &[m3vcf::Block],
-    s: usize,
-    capacity: usize,
-    hmm_params: &HmmParams,
-    mut rng: impl rand::Rng,
-) -> Array2<Genotype> {
-    println!("=== Burn-in iteration ===",);
-    let now = Instant::now();
-    let filtered_ref_panel = update_ref_panel(
-        ref_panel_blocks,
-        estimated_haps,
-        ref_panel_meta.n_markers,
-        ref_panel_meta.n_haps,
-        s,
-        capacity,
-    );
-
-    let (phase_ind, _) = genotype_graph.forward_sampling(
-        filtered_ref_panel.view(),
-        hmm_params.rprob,
-        hmm_params.rev_rprob,
-        hmm_params.eprob,
-        hmm_params.rev_eprob,
-        &mut rng,
-        //TransProbOption::Burnin,
-        TransProbOption::Main,
-    );
-    let out = genotype_graph.get_haps(phase_ind.view());
-    println!(
-        "Burn-in iteration: {} ms",
-        (Instant::now() - now).as_millis()
-    );
-    println!("",);
-
-    out
-}
-
-fn pruning_iter(
-    estimated_haps: ArrayView2<Genotype>,
-    genotype_graph: &mut GenotypeGraph,
-    ref_panel_meta: &m3vcf::RefPanelMeta,
-    ref_panel_blocks: &[m3vcf::Block],
-    s: usize,
-    capacity: usize,
-    hmm_params: &HmmParams,
-    mut rng: impl rand::Rng,
-) -> Array2<Genotype> {
-    println!("=== Pruning iteration ===",);
-    let now = Instant::now();
-    let filtered_ref_panel = update_ref_panel(
-        &ref_panel_blocks,
-        estimated_haps,
-        ref_panel_meta.n_markers,
-        ref_panel_meta.n_haps,
-        s,
-        capacity,
-    );
-    let (phase_ind, tprob) = genotype_graph.forward_sampling(
-        filtered_ref_panel.view(),
-        hmm_params.rprob,
-        hmm_params.rev_rprob,
-        hmm_params.eprob,
-        hmm_params.rev_eprob,
-        &mut rng,
-        TransProbOption::Prune,
-    );
-
-    let out = genotype_graph.get_haps(phase_ind.view());
-    genotype_graph.prune(tprob.unwrap().view());
-    println!(
-        "Pruning iteration: {} ms",
-        (Instant::now() - now).as_millis()
-    );
-    println!("",);
-    out
-}
-
-fn main_iter(
-    estimated_haps: ArrayView2<Genotype>,
-    genotype_graph: &GenotypeGraph,
-    ref_panel_meta: &m3vcf::RefPanelMeta,
-    ref_panel_blocks: &[m3vcf::Block],
-    s: usize,
-    capacity: usize,
-    hmm_params: &HmmParams,
-    mut rng: impl rand::Rng,
-) -> (Array2<Genotype>, Array3<Real>) {
-    println!("=== Main iteration ===");
-    let now = Instant::now();
-    let filtered_ref_panel = update_ref_panel(
-        ref_panel_blocks,
-        estimated_haps,
-        ref_panel_meta.n_markers,
-        ref_panel_meta.n_haps,
-        s,
-        capacity,
-    );
-
-    let (phase_ind, tprob) = genotype_graph.forward_sampling(
-        filtered_ref_panel.view(),
-        hmm_params.rprob,
-        hmm_params.rev_rprob,
-        hmm_params.eprob,
-        hmm_params.rev_eprob,
-        &mut rng,
-        TransProbOption::Main,
-    );
-
-    let out = genotype_graph.get_haps(phase_ind.view());
-    println!("Main iteration: {} ms", (Instant::now() - now).as_millis());
-    println!("",);
-
-    (out, tprob.unwrap())
-}
-
-fn update_ref_panel(
-    blocks: &[m3vcf::Block],
-    t: ArrayView2<Genotype>,
-    npos: usize,
-    nhap: usize,
-    s: usize,
-    capacity: usize,
-) -> Array2<Genotype> {
-    const N: usize = 1000;
-
-    let row_iter = block::RowIterator::from_blocks_iter(blocks.iter());
-    let neighbors = neighbors_finding::find_neighbors(row_iter, t, npos, nhap, s);
-
-    #[cfg(feature = "leak-resist")]
-    let bitmap = {
-        let mut bitmap = union_filter::OblivBitmap::new(nhap, oram_sgx::LinearScanningORAMCreator);
-        for i in neighbors.into_iter().flatten().flatten() {
-            bitmap.set(i);
-        }
-
-        bitmap
-            .into_iter()
-            .map(|v| tp_value!(v, bool))
-            .collect::<Vec<_>>()
-    };
-
-    #[cfg(not(feature = "leak-resist"))]
-    let bitmap = {
-        let mut bitmap = vec![false; nhap];
-        for i in neighbors.into_iter().flatten().flatten() {
-            bitmap[i as usize] = true;
-        }
-        bitmap
-    };
-
-    //let mut filterd_ref_panel = Array2::<Genotype>::from_elem((npos, capacity), tp_value!(0, i8));
-    let mut filterd_ref_panel = Array2::<Genotype>::from_elem((0, 0), tp_value!(0, i8));
-    let mut cur_pos = 0;
-    for (f, block) in blocks.iter().enumerate() {
-        let nskip = if f == 0 { 0 } else { 1 };
-        let nvar = block.nvar - nskip;
-        let transposed = block::block_to_aligned_transposed::<N>(block, nhap);
-
-        #[cfg(feature = "leak-resist")]
-        let (filtered, n_filtered) =
-            oram_sgx::obliv_filter(&bitmap[..], &transposed, capacity as u32);
-
-        #[cfg(feature = "leak-resist")]
-        println!("n_filtered: {}", n_filtered.expose());
-
-        #[cfg(not(feature = "leak-resist"))]
-        let filtered = transposed
-            .into_iter()
-            .zip(bitmap.iter())
-            .filter(|(_, b)| **b)
-            .map(|(v, _)| v)
-            .take(capacity)
-            .collect::<Vec<_>>();
-
-        if filterd_ref_panel.ncols() != filtered.len() {
-            filterd_ref_panel =
-                Array2::<Genotype>::from_elem((npos, filtered.len()), tp_value!(0, i8));
-        }
-
-        // transpose
-        for (i, hap) in filtered.into_iter().enumerate() {
-            for (mut row, &geno) in filterd_ref_panel
-                .slice_mut(ndarray::s![cur_pos..(cur_pos + nvar), ..])
-                .rows_mut()
-                .into_iter()
-                .zip(hap.as_slice().iter().skip(nskip).take(nvar))
-            {
-                row[i] = tp_value!(geno, i8);
-            }
-        }
-        cur_pos += nvar;
-    }
-
-    filterd_ref_panel
+    let avg = lens.iter().sum::<usize>() as f64 / lens.len() as f64;
+    println!("agv: {}", avg);
+    println!("range: {} - {}", lens[0], lens.last().unwrap());
 }
