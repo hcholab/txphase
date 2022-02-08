@@ -2,14 +2,11 @@ use crate::block::RowIterator;
 use m3vcf::{Block, BlockView, RefPanelMeta};
 
 pub struct RefPanel {
-    pub meta: RefPanelMeta,
     pub blocks: Vec<Block>,
-    pub blocks_map: Vec<usize>,
+    pub n_haps: usize,
     pub sites_bitmask: Vec<bool>,
-    pub sites_pos: Vec<usize>,
-    pub cms: Vec<f32>,
-    pub recomb_probs: Vec<f64>,
-    pub rev_recomb_probs: Vec<f64>,
+    sites_pos: Vec<usize>,
+    blocks_map: Vec<usize>,
 }
 
 impl RefPanel {
@@ -17,7 +14,6 @@ impl RefPanel {
         meta: RefPanelMeta,
         blocks: Vec<Block>,
         sites_bitmask: Vec<bool>,
-        cms: Vec<f32>,
     ) -> Self {
         let blocks_map = gen_block_map(&blocks);
         let mut sites_pos = sites_bitmask
@@ -27,59 +23,33 @@ impl RefPanel {
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
         sites_pos.push(sites_bitmask.len());
-        let cms = cms
-            .into_iter()
-            .zip(sites_bitmask.iter())
-            .filter(|(_, b)| **b)
-            .map(|(cm, _)| cm)
-            .collect::<Vec<_>>();
-
-        let n_eff = 15000;
-        let (recomb_probs, rev_recomb_probs) = compute_all_recomb_probs(&cms, n_eff, meta.n_haps);
 
         Self {
-            meta,
             blocks,
-            blocks_map,
+            n_haps: meta.n_haps,
             sites_bitmask,
             sites_pos,
-            cms,
-            recomb_probs,
-            rev_recomb_probs,
+            blocks_map,
         }
     }
 
-    pub fn view<'a>(&'a self) -> RefPanelView<'a> {
-        RefPanelView {
+    pub fn as_slice<'a>(&'a self) -> RefPanelSlice<'a> {
+        RefPanelSlice{
             blocks: self.blocks.iter().map(|b| b.view()).collect(),
-            meta: self.meta.clone(),
+            n_haps: self.n_haps,
             sites_bitmask: self.sites_bitmask.as_slice(),
-            cms: self.cms.as_slice(),
-            recomb_probs: self.recomb_probs.as_slice(),
-            rev_recomb_probs: self.rev_recomb_probs.as_slice(),
         }
     }
 
-    pub fn sub_ref_panel<'a>(&'a self, start: usize, end: usize) -> RefPanelView<'a> {
-        let recomb_probs = &self.recomb_probs[start..end];
-        let rev_recomb_probs = &self.rev_recomb_probs[start..end];
-        let cms = &self.cms[start..end];
+    pub fn slice<'a>(&'a self, start: usize, end: usize) -> RefPanelSlice<'a> {
         let start = self.sites_pos[start];
         let end = self.sites_pos[end];
         let blocks = sub_blocks(&self.blocks, &self.blocks_map, start, end);
-        let meta = gen_ref_panel_meta(&blocks, self.meta.n_haps);
-        RefPanelView {
+        RefPanelSlice {
             blocks,
-            meta,
+            n_haps: self.n_haps,
             sites_bitmask: &self.sites_bitmask[start..end],
-            cms,
-            recomb_probs,
-            rev_recomb_probs,
         }
-    }
-
-    pub fn n_sites(&self) -> usize {
-        self.recomb_probs.len()
     }
 
     pub fn iter<'a>(
@@ -97,20 +67,13 @@ impl RefPanel {
     }
 }
 
-pub struct RefPanelView<'a> {
-    pub meta: RefPanelMeta,
+pub struct RefPanelSlice<'a> {
     pub blocks: Vec<BlockView<'a>>,
+    pub n_haps: usize,
     pub sites_bitmask: &'a [bool],
-    pub cms: &'a [f32],
-    pub recomb_probs: &'a [f64],
-    pub rev_recomb_probs: &'a [f64],
 }
 
-impl<'a> RefPanelView<'a> {
-    pub fn n_sites(&self) -> usize {
-        self.recomb_probs.len()
-    }
-
+impl<'a> RefPanelSlice<'a> {
     pub fn iter(
         &self,
     ) -> RowIterator<
@@ -134,14 +97,6 @@ fn gen_block_map(blocks: &[Block]) -> Vec<usize> {
         *v = s;
     }
     map
-}
-
-fn gen_ref_panel_meta(blocks: &[BlockView], n_haps: usize) -> RefPanelMeta {
-    RefPanelMeta {
-        n_haps,
-        n_blocks: blocks.len(),
-        n_markers: blocks.iter().map(|b| b.nvar).sum::<usize>() - blocks.len() + 1,
-    }
 }
 
 fn sub_blocks<'a>(
@@ -190,19 +145,3 @@ fn sub_blocks<'a>(
     blockviews
 }
 
-fn compute_all_recomb_probs(cms: &[f32], n_eff: usize, n_haps: usize) -> (Vec<f64>, Vec<f64>) {
-    let mut recomb_probs = Vec::with_capacity(cms.len());
-    let mut rev_recomb_probs = Vec::with_capacity(cms.len());
-    recomb_probs.push(0.);
-    rev_recomb_probs.push(1.);
-    for (prev, cur) in cms.iter().zip(cms.iter().skip(1)) {
-        let r = compute_recomb_prob((cur - prev) as f64, n_eff, n_haps);
-        recomb_probs.push(r);
-        rev_recomb_probs.push(1. - r);
-    }
-    (recomb_probs, rev_recomb_probs)
-}
-
-fn compute_recomb_prob(dist_cm: f64, n_eff: usize, n_haps: usize) -> f64 {
-    -1. * (-0.04 * n_eff as f64 * dist_cm / n_haps as f64).exp_m1()
-}

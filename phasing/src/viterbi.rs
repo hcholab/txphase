@@ -220,9 +220,8 @@ mod test {
             .collect::<Vec<_>>();
 
         #[cfg(feature = "leak-resist")]
-        let tprob = Array3::from_shape_fn((m, p, p), |(i, j, k)| {
-            Real::protect_f32(ref_tprob[i][j][k])
-        });
+        let tprob =
+            Array3::from_shape_fn((m, p, p), |(i, j, k)| Real::protect_f32(ref_tprob[i][j][k]));
 
         #[cfg(not(feature = "leak-resist"))]
         let tprob = Array3::<Real>::from_shape_fn((m, p, p), |(i, j, k)| ref_tprob[i][j][k]);

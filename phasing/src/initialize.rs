@@ -1,4 +1,3 @@
-use crate::genotypes::GenotypesMeta;
 use crate::neighbors_finding::{find_neighbors_single_marker, find_target_single_marker, Target};
 use crate::pbwt::{PBWTColumn, PBWT};
 use crate::ref_panel::RefPanel;
@@ -8,23 +7,15 @@ use ndarray::{Array2, ArrayView1};
 #[cfg(feature = "leak-resist")]
 use tp_fixedpoint::timing_shield::{TpEq, TpOrd};
 
-pub fn initialize(
-    ref_panel: &RefPanel,
-    _genotypes_meta: &GenotypesMeta,
-    genotypes: ArrayView1<Genotype>,
-) -> Array2<Genotype> {
-    let mut pbwt = PBWT::new(
-        ref_panel.iter(),
-        ref_panel.n_sites(),
-        ref_panel.meta.n_haps,
-    );
+pub fn initialize(ref_panel: &RefPanel, genotypes: ArrayView1<Genotype>) -> Array2<Genotype> {
+    let mut pbwt = PBWT::new(ref_panel.iter(), genotypes.len(), ref_panel.n_haps);
     let mut prev_col = pbwt.get_init_col().unwrap();
     let mut prev_target_0 = Target::default();
     let mut prev_target_1 = Target::default();
     let mut estm_haplotypes =
-        Array2::<Genotype>::from_elem((ref_panel.n_sites(), 2), tp_value!(-1, i8));
+        Array2::<Genotype>::from_elem((genotypes.len(), 2), tp_value!(-1, i8));
 
-    for i in 0..ref_panel.n_sites() {
+    for i in 0..genotypes.len() {
         let (cur_col, cur_n_zeros, hap_row) = pbwt.next().unwrap();
 
         //#[cfg(feature = "leak-resist")]

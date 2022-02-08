@@ -2,12 +2,16 @@ use crate::{tp_convert_to, tp_value, Real, UInt, U8};
 use ndarray::{s, Array1, Array2, ArrayView1, ArrayView3};
 use rand::Rng;
 
-pub fn forward_sampling(prev_ind: (u8, u8), tprobs: ArrayView3<Real>, mut rng: impl Rng) -> Array2<U8> {
+pub fn forward_sampling(
+    prev_ind: (u8, u8),
+    tprobs: ArrayView3<Real>,
+    mut rng: impl Rng,
+) -> Array2<U8> {
     let m = tprobs.shape()[0];
     let mut phase_ind = unsafe { Array2::<U8>::uninit((m, 2)).assume_init() };
 
     for i in 0..m {
-        let (prev_ind1, prev_ind2) = if i==0 {
+        let (prev_ind1, prev_ind2) = if i == 0 {
             (prev_ind.0, prev_ind.1)
         } else {
             (phase_ind[[i - 1, 0]], phase_ind[[i - 1, 1]])

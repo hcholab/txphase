@@ -68,48 +68,47 @@ impl<T: Clone> DynamicLSOram<T> {
     }
 
     //pub fn obliv_filter(&self, filter: &[TpBool], capacity: usize) -> (Vec<Vec<T>>, TpU32) {
-        //assert_eq!(filter.len(), self.inner.len());
-        ////let mut filtered = vec![Vec::new(); capacity];
-        //for (filter_chunk, data_chunk) in filter.chunks(capacity).zip(self.inner.chunks(capacity)) {
-        //}
-        //todo!()
+    //assert_eq!(filter.len(), self.inner.len());
+    ////let mut filtered = vec![Vec::new(); capacity];
+    //for (filter_chunk, data_chunk) in filter.chunks(capacity).zip(self.inner.chunks(capacity)) {
+    //}
+    //todo!()
     //}
 
     //fn to_obliv_items<T>(
-        //bitmap: &[TpBool],
-        //all_data: &[Vec<T>],
-        //true_start: TpU32,
-        //resize: usize,
+    //bitmap: &[TpBool],
+    //all_data: &[Vec<T>],
+    //true_start: TpU32,
+    //resize: usize,
     //) -> Vec<OblivFilterItem<T>> {
-        //assert_eq!(bitmap.len(), all_data.len());
-        //assert!(resize >= all_data.len());
-        //let nummap = if all_data.len() < resize {
-            //let mut bitmap = bitmap.to_vec();
-            //bitmap.resize(resize, TpBool::protect(false));
-            //assign_bitmap(&bitmap, true_start)
-        //} else {
-            //assign_bitmap(bitmap, true_start)
-        //};
-        //let blank;
-        //let data_iter: Box<dyn Iterator<Item = &Vec<T>>> = if all_data.len() < resize {
-            //blank = Vec::with_capacity(0);
-            //Box::new(all_data.iter().chain(std::iter::repeat(&blank)))
-        //} else {
-            //Box::new(all_data.iter())
-        //};
-        //nummap
-            //.into_iter()
-            //.zip(data_iter)
-            //.map(|(num, data)| OblivFilterItem {
-                //num,
-                //data: Box::new(data.clone()),
-            //})
-        //.collect()
+    //assert_eq!(bitmap.len(), all_data.len());
+    //assert!(resize >= all_data.len());
+    //let nummap = if all_data.len() < resize {
+    //let mut bitmap = bitmap.to_vec();
+    //bitmap.resize(resize, TpBool::protect(false));
+    //assign_bitmap(&bitmap, true_start)
+    //} else {
+    //assign_bitmap(bitmap, true_start)
+    //};
+    //let blank;
+    //let data_iter: Box<dyn Iterator<Item = &Vec<T>>> = if all_data.len() < resize {
+    //blank = Vec::with_capacity(0);
+    //Box::new(all_data.iter().chain(std::iter::repeat(&blank)))
+    //} else {
+    //Box::new(all_data.iter())
+    //};
+    //nummap
+    //.into_iter()
+    //.zip(data_iter)
+    //.map(|(num, data)| OblivFilterItem {
+    //num,
+    //data: Box::new(data.clone()),
+    //})
+    //.collect()
     //}
 }
 
 use timing_shield::{TpCondSwap, TpOrd, TpU8};
-
 
 fn assign_bitmap(bitmap: &[TpBool], true_start: TpU32) -> Vec<TpU8> {
     let zero = TpU8::protect(0);

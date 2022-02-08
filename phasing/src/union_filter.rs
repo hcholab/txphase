@@ -86,7 +86,7 @@ fn gen_sets(n_samples: usize, n_markers: usize, s: usize) -> Vec<Vec<usize>> {
 }
 
 const N_BYTES: usize = 4096;
-const N_MARKERS: usize = N_BYTES * 8; 
+const N_MARKERS: usize = N_BYTES * 8;
 
 fn gen_haplotypes(n_samples: usize) -> Vec<A64Bytes<N_BYTES>> {
     use rand::RngCore;
@@ -105,7 +105,7 @@ pub fn union_filter() {
     let capacity = 10000;
     let s = 4;
 
-    let n_markers = N_MARKERS ;
+    let n_markers = N_MARKERS;
     let sets = gen_sets(n_samples, n_markers, s);
 
     let now = Instant::now();
@@ -136,7 +136,10 @@ pub fn union_filter() {
     let now = Instant::now();
     let (_selected_haplotypes, len) = obliv_filter(&bitmap, &haplotypes, capacity);
     let filter_ms = (Instant::now() - now).as_millis();
-    println!("Filter haplotypes with filter capacity of {} haplotypes: {} ms", capacity, filter_ms);
+    println!(
+        "Filter haplotypes with filter capacity of {} haplotypes: {} ms",
+        capacity, filter_ms
+    );
     println!("# of selected haplotyps: {}", len.expose());
 }
 

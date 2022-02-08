@@ -1,6 +1,7 @@
+use crate::hmm::HmmParamsSlice;
 use crate::{tp_value, Bool, Genotype, Real, UInt, U8};
 use ndarray::{
-    s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut1, ArrayViewMut2, 
+    s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut1, ArrayViewMut2,
     Zip,
 };
 use rand::Rng;
@@ -58,8 +59,8 @@ use inner::*;
 
 //#[cfg(feature = "leak-resist")]
 //pub struct GenotypeGraph {
-    //pub graph: Vec<SmallLSOram<Genotype>>,
-    //pub block_head: Array1<Bool>,
+//pub graph: Vec<SmallLSOram<Genotype>>,
+//pub block_head: Array1<Bool>,
 //}
 
 //#[cfg(not(feature = "leak-resist"))]
@@ -74,18 +75,15 @@ pub struct GenotypeGraphViewMut<'a> {
 }
 
 impl<'a> GenotypeGraphViewMut<'a> {
-    pub fn forward_pass(
+    pub fn forward_backward(
         &self,
         x: ArrayView2<Genotype>,
-        rprobs: ArrayView1<Real>,
-        rev_rprobs: ArrayView1<Real>,
-        eprob: Real,
-        rev_eprob: Real,
+        hmm_params: &HmmParamsSlice,
     ) -> Array3<Real> {
         let m = x.nrows();
         let n = x.ncols();
 
-        let bprob = self.backward_pass(x, rprobs, rev_rprobs, eprob, rev_eprob);
+        let bprob = self.backward(x, hmm_params);
 
         // p x p matrix at each pos i for transition between i-1 and i
         // Save belief over the first block in tprob[0][0]
@@ -105,7 +103,7 @@ impl<'a> GenotypeGraphViewMut<'a> {
         for h1 in 0..P {
             for h2 in 0..n {
                 fprob[[h1, h2]] =
-                    emission_prob(x[[0, h2]], self.graph[[0, h1 as usize]], eprob, rev_eprob);
+                    emission_prob(x[[0, h2]], self.graph[[0, h1 as usize]], hmm_params.eprob);
             }
         }
 
@@ -123,8 +121,7 @@ impl<'a> GenotypeGraphViewMut<'a> {
                         fprob[[j, h2]],
                         fsum,
                         uniform_frac.into(),
-                        rprobs[i],
-                        rev_rprobs[i],
+                        hmm_params.rprobs[i],
                     );
                 }
             }
@@ -199,7 +196,7 @@ impl<'a> GenotypeGraphViewMut<'a> {
             for h1 in 0..P {
                 for h2 in 0..n {
                     fprob_next[[h1, h2]] *=
-                        emission_prob(x[[i, h2]], self.graph[[i, h1 as usize]], eprob, rev_eprob);
+                        emission_prob(x[[i, h2]], self.graph[[i, h1 as usize]], hmm_params.eprob);
                 }
             }
 
@@ -214,14 +211,7 @@ impl<'a> GenotypeGraphViewMut<'a> {
         tprob
     }
 
-    fn backward_pass(
-        &self,
-        x: ArrayView2<Genotype>,
-        rprobs: ArrayView1<Real>,
-        rev_rprobs: ArrayView1<Real>,
-        eprob: Real,
-        rev_eprob: Real,
-    ) -> Array3<Real> {
+    fn backward(&self, x: ArrayView2<Genotype>, hmm_params: &HmmParamsSlice) -> Array3<Real> {
         let m = x.nrows();
         let n = x.ncols();
 
@@ -239,7 +229,7 @@ impl<'a> GenotypeGraphViewMut<'a> {
                 .and(&row)
                 .for_each(|mut a, &b| {
                     Zip::from(&mut a).and(x.row(m - 1)).for_each(|c, &d| {
-                        *c = emission_prob(d, b, eprob, rev_eprob);
+                        *c = emission_prob(d, b, hmm_params.eprob);
                     });
                 });
             // renormalize
@@ -265,7 +255,7 @@ impl<'a> GenotypeGraphViewMut<'a> {
                 .for_each(|mut a, b| {
                     let sum: Real = b.iter().sum();
                     Zip::from(&mut a).and(&b).for_each(|c, &d| {
-                        *c = transition_prob(d, sum, uniform_frac.into(), rprobs[i], rev_rprobs[i]);
+                        *c = transition_prob(d, sum, uniform_frac.into(), hmm_params.rprobs[i]);
                     });
                 });
 
@@ -303,7 +293,7 @@ impl<'a> GenotypeGraphViewMut<'a> {
                 .and(&row)
                 .for_each(|mut a, &b| {
                     Zip::from(&mut a).and(x.row(i)).for_each(|c, &d| {
-                        *c *= emission_prob(d, b, eprob, rev_eprob);
+                        *c *= emission_prob(d, b, hmm_params.eprob);
                     });
                 });
 
@@ -420,10 +410,7 @@ impl GenotypeGraph {
 
         block_head[0] = tp_value!(false, bool);
 
-        Self {
-            graph,
-            block_head,
-        }
+        Self { graph, block_head }
     }
 
     pub fn subview_mut<'a>(&'a mut self, start: usize, end: usize) -> GenotypeGraphViewMut<'a> {
@@ -603,7 +590,6 @@ impl GenotypeGraph {
     }
 
     pub fn get_haps(&self, phase_ind: ArrayView2<U8>) -> Array2<Genotype> {
-
         //#[cfg(feature = "leak-resist")]
         //let m = phase_ind.nrows();
 
@@ -616,7 +602,7 @@ impl GenotypeGraph {
             for hap in 0..2 {
                 //#[cfg(feature = "leak-resist")]
                 //{
-                    //phased[[hap, i]] = self.graph[i].obliv_read(phase_ind[[hap, i]].as_u32());
+                //phased[[hap, i]] = self.graph[i].obliv_read(phase_ind[[hap, i]].as_u32());
                 //}
 
                 //#[cfg(not(feature = "leak-resist"))]
@@ -815,20 +801,19 @@ fn weighted_sample(weights: ArrayView1<Real>, mut rng: impl Rng) -> UInt {
 fn emission_prob(
     x_geno: Genotype,
     t_geno: Genotype,
-    error_prob: Real,
-    rev_error_prob: Real,
+    error_prob: (Real, Real), // (e, 1-e)
 ) -> Real {
     #[cfg(feature = "leak-resist")]
     {
-        x_geno.tp_eq(&t_geno).select(rev_error_prob, error_prob)
+        x_geno.tp_eq(&t_geno).select(error_prob.1, error_prob.0)
     }
 
     #[cfg(not(feature = "leak-resist"))]
     {
         if x_geno == t_geno {
-            rev_error_prob
+            error_prob.1
         } else {
-            error_prob
+            error_prob.0
         }
     }
 }
@@ -838,10 +823,9 @@ fn transition_prob(
     prev_prob: Real,
     total_prob: Real,
     uniform_frac: Real,
-    recomb_prob: Real,
-    rev_recomb_prob: Real,
+    recomb_prob: (Real, Real), // (r, 1-r)
 ) -> Real {
-    prev_prob * rev_recomb_prob + total_prob * recomb_prob * uniform_frac
+    prev_prob * recomb_prob.1 + total_prob * recomb_prob.0 * uniform_frac
 }
 
 fn inner_prod(v1: ArrayView1<Real>, v2: ArrayView1<Real>) -> Real {

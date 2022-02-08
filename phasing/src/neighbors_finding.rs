@@ -1,35 +1,34 @@
 use crate::pbwt::{PBWTColumn, PBWT};
 use crate::{tp_value, Genotype, UInt};
-use ndarray::{Array1, ArrayView1, ArrayView2};
+use ndarray::{Array1, ArrayView1};
 
 #[cfg(feature = "leak-resist")]
 use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpOrd};
 
 pub fn find_neighbors(
-    x: impl Iterator<Item = Array1<i8>>,
-    t: ArrayView2<Genotype>,
-    npos: usize,
-    nhap: usize,
+    ref_panel: impl Iterator<Item = Array1<i8>>,
+    mut estimated_haps: impl Iterator<Item = Array1<Genotype>>,
+    n_pos: usize,
+    n_haps_ref: usize,
+    n_haps_target: usize,
     s: usize,
-) -> Vec<Vec<Vec<UInt>>> {
-    let m = npos;
-    let n_targets = t.ncols();
-
-    let mut pbwt = PBWT::new(x, npos, nhap);
+) -> Vec<bool> {
+    let mut pbwt = PBWT::new(ref_panel, n_pos, n_haps_ref);
     let mut prev_col = pbwt.get_init_col().unwrap();
 
-    let mut prev_target = vec![Target::default(); n_targets];
+    let mut prev_target = vec![Target::default(); n_haps_target];
 
-    let mut neighbors: Vec<Vec<Vec<UInt>>> = vec![Vec::with_capacity(m); n_targets];
+    let mut neighbors_bitmap = vec![false; n_haps_ref];
 
-    for i in 0..m {
+    for i in 0..n_pos {
         let (cur_col, cur_n_zeros, hap_row) = pbwt.next().unwrap();
+        let cur_haps = estimated_haps.next().unwrap();
 
-        for j in 0..n_targets {
+        for j in 0..n_haps_target {
             let cur_target = find_target_single_marker(
                 hap_row.view(),
                 cur_n_zeros as u32,
-                t[[i, j]],
+                cur_haps[j],
                 i as u32,
                 &prev_target[j],
                 &prev_col,
@@ -38,14 +37,16 @@ pub fn find_neighbors(
             let (new_neighbors, _) =
                 find_neighbors_single_marker(i as u32, s, &cur_target, &cur_col, &prev_col, false);
 
+            for i in new_neighbors {
+                neighbors_bitmap[i as usize] = true;
+            }
+
             prev_target[j] = cur_target;
-            neighbors[j].push(new_neighbors);
         }
 
         prev_col = cur_col;
     }
-
-    neighbors
+    neighbors_bitmap
 }
 
 #[derive(Clone)]
