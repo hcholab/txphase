@@ -283,7 +283,7 @@ fn select_ref_panel(
     pbwt_filter_bitmask: &[bool],
     s: usize,
 ) -> Array2<Genotype> {
-    const N: usize = 1000;
+    //const N: usize = 1000;
     let n_pbwt_pos = pbwt_filter_bitmask.iter().filter(|b| **b).count();
     let neighbors_bitmap = neighbors_finding::find_neighbors(
         ref_panel
@@ -317,78 +317,7 @@ fn select_ref_panel(
     //.collect::<Vec<_>>()
     //};
 
-    //#[cfg(not(feature = "leak-resist"))]
-    //let bitmap = {
-    //let mut bitmap = vec![false; nhap];
-    //for i in neighbors.into_iter() {
-    //bitmap[i as usize] = true;
-    //}
-    //bitmap
-    //};
-
     println!("k = {}", neighbors_bitmap.iter().filter(|&&b| b).count());
+    ref_panel.filter(&neighbors_bitmap)
 
-    let mut filtered_ref_panel = Array2::<Genotype>::from_elem((0, 0), tp_value!(0, i8));
-    let mut cur_pos = 0;
-    for block in ref_panel.blocks.iter() {
-        //let nskip = if f == 0 { 0 } else { 1 };
-        let nvar = block.n_sites();
-        let transposed =
-            crate::ref_panel::block_to_aligned_transposed::<N>(&block, ref_panel.n_haps);
-
-        //#[cfg(feature = "leak-resist")]
-        //let (filtered, n_filtered) =
-        //oram_sgx::obliv_filter(&[..], &transposed, capacity as u32);
-
-        //#[cfg(feature = "leak-resist")]
-        //println!("n_filtered: {}", n_filtered.expose());
-
-        //#[cfg(not(feature = "leak-resist"))]
-        let filtered = transposed
-            .into_iter()
-            .zip(neighbors_bitmap.iter())
-            .filter(|(_, b)| **b)
-            .map(|(v, _)| v)
-            //.take(capacity)
-            .collect::<Vec<_>>();
-
-        if filtered_ref_panel.ncols() != filtered.len() {
-            filtered_ref_panel = Array2::<Genotype>::from_elem(
-                (ref_panel.n_sites, filtered.len()),
-                tp_value!(0, i8),
-            );
-        }
-
-        // transpose
-        for (i, hap) in filtered.into_iter().enumerate() {
-            for (mut row, &geno) in filtered_ref_panel
-                .slice_mut(s![cur_pos..(cur_pos + nvar), ..])
-                .rows_mut()
-                .into_iter()
-                .zip(hap.as_slice().iter())
-            {
-                row[i] = tp_value!(geno, i8);
-            }
-        }
-        cur_pos += nvar;
-    }
-    filtered_ref_panel
-    //let mut out = Array2::<Genotype>::from_elem(
-    //(estimated_haps.nrows(), filtered_ref_panel.ncols()),
-    //tp_value!(0, i8),
-    //);
-
-    //let mut i = 0;
-    //for (row, b) in filtered_ref_panel
-    //.rows()
-    //.into_iter()
-    //.zip(ref_panel.sites_bitmask.iter())
-    //{
-    //if *b {
-    //out.slice_mut(s![i, ..]).assign(&row);
-    //i += 1;
-    //}
-    //}
-
-    //out
 }

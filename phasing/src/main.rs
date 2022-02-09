@@ -54,7 +54,7 @@ fn main() {
     //let min_window_len_cm = 2.5;
     let min_window_len_cm = 8.0;
     let pbwt_modulo = 0.02;
-    let n_pos_window_overlap = 20;
+    let n_pos_window_overlap = 10;
     let s = 4;
 
     let (host_stream, _host_socket) = TcpListener::bind(SocketAddr::from((
@@ -107,7 +107,7 @@ fn main() {
 
     let mut mcmc = mcmc::Mcmc::initialize(&mcmc_params, genotypes.view());
 
-    for _ in 0..6 {
+    for _ in 0..7 {
         mcmc.iteration(IterOption::Burnin, &mut rng);
     }
 

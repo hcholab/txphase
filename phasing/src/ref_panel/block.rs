@@ -1,6 +1,7 @@
 //use crate::oram::DynamicLSOram;
+use crate::Genotype;
 use bitvec::prelude::{BitSlice, Lsb0};
-use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, Zip};
+use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, Zip, ArrayViewMut2};
 use oram_sgx::align::A64Bytes;
 
 pub struct Block {
@@ -30,6 +31,26 @@ impl Block {
             haplotypes: self.haplotypes.slice(s![start..end, ..]),
         }
     }
+
+    pub fn transpose(&self) -> TransposedBlock {
+        let ncols = (self.n_sites() + 7) / 8;
+        let mut transposed_haplotypes =
+            unsafe { Array2::<u8>::uninit((self.n_unique(), ncols)).assume_init() };
+        Zip::indexed(self.haplotypes.rows()).for_each(|i, s| {
+            let s = BitSlice::<Lsb0, u8>::from_slice(s.as_slice().unwrap()).unwrap();
+            for (b, mut hap) in s.iter().zip(transposed_haplotypes.rows_mut().into_iter()) {
+                let hap =
+                    BitSlice::<Lsb0, u8>::from_slice_mut(hap.as_slice_mut().unwrap()).unwrap();
+                hap.set(i, *b);
+            }
+        });
+
+        TransposedBlock {
+            index_map: self.index_map.clone(),
+            haplotypes: transposed_haplotypes,
+            n_sites: self.n_sites(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -45,6 +66,67 @@ impl<'a> BlockSlice<'a> {
 
     pub fn n_unique(&self) -> usize {
         self.index_map.len()
+    }
+}
+
+pub struct TransposedBlock {
+    index_map: Array1<u16>,
+    haplotypes: Array2<u8>,
+    n_sites: usize,
+}
+
+impl TransposedBlock {
+    pub fn slice(&self, start: usize, end: usize) -> TransposedBlockSlice {
+        TransposedBlockSlice {
+            index_map: self.index_map.view(),
+            haplotypes: self.haplotypes.view(),
+            n_sites: end - start, 
+            range: Some((start, end)),
+        }
+    }
+
+    pub fn as_slice(&self) -> TransposedBlockSlice {
+        TransposedBlockSlice {
+            index_map: self.index_map.view(),
+            haplotypes: self.haplotypes.view(),
+            n_sites: self.n_sites,
+            range: None,
+        }
+    }
+}
+
+pub struct TransposedBlockSlice<'a> {
+    index_map: ArrayView1<'a, u16>,
+    haplotypes: ArrayView2<'a, u8>,
+    n_sites: usize,
+    range: Option<(usize, usize)>,
+}
+
+impl<'a> TransposedBlockSlice<'a> {
+    pub fn filter(&self, bitmask: &[bool], mut output: ArrayViewMut2<Genotype>) {
+        //assert_eq!(output.ncols(), bitmask.);
+        assert_eq!(output.nrows(), self.n_sites);
+        let mut hap_count = 0;
+        for (i, b) in bitmask.iter().enumerate() {
+            if *b {
+                let hap_i = self.index_map[i] as usize;
+                let tmp = self.haplotypes.row(hap_i);
+                let hap = BitSlice::<Lsb0, u8>::from_slice(tmp.as_slice().unwrap()).unwrap();
+                let hap = if let Some(&(start, end)) = self.range.as_ref() {
+                    &hap[start..end]
+                } else {
+                    &hap[..self.n_sites]
+                };
+                for (mut p, b) in output.rows_mut().into_iter().zip(hap.iter()) {
+                    p[hap_count] = *b as i8;
+                }
+                hap_count += 1;
+            }
+        }
+    }
+
+    pub fn n_sites(&self) -> usize {
+        self.n_sites
     }
 }
 
