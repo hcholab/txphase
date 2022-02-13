@@ -1,5 +1,5 @@
 use crate::genotype_graph::GenotypeGraph;
-use crate::hmm::{HmmParams, HmmParamsSlice};
+use crate::hmm::{forward_backward, HmmParams, HmmParamsSlice};
 use crate::neighbors_finding;
 use crate::ref_panel::{RefPanel, RefPanelSlice};
 use crate::sampling;
@@ -141,7 +141,7 @@ impl<'a> Mcmc<'a> {
         let mut prev_ind = (0, 0);
         for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
             let estimated_haps_w = self.estimated_haps.slice(s![start_w..end_w, ..]).to_owned();
-            let genotype_graph_w = self.genotype_graph.subview_mut(start_w, end_w);
+            let genotype_graph_w = self.genotype_graph.slice(start_w, end_w);
             let params_w = self.params.slice(start_w, end_w);
             let pbwt_filter_bitmask_w = &pbwt_filter_bitmask[start_w..end_w];
             let selected_ref_panel = select_ref_panel(
@@ -151,8 +151,11 @@ impl<'a> Mcmc<'a> {
                 self.params.s,
             );
 
-            let mut tprobs_window =
-                genotype_graph_w.forward_backward(selected_ref_panel.view(), &params_w.hmm_params);
+            let mut tprobs_window = forward_backward(
+                selected_ref_panel.view(),
+                genotype_graph_w.graph.view(),
+                &params_w.hmm_params,
+            );
 
             let mut tprobs_window_slice =
                 tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
@@ -192,8 +195,8 @@ impl<'a> Mcmc<'a> {
             );
         }
 
-        let estimated_haps = self.genotype_graph.get_haps(self.phased_ind.view());
-        self.estimated_haps = estimated_haps;
+        self.genotype_graph
+            .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
 
         if iter_option == IterOption::Pruning {
             self.genotype_graph.prune(self.tprobs.view());
@@ -213,7 +216,9 @@ impl<'a> Mcmc<'a> {
         }
 
         self.phased_ind = crate::viterbi::viterbi(self.tprobs.view());
-        self.genotype_graph.get_haps(self.phased_ind.view())
+        self.genotype_graph
+            .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
+        self.estimated_haps
     }
 
     fn overlap(&self) -> Vec<((usize, usize), (usize, usize))> {
@@ -225,10 +230,10 @@ impl<'a> Mcmc<'a> {
 
             let mut end_write_boundary = None;
             for i in 0..overlap_len {
-                if split_point + i >= self.genotype_graph.block_head.len() {
+                if split_point + i >= self.genotype_graph.graph.len() {
                     break;
                 }
-                if self.genotype_graph.block_head[split_point + i] {
+                if self.genotype_graph.graph[split_point + i].is_segment_marker() {
                     end_write_boundary = Some(split_point + i);
                     break;
                 }
@@ -313,6 +318,6 @@ fn select_ref_panel(
     //.collect::<Vec<_>>()
     //};
 
-    println!("k = {}", neighbors_bitmap.iter().filter(|&&b| b).count());
+    //println!("k = {}", neighbors_bitmap.iter().filter(|&&b| b).count());
     ref_panel.filter(&neighbors_bitmap)
 }

@@ -52,7 +52,7 @@ fn main() {
     let min_window_len_cm = 8.0;
     //let min_window_len_cm = 80.0;
     let pbwt_modulo = 0.02;
-    let n_pos_window_overlap = 5;
+    let n_pos_window_overlap = 10;
     let s = 4;
 
     let (host_stream, _host_socket) = TcpListener::bind(SocketAddr::from((
