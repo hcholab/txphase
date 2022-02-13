@@ -1,11 +1,9 @@
 use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::{HmmParams, HmmParamsSlice};
 use crate::neighbors_finding;
-//use crate::ref_panel::{RefPanel, RefPanelSlice};
 use crate::ref_panel::{RefPanel, RefPanelSlice};
 use crate::sampling;
-use crate::windows_split::Windows;
-use crate::{tp_value, Genotype, Real};
+use crate::{Genotype, Real};
 use rand::Rng;
 
 use ndarray::{s, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut3, Zip};
@@ -24,7 +22,7 @@ pub enum IterOption {
 pub struct McmcSharedParams {
     ref_panel: RefPanel,
     hmm_params: HmmParams,
-    windows: Windows,
+    windows: Vec<(usize, usize)>,
     overlap_region_len: usize,
     pbwt_groups: Vec<Vec<usize>>,
     s: usize,
@@ -40,7 +38,7 @@ impl McmcSharedParams {
         s: usize,
     ) -> Self {
         let hmm_params = HmmParams::new(&cms, ref_panel.n_haps);
-        let windows = Windows::new(&cms, min_window_len_cm);
+        let windows = crate::windows_split::split(&cms, min_window_len_cm);
         let pbwt_groups = Self::pbwt_groups(&cms, pbwt_modulo);
         println!("#pbwt_positions = {}", pbwt_groups.len());
         Self {
@@ -105,6 +103,7 @@ pub struct McmcSharedParamsSlice<'a> {
 
 pub struct Mcmc<'a> {
     pub params: &'a McmcSharedParams,
+    pub cur_overlap_region_len: usize,
     pub genotype_graph: GenotypeGraph,
     pub estimated_haps: Array2<Genotype>,
     phased_ind: Array2<u8>,
@@ -122,9 +121,9 @@ impl<'a> Mcmc<'a> {
         let genotype_graph = GenotypeGraph::build(genotypes);
         println!("Initialization: {} ms", (Instant::now() - now).as_millis());
         println!("",);
-        println!("",);
         Self {
             params,
+            cur_overlap_region_len: params.overlap_region_len,
             genotype_graph,
             estimated_haps,
             phased_ind,
@@ -136,29 +135,11 @@ impl<'a> Mcmc<'a> {
         println!("=== {:?} Iteration ===", iter_option);
         let now = Instant::now();
 
-        let overlap = self.params.overlap_region_len;
-
         let pbwt_filter_bitmask = self.params.randomize_pbwt_bitmask(&mut rng);
+        let windows = self.overlap();
 
         let mut prev_ind = (0, 0);
-        for (i, &(start_w, end_w)) in self.params.windows.boundaries.iter().enumerate() {
-            //let (start_overlap, end_overlap) = if i == 0 {
-            //(start_w, end_w + overlap)
-            //} else if i == self.params.windows.boundaries.len() - 1 {
-            //(start_w, end_w)
-            //} else {
-            //(start_w - overlap, end_w + overlap)
-            //};
-
-            // expand by overlap region len
-            let (start_w, end_w) = if i == 0 {
-                (start_w, end_w + overlap)
-            } else if i == self.params.windows.boundaries.len() - 1 {
-                (start_w, end_w)
-            } else {
-                (start_w, end_w + overlap)
-            };
-
+        for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
             let estimated_haps_w = self.estimated_haps.slice(s![start_w..end_w, ..]).to_owned();
             let genotype_graph_w = self.genotype_graph.subview_mut(start_w, end_w);
             let params_w = self.params.slice(start_w, end_w);
@@ -173,60 +154,42 @@ impl<'a> Mcmc<'a> {
             let mut tprobs_window =
                 genotype_graph_w.forward_backward(selected_ref_panel.view(), &params_w.hmm_params);
 
+            let mut tprobs_window_slice =
+                tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
+
             if iter_option == IterOption::Pruning {
                 //save
-                if i == 0 {
-                    let mut tmp = self.tprobs.slice_mut(s![..end_w, .., ..]);
-                    tmp.assign(&tprobs_window.view());
-                } else {
-                    let mut tmp = self.tprobs.slice_mut(s![start_w + overlap..end_w, .., ..]);
-                    tmp.assign(&tprobs_window.slice(s![overlap.., .., ..]));
-                }
+                let mut tmp = self
+                    .tprobs
+                    .slice_mut(s![start_write_w..end_write_w, .., ..]);
+                tmp.assign(&tprobs_window_slice);
             }
 
             // renormalize
-            renormalize_pos_row(tprobs_window.view_mut());
+            renormalize_pos_row(tprobs_window_slice.view_mut());
 
             if let IterOption::Main(first_main) = iter_option {
-                //add
-                if i == 0 {
-                    let mut tmp = self.tprobs.slice_mut(s![..end_w, .., ..]);
-                    if first_main {
-                        tmp.assign(&tprobs_window);
-                    } else {
-                        tmp += &tprobs_window.view();
-                    }
+                let mut tmp = self
+                    .tprobs
+                    .slice_mut(s![start_write_w..end_write_w, .., ..]);
+                if first_main {
+                    tmp.assign(&tprobs_window_slice);
                 } else {
-                    let mut tmp = self.tprobs.slice_mut(s![start_w + overlap..end_w, .., ..]);
-                    if first_main {
-                        tmp.assign(&tprobs_window.slice(s![overlap.., .., ..]));
-                    } else {
-                        tmp += &tprobs_window.slice(s![overlap.., .., ..]);
-                    }
+                    tmp += &tprobs_window_slice
                 }
             }
 
             // sample
-            if i == 0 {
-                let phased_ind_window =
-                    sampling::forward_sampling(prev_ind, tprobs_window.view(), &mut rng);
-                let mut tmp = self.phased_ind.slice_mut(s![..end_w, ..]);
-                tmp.assign(&phased_ind_window);
-                prev_ind = (
-                    phased_ind_window[[phased_ind_window.nrows() - 1, 0]],
-                    phased_ind_window[[phased_ind_window.nrows() - 1, 1]],
-                );
-            } else {
-                let tprobs_window = tprobs_window.slice(s![overlap.., .., ..]);
-                let phased_ind_window =
-                    sampling::forward_sampling(prev_ind, tprobs_window, &mut rng);
-                let mut tmp = self.phased_ind.slice_mut(s![start_w + overlap..end_w, ..]);
-                tmp.assign(&phased_ind_window);
-                prev_ind = (
-                    phased_ind_window[[phased_ind_window.nrows() - 1, 0]],
-                    phased_ind_window[[phased_ind_window.nrows() - 1, 1]],
-                );
-            }
+            let phased_ind_window =
+                sampling::forward_sampling(prev_ind, tprobs_window_slice.view(), &mut rng);
+            let mut tmp = self
+                .phased_ind
+                .slice_mut(s![start_write_w..end_write_w, ..]);
+            tmp.assign(&phased_ind_window);
+            prev_ind = (
+                phased_ind_window[[phased_ind_window.nrows() - 1, 0]],
+                phased_ind_window[[phased_ind_window.nrows() - 1, 1]],
+            );
         }
 
         let estimated_haps = self.genotype_graph.get_haps(self.phased_ind.view());
@@ -234,6 +197,7 @@ impl<'a> Mcmc<'a> {
 
         if iter_option == IterOption::Pruning {
             self.genotype_graph.prune(self.tprobs.view());
+            self.cur_overlap_region_len *= 2;
         }
 
         println!("Iteration: {} ms", (Instant::now() - now).as_millis());
@@ -252,17 +216,49 @@ impl<'a> Mcmc<'a> {
         self.genotype_graph.get_haps(self.phased_ind.view())
     }
 
-    //pub fn overlap_boundary(
-    //start_w: usize,
-    //end_w: usize,
-    //overlap_region_len: usize,
-    //is_first: bool,
-    //is_last: bool,
-    //segment_start_bitmask: &[bool],
-    //) -> (usize, usize, bool) {
+    fn overlap(&self) -> Vec<((usize, usize), (usize, usize))> {
+        let overlap_len = self.cur_overlap_region_len;
+        let mut hmm_windows = Vec::with_capacity(self.params.windows.len());
+        let mut prev_end_write_boundary = 0;
+        for (i, window) in self.params.windows.iter().enumerate() {
+            let split_point = window.1;
 
-    //todo!()
-    //}
+            let mut end_write_boundary = None;
+            for i in 0..overlap_len {
+                if split_point + i >= self.genotype_graph.block_head.len() {
+                    break;
+                }
+                if self.genotype_graph.block_head[split_point + i] {
+                    end_write_boundary = Some(split_point + i);
+                    break;
+                }
+            }
+            let end_write_boundary = match end_write_boundary {
+                Some(e) => e,
+                None => split_point + overlap_len,
+            };
+
+            let v = if i == 0 {
+                (
+                    (window.0, window.1 + overlap_len),
+                    (window.0, end_write_boundary),
+                )
+            } else if i == self.params.windows.len() - 1 {
+                (
+                    (window.0 - overlap_len, window.1),
+                    (prev_end_write_boundary, window.1),
+                )
+            } else {
+                (
+                    (window.0 - overlap_len, window.1 + overlap_len),
+                    (prev_end_write_boundary, end_write_boundary),
+                )
+            };
+            hmm_windows.push(v);
+            prev_end_write_boundary = end_write_boundary;
+        }
+        hmm_windows
+    }
 }
 
 #[inline]
@@ -319,5 +315,4 @@ fn select_ref_panel(
 
     println!("k = {}", neighbors_bitmap.iter().filter(|&&b| b).count());
     ref_panel.filter(&neighbors_bitmap)
-
 }

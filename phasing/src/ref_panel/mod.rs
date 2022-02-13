@@ -135,7 +135,7 @@ impl<'a> RefPanelSlice<'a> {
         let mut ref_panel =
             unsafe { Array2::<Genotype>::uninit((self.n_sites, n_haps)).assume_init() };
         let mut pos = 0;
-        for (i, block) in self.transposed_blocks.iter().enumerate() {
+        for block in self.transposed_blocks.iter() {
             block.filter(
                 bitmask,
                 ref_panel.slice_mut(s![pos..pos + block.n_sites(), ..]),

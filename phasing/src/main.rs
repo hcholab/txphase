@@ -1,9 +1,5 @@
 #![allow(dead_code)]
-//#![allow(unused)]
-//#![allow(deprecated)]
-//mod block;
 mod genotype_graph;
-//mod genotypes;
 mod hmm;
 mod initialize;
 mod mcmc;
@@ -15,6 +11,7 @@ mod sampling;
 mod union_filter;
 mod utils;
 mod viterbi;
+mod genotypes;
 mod windows_split;
 
 #[cfg(feature = "leak-resist")]
@@ -53,8 +50,9 @@ const HOST_PORT: u16 = 1234;
 fn main() {
     //let min_window_len_cm = 2.5;
     let min_window_len_cm = 8.0;
+    //let min_window_len_cm = 80.0;
     let pbwt_modulo = 0.02;
-    let n_pos_window_overlap = 10;
+    let n_pos_window_overlap = 5;
     let s = 4;
 
     let (host_stream, _host_socket) = TcpListener::bind(SocketAddr::from((
@@ -71,7 +69,7 @@ fn main() {
     let ref_panel_blocks: Vec<m3vcf::Block> = bincode::deserialize_from(&mut host_stream).unwrap();
     let sites_bitmask: Vec<bool> = bincode::deserialize_from(&mut host_stream).unwrap();
 
-    let (ref_panel_new, afreqs) =
+    let (ref_panel_new, _afreqs) =
         ref_panel::m3vcf_scan(&ref_panel_meta, &ref_panel_blocks, &sites_bitmask);
 
     let cms = {
@@ -102,8 +100,9 @@ fn main() {
 
     let genotypes = Array1::<Genotype>::from_vec(genotypes);
 
-    let mut rng = rand::thread_rng();
-    //let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
+    //let mut rng = rand::thread_rng();
+    use rand::SeedableRng;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
 
     let mut mcmc = mcmc::Mcmc::initialize(&mcmc_params, genotypes.view());
 
@@ -117,9 +116,6 @@ fn main() {
     }
 
     let phased = mcmc.main_finalize(5, rng);
-
-    //mcmc.iteration(IterOption::Burnin, &mut rng);
-    //let phased = mcmc.estimated_haps.to_owned();
 
     bincode::serialize_into(&mut host_stream, &phased).unwrap();
 }

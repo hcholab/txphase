@@ -104,7 +104,6 @@ pub struct TransposedBlockSlice<'a> {
 
 impl<'a> TransposedBlockSlice<'a> {
     pub fn filter(&self, bitmask: &[bool], mut output: ArrayViewMut2<Genotype>) {
-        //assert_eq!(output.ncols(), bitmask.);
         assert_eq!(output.nrows(), self.n_sites);
         let mut hap_count = 0;
         for (i, b) in bitmask.iter().enumerate() {
