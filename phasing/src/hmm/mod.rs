@@ -46,7 +46,7 @@ pub fn forward_backward(
     for i in 1..m {
         transition(
             genograph[i - 1].is_segment_marker(),
-            hmm_params.rprobs[i],
+            hmm_params.get_forward_rprobs(i),
             uniform_frac.into(),
             cur_fprobs.view_mut(),
             prev_fprobs.view(),
@@ -104,7 +104,7 @@ fn backward(
 
         transition(
             genograph[i + 1].is_segment_marker(),
-            hmm_params.rprobs[i],
+            hmm_params.get_backward_rprobs(i),
             uniform_frac.into(),
             cur_bprob.view_mut(),
             prev_bprob.view(),

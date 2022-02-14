@@ -186,7 +186,7 @@ pub fn m3vcf_block_scan(
     block: &m3vcf::Block,
     filter: &[bool],
     is_first_block: bool,
-    afreqs: &mut Vec<f32>,
+    afreqs: &mut Vec<f64>,
 ) -> Option<Block> {
     let n_filtered_sites = filter.iter().filter(|b| **b).count();
 
@@ -208,7 +208,7 @@ pub fn m3vcf_block_scan(
         .filter_map(|((row, afreq), &b)| if b { Some((row, afreq)) } else { None });
 
     for (mut row, (ref_row, &afreq)) in filtered_haps.rows_mut().into_iter().zip(ref_haps_iter) {
-        afreqs.push(afreq);
+        afreqs.push(afreq.into());
         row.assign(&ref_row);
     }
 

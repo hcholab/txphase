@@ -1,46 +1,67 @@
+use crate::variants::Variant;
 use crate::Real;
 
-const EPROB: f32 = 0.0001;
+const EPROB: f64 = 0.0001;
 const N_EFF: usize = 15000;
 
 pub struct HmmParams {
-    pub eprob: (Real, Real),       // (e, 1 - e)
-    pub rprobs: Vec<(Real, Real)>, //(r, 1 - r)
+    pub eprob: (Real, Real),           // (e, 1 - e)
+    forward_rprobs: Vec<(Real, Real)>, //(r, 1 - r)
 }
 
 impl HmmParams {
-    pub fn new(cms: &[f32], n_haps_ref: usize) -> Self {
+    pub fn new(variants: &[Variant], n_haps_ref: usize) -> Self {
         let eprob = (EPROB, 1. - EPROB);
 
         #[cfg(feature = "leak-resist")]
         let eprob = (Real::protect_f32(eprob), Real::protect_f32(rev_eprob));
 
-        let rprobs = compute_all_recomb_probs(&cms, N_EFF, n_haps_ref);
+        let forward_rprobs = compute_all_recomb_probs(&variants, N_EFF, n_haps_ref);
 
         Self {
             eprob: (eprob.0.into(), eprob.1.into()),
-            rprobs,
+            forward_rprobs,
         }
+    }
+
+    pub fn n_rprobs(&self) -> usize {
+        self.forward_rprobs.len()
     }
 
     pub fn slice<'a>(&'a self, start: usize, end: usize) -> HmmParamsSlice<'a> {
         HmmParamsSlice {
             eprob: self.eprob,
-            rprobs: &self.rprobs[start..end],
+            forward_rprobs: &self.forward_rprobs[start..end],
+            backward_prob_last: self.forward_rprobs[end % self.forward_rprobs.len()],
         }
     }
 }
 
 pub struct HmmParamsSlice<'a> {
     pub eprob: (Real, Real),
-    pub rprobs: &'a [(Real, Real)],
+    forward_rprobs: &'a [(Real, Real)],
+    backward_prob_last: (Real, Real),
 }
 
-fn compute_all_recomb_probs(cms: &[f32], n_eff: usize, n_haps: usize) -> Vec<(f64, f64)> {
-    let mut recomb_probs = Vec::with_capacity(cms.len());
+impl<'a> HmmParamsSlice<'a> {
+    pub fn get_forward_rprobs(&self, i: usize) -> (Real, Real) {
+        self.forward_rprobs[i]
+    }
+
+    pub fn get_backward_rprobs(&self, i: usize) -> (Real, Real) {
+        if i == self.forward_rprobs.len() - 1 {
+            self.backward_prob_last
+        } else {
+            self.forward_rprobs[i + 1]
+        }
+    }
+}
+
+fn compute_all_recomb_probs(variants: &[Variant], n_eff: usize, n_haps: usize) -> Vec<(f64, f64)> {
+    let mut recomb_probs = Vec::with_capacity(variants.len());
     recomb_probs.push((0., 1.));
-    for (prev, cur) in cms.iter().zip(cms.iter().skip(1)) {
-        let r = compute_recomb_prob((cur - prev) as f64, n_eff, n_haps);
+    for (prev, cur) in variants.iter().zip(variants.iter().skip(1)) {
+        let r = compute_recomb_prob((cur.cm - prev.cm) as f64, n_eff, n_haps);
         recomb_probs.push((r, 1. - r));
     }
     recomb_probs

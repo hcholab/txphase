@@ -8,7 +8,7 @@ pub fn m3vcf_scan(
     meta: &m3vcf::RefPanelMeta,
     m3vcf_blocks: &[m3vcf::Block],
     sites_bitmask: &[bool],
-) -> (RefPanel, Vec<f32>) {
+) -> (RefPanel, Vec<f64>) {
     assert_eq!(sites_bitmask.len(), meta.n_markers);
     let mut afreqs = Vec::new();
     let mut pos = 0;

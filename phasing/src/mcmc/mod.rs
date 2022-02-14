@@ -1,7 +1,10 @@
+mod params;
+pub use params::*;
+
 use crate::genotype_graph::GenotypeGraph;
-use crate::hmm::{forward_backward, HmmParams, HmmParamsSlice};
+use crate::hmm::forward_backward;
 use crate::neighbors_finding;
-use crate::ref_panel::{RefPanel, RefPanelSlice};
+use crate::ref_panel::RefPanelSlice;
 use crate::sampling;
 use crate::{Genotype, Real};
 use rand::Rng;
@@ -17,88 +20,6 @@ pub enum IterOption {
     Burnin,
     Pruning,
     Main(bool), // First main iteration?
-}
-
-pub struct McmcSharedParams {
-    ref_panel: RefPanel,
-    hmm_params: HmmParams,
-    windows: Vec<(usize, usize)>,
-    overlap_region_len: usize,
-    pbwt_groups: Vec<Vec<usize>>,
-    s: usize,
-}
-
-impl McmcSharedParams {
-    pub fn new(
-        ref_panel: RefPanel,
-        cms: Vec<f32>,
-        min_window_len_cm: f32,
-        overlap_region_len: usize,
-        pbwt_modulo: f32,
-        s: usize,
-    ) -> Self {
-        let hmm_params = HmmParams::new(&cms, ref_panel.n_haps);
-        let windows = crate::windows_split::split(&cms, min_window_len_cm);
-        let pbwt_groups = Self::pbwt_groups(&cms, pbwt_modulo);
-        println!("#pbwt_positions = {}", pbwt_groups.len());
-        Self {
-            ref_panel,
-            hmm_params,
-            windows,
-            overlap_region_len,
-            pbwt_groups,
-            s,
-        }
-    }
-
-    pub fn slice<'a>(&'a self, start: usize, end: usize) -> McmcSharedParamsSlice<'a> {
-        McmcSharedParamsSlice {
-            ref_panel: self.ref_panel.slice(start, end),
-            hmm_params: self.hmm_params.slice(start, end),
-        }
-    }
-
-    pub fn n_sites(&self) -> usize {
-        self.hmm_params.rprobs.len()
-    }
-
-    pub fn randomize_pbwt_bitmask(&self, mut rng: impl Rng) -> Vec<bool> {
-        use rand::prelude::SliceRandom;
-        let mut pbwt_filter_bitmask = vec![false; self.n_sites()];
-        for group in &self.pbwt_groups {
-            let i = group.choose(&mut rng).unwrap();
-            pbwt_filter_bitmask[*i] = true;
-        }
-        pbwt_filter_bitmask
-    }
-
-    fn pbwt_groups(cms: &[f32], pbwt_modulo: f32) -> Vec<Vec<usize>> {
-        let mut start_cm = cms[0];
-        let mut end_cm = start_cm + pbwt_modulo;
-        let mut pbwt_groups = Vec::new();
-
-        let mut cur_group = Vec::new();
-        for (i, &cm) in cms.iter().enumerate() {
-            if cm >= start_cm && cm < end_cm {
-                cur_group.push(i);
-            } else {
-                if !cur_group.is_empty() {
-                    pbwt_groups.push(cur_group);
-                    cur_group = Vec::new();
-                }
-                while cm >= end_cm {
-                    start_cm += pbwt_modulo;
-                    end_cm += pbwt_modulo;
-                }
-            }
-        }
-        pbwt_groups
-    }
-}
-
-pub struct McmcSharedParamsSlice<'a> {
-    pub ref_panel: RefPanelSlice<'a>,
-    pub hmm_params: HmmParamsSlice<'a>,
 }
 
 pub struct Mcmc<'a> {
@@ -169,7 +90,7 @@ impl<'a> Mcmc<'a> {
             }
 
             // renormalize
-            renormalize_pos_row(tprobs_window_slice.view_mut());
+            renormalize(tprobs_window_slice.view_mut());
 
             if let IterOption::Main(first_main) = iter_option {
                 let mut tmp = self
@@ -267,15 +188,10 @@ impl<'a> Mcmc<'a> {
 }
 
 #[inline]
-fn renormalize_pos_row(mut v: ArrayViewMut3<Real>) {
+fn renormalize(mut v: ArrayViewMut3<Real>) {
     Zip::from(v.outer_iter_mut()).for_each(|mut v_pos| {
         Zip::from(v_pos.outer_iter_mut()).for_each(|mut v_row| v_row /= v_row.sum())
     });
-}
-
-#[inline]
-fn renormalize_pos(mut v: ArrayViewMut3<Real>) {
-    Zip::from(v.outer_iter_mut()).for_each(|mut v_pos| v_pos /= v_pos.sum());
 }
 
 fn select_ref_panel(
@@ -284,7 +200,6 @@ fn select_ref_panel(
     pbwt_filter_bitmask: &[bool],
     s: usize,
 ) -> Array2<Genotype> {
-    //const N: usize = 1000;
     let n_pbwt_pos = pbwt_filter_bitmask.iter().filter(|b| **b).count();
     let neighbors_bitmap = neighbors_finding::find_neighbors(
         ref_panel
@@ -318,6 +233,6 @@ fn select_ref_panel(
     //.collect::<Vec<_>>()
     //};
 
-    //println!("k = {}", neighbors_bitmap.iter().filter(|&&b| b).count());
+    println!("k = {}", neighbors_bitmap.iter().filter(|&&b| b).count());
     ref_panel.filter(&neighbors_bitmap)
 }

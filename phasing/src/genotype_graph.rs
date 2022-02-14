@@ -1,6 +1,5 @@
 use crate::{tp_value, Genotype, Real, U8};
 use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut2, Zip};
-use std::time::Instant;
 
 pub const HET_PER_SEGMENT: usize = 3;
 pub const P: usize = 1 << HET_PER_SEGMENT;
@@ -74,18 +73,22 @@ impl G {
 
     #[inline]
     pub fn set_row(&mut self, i: usize, genotype: i8) {
-        if genotype == 1 {
-            self.0 |= 1 << i;
-        } else if genotype == 0 {
-            self.0 &= !(1 << i);
-        } else {
-            panic!("Invalid genotype");
-        }
+        match genotype {
+            0 => self.0 &= !(1 << i),
+            1 => self.0 |= 1 << i,
+            _ => panic!("Invalid genotype"),
+        };
     }
 
     #[inline]
     pub fn is_segment_marker(self) -> bool {
         self.0 == 0b01010101
+    }
+}
+
+impl Default for G {
+    fn default() -> Self {
+        Self(0)
     }
 }
 
@@ -95,27 +98,28 @@ pub struct GenotypeGraph {
 }
 
 impl GenotypeGraph {
-    pub fn build(t: ArrayView1<Genotype>) -> Self {
-        let m = t.len();
+    pub fn build(genotypes: ArrayView1<Genotype>) -> Self {
+        let m = genotypes.len();
 
-        let mut graph = unsafe { Array1::<G>::uninit(m).assume_init() };
+        let mut graph = Vec::with_capacity(m);
 
         let mut cur_het_count = tp_value!(HET_PER_SEGMENT - 1, u32);
 
-        for i in 0..m {
-            if t[i] == 1 {
+        for &g in genotypes {
+            if g == 1 {
                 cur_het_count += 1;
                 if cur_het_count == HET_PER_SEGMENT as u32 {
                     cur_het_count = 0;
-                } else {
                 }
-                graph[i] = G::new_het(cur_het_count);
+                graph.push(G::new_het(cur_het_count))
             } else {
-                graph[i] = G::new_hom(t[i]);
+                graph.push(G::new_hom(g));
             }
         }
 
-        Self { graph }
+        Self {
+            graph: Array1::from_vec(graph),
+        }
     }
 
     pub fn slice<'a>(&'a mut self, start: usize, end: usize) -> GenotypeGraphSlice<'a> {
@@ -126,7 +130,6 @@ impl GenotypeGraph {
 
     // TODO: limit merges to maximum of MAX_AMBIGUOUS het sites within a block
     pub fn prune(&mut self, tprob: ArrayView3<Real>) {
-        let now = Instant::now();
         const MCMC_PRUNE_PROB_THRES: f32 = 0.999; // "mcmc-prune" parameter in ShapeIt4
         const MAX_AMBIGUOUS: usize = 22; // "MAX_AMB" constant in ShapeIt4 (utils/otools.h)
 
@@ -200,7 +203,8 @@ impl GenotypeGraph {
         }
 
         // Forward pass to update the graph and block_head
-        let mut new_geno = unsafe { Array1::<Genotype>::uninit(P).assume_init() };
+        //let mut new_geno = unsafe { Array1::<Genotype>::uninit(P).assume_init() };
+        let mut new_geno = G::default();
         let mut ind1 = unsafe { Array1::<U8>::uninit(P).assume_init() };
         let mut ind2 = unsafe { Array1::<U8>::uninit(P).assume_init() };
         let mut ind = unsafe { Array1::<U8>::uninit(P).assume_init() };
@@ -277,11 +281,10 @@ impl GenotypeGraph {
                 }
 
                 for j in 0..P {
-                    new_geno[j] = self.graph[i].get_row(ind[j] as usize);
+                    new_geno.set_row(j, self.graph[i].get_row(ind[j] as usize));
                 }
-                for j in 0..P {
-                    self.graph[i].set_row(j, new_geno[j]);
-                }
+
+                self.graph[i] = new_geno;
 
                 //// Erase block_head flag between the two blocks being merged
                 //if self.block_head[i] && block_counter == 1 {
@@ -289,17 +292,9 @@ impl GenotypeGraph {
                 //}
             }
         }
-        println!(
-            "Genotype graph pruning: {} ms",
-            (Instant::now() - now).as_millis()
-        );
     }
 
-    pub fn traverse_graph_pair(
-        &self,
-        ind: ArrayView2<u8>,
-        mut haps: ArrayViewMut2<Genotype>,
-    ) {
+    pub fn traverse_graph_pair(&self, ind: ArrayView2<u8>, mut haps: ArrayViewMut2<Genotype>) {
         Zip::from(haps.rows_mut())
             .and(ind.rows())
             .and(&self.graph)
@@ -390,7 +385,6 @@ fn select_top_k(tab: ArrayView2<Real>, k: usize) -> (Array1<U8>, Array1<U8>, Rea
     }
     (ind1, ind2, sum)
 }
-
 
 #[cfg(test)]
 mod test {
