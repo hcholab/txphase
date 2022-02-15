@@ -1,7 +1,6 @@
 use crate::hmm::{HmmParams, HmmParamsSlice};
 use crate::ref_panel::{RefPanel, RefPanelSlice};
 use crate::variants::{build_variants, Variant};
-use crate::windows_split::split;
 use ndarray::{s, Array1, ArrayView1};
 use rand::Rng;
 
@@ -11,7 +10,8 @@ pub struct McmcSharedParams {
     pub ref_panel: RefPanel,
     pub variants: Array1<Variant>,
     pub hmm_params: HmmParams,
-    pub windows: Vec<(usize, usize)>,
+    //pub windows: Vec<(usize, usize)>,
+    pub min_window_len_cm: f64,
     pub overlap_region_len: usize,
     pub pbwt_groups: Vec<Vec<usize>>,
     pub s: usize,
@@ -30,14 +30,15 @@ impl McmcSharedParams {
         let variants = build_variants(&cms, &afreqs, ref_panel.n_haps);
         println!("#rare = {}", variants.iter().filter(|v| v.rarity().is_rare()).count());
         let hmm_params = HmmParams::new(&variants, ref_panel.n_haps);
-        let windows = split(&variants, min_window_len_cm);
+        //let windows = split(&variants, min_window_len_cm);
         let pbwt_groups = Self::pbwt_groups(&variants, pbwt_modulo);
         println!("#pbwt_groups = {}", pbwt_groups.len());
         Self {
             ref_panel,
             variants: Array1::from_vec(variants),
+            min_window_len_cm,
             hmm_params,
-            windows,
+            //windows,
             overlap_region_len,
             pbwt_groups,
             s,

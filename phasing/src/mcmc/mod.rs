@@ -4,6 +4,7 @@ mod sampling;
 mod viterbi;
 pub use params::*;
 
+use crate::windows_split::split;
 use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::forward_backward;
 use crate::neighbors_finding;
@@ -67,7 +68,7 @@ impl<'a> Mcmc<'a> {
         let now = Instant::now();
 
         let pbwt_filter_bitmask = self.params.randomize_pbwt_bitmask(&mut rng);
-        let windows = self.overlap();
+        let windows = self.windows(&mut rng);
 
         let mut prev_ind = (0, 0);
         for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
@@ -155,11 +156,12 @@ impl<'a> Mcmc<'a> {
         self.estimated_haps
     }
 
-    fn overlap(&self) -> Vec<((usize, usize), (usize, usize))> {
+    fn windows(&self, mut rng: impl Rng) -> Vec<((usize, usize), (usize, usize))> {
+        let windows = split(self.params.variants.view(), self.params.min_window_len_cm, &mut rng);
         let overlap_len = self.cur_overlap_region_len;
-        let mut hmm_windows = Vec::with_capacity(self.params.windows.len());
+        let mut hmm_windows = Vec::with_capacity(windows.len());
         let mut prev_end_write_boundary = 0;
-        for (i, window) in self.params.windows.iter().enumerate() {
+        for (i, window) in windows.iter().enumerate() {
             let split_point = window.1;
 
             let mut end_write_boundary = None;
@@ -182,7 +184,7 @@ impl<'a> Mcmc<'a> {
                     (window.0, window.1 + overlap_len),
                     (window.0, end_write_boundary),
                 )
-            } else if i == self.params.windows.len() - 1 {
+            } else if i == windows.len() - 1 {
                 (
                     (window.0 - overlap_len, window.1),
                     (prev_end_write_boundary, window.1),
