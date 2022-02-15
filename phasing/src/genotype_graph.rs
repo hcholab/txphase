@@ -84,6 +84,15 @@ impl G {
     pub fn is_segment_marker(self) -> bool {
         self.0 == 0b01010101
     }
+
+    #[inline]
+    pub fn get_genotype(self) -> Genotype {
+        match self.0 {
+            0b0000000 => 0,
+            0b1111111 => 2,
+            _ => 1,
+        }
+    }
 }
 
 impl Default for G {

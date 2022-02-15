@@ -7,6 +7,7 @@ const N_EFF: usize = 15000;
 pub struct HmmParams {
     pub eprob: (Real, Real),           // (e, 1 - e)
     forward_rprobs: Vec<(Real, Real)>, //(r, 1 - r)
+    n_haps_ref: usize,
 }
 
 impl HmmParams {
@@ -21,11 +22,8 @@ impl HmmParams {
         Self {
             eprob: (eprob.0.into(), eprob.1.into()),
             forward_rprobs,
+            n_haps_ref,
         }
-    }
-
-    pub fn n_rprobs(&self) -> usize {
-        self.forward_rprobs.len()
     }
 
     pub fn slice<'a>(&'a self, start: usize, end: usize) -> HmmParamsSlice<'a> {
@@ -33,6 +31,7 @@ impl HmmParams {
             eprob: self.eprob,
             forward_rprobs: &self.forward_rprobs[start..end],
             backward_prob_last: self.forward_rprobs[end % self.forward_rprobs.len()],
+            n_haps_ref: self.n_haps_ref,
         }
     }
 }
@@ -41,6 +40,7 @@ pub struct HmmParamsSlice<'a> {
     pub eprob: (Real, Real),
     forward_rprobs: &'a [(Real, Real)],
     backward_prob_last: (Real, Real),
+    n_haps_ref: usize,
 }
 
 impl<'a> HmmParamsSlice<'a> {
@@ -54,6 +54,11 @@ impl<'a> HmmParamsSlice<'a> {
         } else {
             self.forward_rprobs[i + 1]
         }
+    }
+
+    pub fn get_rprobs_from_cm_dist(&self, dist_cm: Real) -> (Real, Real) {
+        let r = compute_recomb_prob(dist_cm, N_EFF, self.n_haps_ref);
+        (r, 1. - r)
     }
 }
 

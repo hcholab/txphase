@@ -1,16 +1,14 @@
+#![feature(int_log)]
 #![allow(dead_code)]
 mod genotype_graph;
 mod hmm;
-mod initialize;
 mod mcmc;
 mod neighbors_finding;
 mod oram;
 mod pbwt;
 mod ref_panel;
-mod sampling;
 mod union_filter;
 mod utils;
-mod viterbi;
 mod windows_split;
 mod variants;
 
@@ -79,6 +77,7 @@ fn main() {
             .map(|(cm, _)| cm)
             .collect::<Vec<_>>()
     };
+    println!("#sites = {}", cms.len());
 
     let mcmc_params = mcmc::McmcSharedParams::new(
         ref_panel_new,
@@ -100,13 +99,13 @@ fn main() {
 
     let genotypes = Array1::<Genotype>::from_vec(genotypes);
 
-    //let mut rng = rand::thread_rng();
-    use rand::SeedableRng;
-    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
+    let mut rng = rand::thread_rng();
+    //use rand::SeedableRng;
+    //let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
 
     let mut mcmc = mcmc::Mcmc::initialize(&mcmc_params, genotypes.view());
 
-    for _ in 0..7 {
+    for _ in 0..6 {
         mcmc.iteration(IterOption::Burnin, &mut rng);
     }
 
@@ -116,6 +115,8 @@ fn main() {
     }
 
     let phased = mcmc.main_finalize(5, rng);
+
+
 
     bincode::serialize_into(&mut host_stream, &phased).unwrap();
 }

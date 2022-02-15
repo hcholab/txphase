@@ -235,7 +235,7 @@ fn score_single(
     #[cfg(not(feature = "leak-resist"))]
     {
         for (&k, &d) in neighbors.iter().zip(divs.iter()) {
-            s += (x_row[k as usize] as i32 * 2 - 1) * d as i32;
+            s += (x_row[k as usize] as i32 * 2 - 1) * (d as f64).log2() as i32;
         }
     }
     (s, cur_target)

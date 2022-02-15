@@ -2,6 +2,7 @@ mod params;
 pub use params::*;
 
 use crate::genotype_graph::{G, P};
+use crate::variants::Variant;
 use crate::{Genotype, Real};
 
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
@@ -10,11 +11,13 @@ pub fn forward_backward(
     ref_panel: ArrayView2<Genotype>,
     genograph: ArrayView1<G>,
     hmm_params: &HmmParamsSlice,
+    variants: ArrayView1<Variant>,
+    ignored_sites: ArrayView1<bool>,
 ) -> Array3<Real> {
     let m = ref_panel.nrows();
     let n = ref_panel.ncols();
 
-    let bprobs = backward(ref_panel, genograph, hmm_params);
+    let bprobs = backward(ref_panel, genograph, hmm_params, variants, ignored_sites);
 
     let mut tprobs = unsafe { Array3::<Real>::uninit((m, P, P)).assume_init() };
 
@@ -43,33 +46,52 @@ pub fn forward_backward(
     #[cfg(feature = "leak-resist")]
     let uniform_frac = Real::protect_f32(uniform_frac);
 
+    let mut last_cm_dist = None; 
+
     for i in 1..m {
-        transition(
-            genograph[i - 1].is_segment_marker(),
-            hmm_params.get_forward_rprobs(i),
-            uniform_frac.into(),
-            cur_fprobs.view_mut(),
-            prev_fprobs.view(),
-        );
+        if !ignored_sites[i] {
+            let rprobs = if let Some(last_cm_dist) = last_cm_dist {
+                let cm_dist = variants[i].cm - last_cm_dist;
+                hmm_params.get_rprobs_from_cm_dist(cm_dist)
+            } else {
+                hmm_params.get_forward_rprobs(i)
+            };
+            last_cm_dist = None;
 
-        // Combine fprob (from i-1) and bprob[i] to get transition probs
-        combine(
-            cur_fprobs.view(),
-            bprobs.slice(s![i, .., ..]),
-            genograph[i].is_segment_marker(),
-            tprobs.slice_mut(s![i, .., ..]),
-        );
+            transition(
+                genograph[i - 1].is_segment_marker(),
+                rprobs,
+                uniform_frac.into(),
+                cur_fprobs.view_mut(),
+                prev_fprobs.view(),
+            );
 
-        // Add emission at i (with the sampled haplotypes) to fprob_next
-        emission(
-            ref_panel.slice(s![i, ..]),
-            genograph[i],
-            hmm_params,
-            cur_fprobs.view_mut(),
-        );
+            // Combine fprob (from i-1) and bprob[i] to get transition probs
+            if genograph[i].is_segment_marker() {
+                combine(
+                    cur_fprobs.view(),
+                    bprobs.slice(s![i, .., ..]),
+                    tprobs.slice_mut(s![i, .., ..]),
+                );
+            } else {
+                combine_non_transition(tprobs.slice_mut(s![i, .., ..]));
+            }
 
-        // Update fprob
-        prev_fprobs.assign(&cur_fprobs);
+            // Add emission at i (with the sampled haplotypes) to fprob_next
+            emission(
+                ref_panel.slice(s![i, ..]),
+                genograph[i],
+                hmm_params,
+                cur_fprobs.view_mut(),
+            );
+            // Update fprob
+            prev_fprobs.assign(&cur_fprobs);
+        } else {
+            combine_non_transition(tprobs.slice_mut(s![i, .., ..]));
+            if last_cm_dist.is_none() {
+                last_cm_dist = Some(variants[i - 1].cm);
+            }
+        }
     }
 
     tprobs
@@ -79,6 +101,8 @@ fn backward(
     ref_panel: ArrayView2<Genotype>,
     genograph: ArrayView1<G>,
     hmm_params: &HmmParamsSlice,
+    variants: ArrayView1<Variant>,
+    ignored_sites: ArrayView1<bool>,
 ) -> Array3<Real> {
     let m = ref_panel.nrows();
     let n = ref_panel.ncols();
@@ -98,24 +122,36 @@ fn backward(
     #[cfg(feature = "leak-resist")]
     let uniform_frac = Real::protect_f32(uniform_frac);
 
+    let mut last_cm_dist = None; 
+
     for i in (0..m - 1).rev() {
         let (mut cur_bprob, prev_bprob) =
             bprobs.multi_slice_mut((s![i, .., ..], s![i + 1, .., ..]));
 
-        transition(
-            genograph[i + 1].is_segment_marker(),
-            hmm_params.get_backward_rprobs(i),
-            uniform_frac.into(),
-            cur_bprob.view_mut(),
-            prev_bprob.view(),
-        );
+        if !ignored_sites[i] {
+            let rprobs = if let Some(last_cm_dist) = last_cm_dist {
+                let cm_dist = last_cm_dist - variants[i].cm;
+                hmm_params.get_rprobs_from_cm_dist(cm_dist)
+            } else {
+                hmm_params.get_backward_rprobs(i)
+            };
+            last_cm_dist = None;
 
-        emission(
-            ref_panel.row(i),
-            genograph[i],
-            hmm_params,
-            bprobs.slice_mut(s![i, .., ..]),
-        );
+            transition(
+                genograph[i + 1].is_segment_marker(),
+                rprobs,
+                uniform_frac.into(),
+                cur_bprob.view_mut(),
+                prev_bprob.view(),
+            );
+
+            emission(ref_panel.row(i), genograph[i], hmm_params, cur_bprob);
+        } else {
+            cur_bprob.assign(&prev_bprob);
+            if last_cm_dist.is_none() {
+                last_cm_dist = Some(variants[i + 1].cm);
+            }
+        }
     }
 
     bprobs
@@ -222,27 +258,18 @@ fn transition_prob(
     prev_prob * recomb_prob.1 + total_prob * recomb_prob.0 * uniform_frac
 }
 
-fn combine(
-    fprobs: ArrayView2<Real>,
-    bprobs: ArrayView2<Real>,
-    is_segment_marker: bool,
-    mut tprobs: ArrayViewMut2<Real>,
-) {
-    Zip::indexed(tprobs.rows_mut())
+fn combine(fprobs: ArrayView2<Real>, bprobs: ArrayView2<Real>, mut tprobs: ArrayViewMut2<Real>) {
+    Zip::from(tprobs.rows_mut())
         .and(fprobs.rows())
-        .for_each(|i, mut t_row, f_row| {
-            Zip::indexed(&mut t_row)
+        .for_each(|mut t_row, f_row| {
+            Zip::from(&mut t_row)
                 .and(bprobs.rows())
-                .for_each(|j, t, b_row| {
-                    *t = if is_segment_marker {
-                        f_row.dot(&b_row)
-                    } else {
-                        if i == j {
-                            1.
-                        } else {
-                            0.
-                        }
-                    };
-                });
+                .for_each(|t, b_row| *t = f_row.dot(&b_row));
         })
+}
+
+fn combine_non_transition(mut tprobs: ArrayViewMut2<Real>) {
+    Zip::indexed(tprobs.rows_mut()).for_each(|i, r| {
+        Zip::indexed(r).for_each(|j, t| *t = if i == j { 1. } else { 0. });
+    });
 }

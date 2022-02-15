@@ -1,15 +1,18 @@
 mod params;
+mod initialize;
+mod sampling;
+mod viterbi;
 pub use params::*;
 
 use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::forward_backward;
 use crate::neighbors_finding;
 use crate::ref_panel::RefPanelSlice;
-use crate::sampling;
+use crate::variants::{Rarity, Variant};
 use crate::{Genotype, Real};
 use rand::Rng;
 
-use ndarray::{s, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut3, Zip};
+use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut3, Zip};
 use std::time::Instant;
 
 const N_HETS_PER_SEGMENT: usize = 3;
@@ -26,6 +29,7 @@ pub struct Mcmc<'a> {
     pub params: &'a McmcSharedParams,
     pub cur_overlap_region_len: usize,
     pub genotype_graph: GenotypeGraph,
+    pub ignored_sites: Array1<bool>,
     pub estimated_haps: Array2<Genotype>,
     phased_ind: Array2<u8>,
     tprobs: Array3<Real>,
@@ -35,11 +39,16 @@ impl<'a> Mcmc<'a> {
     pub fn initialize(params: &'a McmcSharedParams, genotypes: ArrayView1<Genotype>) -> Self {
         println!("=== Initialization ===",);
         let now = Instant::now();
-        let estimated_haps = crate::initialize::initialize(&params.ref_panel, genotypes);
+        let estimated_haps = initialize::initialize(&params.ref_panel, genotypes);
         let phased_ind = unsafe { Array2::<u8>::uninit((estimated_haps.nrows(), 2)).assume_init() };
         let tprobs =
             unsafe { Array3::<Real>::uninit((estimated_haps.nrows(), P, P)).assume_init() };
         let genotype_graph = GenotypeGraph::build(genotypes);
+        let ignored_sites = Self::get_ignored_sites(params.variants.view(), genotypes);
+        println!(
+            "#ignored_sites = {}",
+            ignored_sites.iter().filter(|b| **b).count()
+        );
         println!("Initialization: {} ms", (Instant::now() - now).as_millis());
         println!("",);
         Self {
@@ -49,6 +58,7 @@ impl<'a> Mcmc<'a> {
             estimated_haps,
             phased_ind,
             tprobs,
+            ignored_sites,
         }
     }
 
@@ -65,6 +75,7 @@ impl<'a> Mcmc<'a> {
             let genotype_graph_w = self.genotype_graph.slice(start_w, end_w);
             let params_w = self.params.slice(start_w, end_w);
             let pbwt_filter_bitmask_w = &pbwt_filter_bitmask[start_w..end_w];
+            let ignored_sites_w = self.ignored_sites.slice(s![start_w..end_w]);
             let selected_ref_panel = select_ref_panel(
                 &params_w.ref_panel,
                 estimated_haps_w.view(),
@@ -76,6 +87,8 @@ impl<'a> Mcmc<'a> {
                 selected_ref_panel.view(),
                 genotype_graph_w.graph.view(),
                 &params_w.hmm_params,
+                params_w.variants,
+                ignored_sites_w,
             );
 
             let mut tprobs_window_slice =
@@ -136,7 +149,7 @@ impl<'a> Mcmc<'a> {
             self.iteration(IterOption::Main(false), &mut rng);
         }
 
-        self.phased_ind = crate::viterbi::viterbi(self.tprobs.view());
+        self.phased_ind = viterbi::viterbi(self.tprobs.view());
         self.genotype_graph
             .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
         self.estimated_haps
@@ -184,6 +197,25 @@ impl<'a> Mcmc<'a> {
             prev_end_write_boundary = end_write_boundary;
         }
         hmm_windows
+    }
+
+    fn get_ignored_sites(
+        variants: ArrayView1<Variant>,
+        genotypes: ArrayView1<Genotype>,
+    ) -> Array1<bool> {
+        //Array1::<bool>::from_elem(variants.dim(), false)
+        let mut ignored_sites = unsafe { Array1::<bool>::uninit(variants.dim()).assume_init() };
+        Zip::from(&mut ignored_sites)
+            .and(&variants)
+            .and(&genotypes)
+            .for_each(|s, v, &g| {
+                let rarity = v.rarity();
+                *s = (g == 0 || g == 2)
+                    && !(rarity == Rarity::NotRare
+                        || (rarity == Rarity::Rare(true) && g == 2)
+                        || (rarity == Rarity::Rare(false) && g == 0));
+            });
+        ignored_sites
     }
 }
 

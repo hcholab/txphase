@@ -1,7 +1,7 @@
 //use crate::oram::DynamicLSOram;
 use crate::Genotype;
 use bitvec::prelude::{BitSlice, Lsb0};
-use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, Zip, ArrayViewMut2};
+use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
 use oram_sgx::align::A64Bytes;
 
 pub struct Block {
@@ -80,7 +80,7 @@ impl TransposedBlock {
         TransposedBlockSlice {
             index_map: self.index_map.view(),
             haplotypes: self.haplotypes.view(),
-            n_sites: end - start, 
+            n_sites: end - start,
             range: Some((start, end)),
         }
     }
@@ -211,6 +211,27 @@ pub fn m3vcf_block_scan(
         afreqs.push(afreq.into());
         row.assign(&ref_row);
     }
+
+    //// debug
+    //for (pos, &afreq) in filtered_haps
+    //.rows()
+    //.into_iter()
+    //.zip(afreqs[afreqs.len() - n_filtered_sites..].iter())
+    //{
+    //let pos = BitSlice::<Lsb0, u8>::from_slice(pos.as_slice().unwrap()).unwrap();
+    //let mut cref = 0;
+    //let mut calt = 0;
+
+    //for &i in &block.indmap {
+    //if pos[i as usize] {
+    //calt += 1;
+    //} else {
+    //cref += 1;
+    //}
+    //}
+    //assert_eq!((afreq*(cref + calt) as f64).round() as usize, calt);
+
+    //}
 
     Some(Block {
         index_map: block.indmap.clone(),

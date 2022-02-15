@@ -1,3 +1,17 @@
+const RARE_VARIANT_FREQ: f64 = 0.001;
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum Rarity {
+    NotRare,
+    Rare(bool), // is Ref AF > 0.5 (is Ref major allele)?
+}
+
+impl Rarity {
+    pub fn is_rare(self) -> bool {
+        self != Self::NotRare
+    }
+}
+
 pub struct Variant {
     pub cm: f64,
     afreq: f64,
@@ -23,6 +37,18 @@ impl Variant {
 
     pub fn get_maf(&self) -> f64 {
         self.afreq.min(1. - self.afreq)
+    }
+
+    pub fn get_ref_af(&self) -> f64 {
+        1. - self.afreq
+    }
+
+    pub fn rarity(&self) -> Rarity {
+        if self.get_maf() <= RARE_VARIANT_FREQ {
+            Rarity::Rare(self.get_ref_af() > 0.5)
+        } else {
+            Rarity::NotRare
+        }
     }
 }
 
