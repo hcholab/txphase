@@ -119,8 +119,8 @@ fn backward(
 
     let uniform_frac = 1.0 / (n as f32);
 
-    #[cfg(feature = "leak-resist")]
-    let uniform_frac = Real::protect_f32(uniform_frac);
+    //#[cfg(feature = "leak-resist")]
+    //let uniform_frac = Real::protect_f32(uniform_frac);
 
     let mut last_cm_dist = None; 
 

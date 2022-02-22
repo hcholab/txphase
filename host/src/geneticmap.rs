@@ -44,7 +44,7 @@ pub fn interpolate_cm(genetic_map: &[(u32, f64)], sites: &[Site]) -> Vec<f64> {
 
     // Middle positions
     for (start_map, end_map) in genetic_map.iter().zip(genetic_map.iter().skip(1)) {
-        if let Some((_, site)) = site_ptr {
+        if let Some((_site_i, site)) = site_ptr {
             if site.pos == start_map.0 {
                 interpolated.push(start_map.1);
                 site_ptr = sites_iter.next();
@@ -75,7 +75,7 @@ pub fn interpolate_cm(genetic_map: &[(u32, f64)], sites: &[Site]) -> Vec<f64> {
             break;
         }
 
-        if let Some((_, site)) = site_ptr {
+        if let Some((_site_i, site)) = site_ptr {
             if site.pos == end_map.0 {
                 interpolated.push(end_map.1);
                 site_ptr = sites_iter.next();
@@ -95,7 +95,6 @@ pub fn interpolate_cm(genetic_map: &[(u32, f64)], sites: &[Site]) -> Vec<f64> {
     interpolated.iter_mut().for_each(|v| *v -= baseline);
 
     assert_eq!(interpolated.len(), sites.len());
-
     interpolated
 }
 

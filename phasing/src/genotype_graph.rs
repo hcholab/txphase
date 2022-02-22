@@ -46,48 +46,59 @@ mod inner {
 use inner::*;
 
 #[derive(Copy, Clone)]
-pub struct G(U8);
+pub struct G {
+    pub graph: U8,
+    pub segment_marker: bool,
+}
 
 impl G {
     pub fn new_het(het_count: u32) -> Self {
-        Self(match het_count {
-            0 => 0b01010101,
-            1 => 0b00110011,
-            2 => 0b00001111,
+        let (graph, segment_marker) = match het_count {
+            0 => (0b01010101, true),
+            1 => (0b00110011, false),
+            2 => (0b00001111, false),
             _ => panic!("Invalid het count"),
-        })
+        };
+        Self {
+            graph,
+            segment_marker,
+        }
     }
 
     pub fn new_hom(hom: Genotype) -> Self {
-        Self(match hom {
-            0 => 0b00000000,
-            2 => 0b11111111,
+        let (graph, segment_marker) = match hom {
+            0 => (0b00000000, false),
+            2 => (0b11111111, false),
             _ => panic!("Invalid homozygote"),
-        })
+        };
+        Self {
+            graph,
+            segment_marker,
+        }
     }
 
     #[inline]
     pub fn get_row(self, i: usize) -> Genotype {
-        (self.0 >> i & 1) as Genotype
+        (self.graph >> i & 1) as Genotype
     }
 
     #[inline]
     pub fn set_row(&mut self, i: usize, genotype: i8) {
         match genotype {
-            0 => self.0 &= !(1 << i),
-            1 => self.0 |= 1 << i,
+            0 => self.graph &= !(1 << i),
+            1 => self.graph |= 1 << i,
             _ => panic!("Invalid genotype"),
         };
     }
 
     #[inline]
     pub fn is_segment_marker(self) -> bool {
-        self.0 == 0b01010101
+        self.segment_marker
     }
 
     #[inline]
     pub fn get_genotype(self) -> Genotype {
-        match self.0 {
+        match self.graph {
             0b0000000 => 0,
             0b1111111 => 2,
             _ => 1,
@@ -97,7 +108,10 @@ impl G {
 
 impl Default for G {
     fn default() -> Self {
-        Self(0)
+        Self {
+            graph: 0,
+            segment_marker: false,
+        }
     }
 }
 
@@ -293,12 +307,14 @@ impl GenotypeGraph {
                     new_geno.set_row(j, self.graph[i].get_row(ind[j] as usize));
                 }
 
-                self.graph[i] = new_geno;
+                // Erase block_head flag between the two blocks being merged
+                if self.graph[i].is_segment_marker() && block_counter == 1 {
+                    new_geno.segment_marker = false;
+                } else {
+                    new_geno.segment_marker = self.graph[i].segment_marker;
+                }
 
-                //// Erase block_head flag between the two blocks being merged
-                //if self.block_head[i] && block_counter == 1 {
-                //self.block_head[i] = false;
-                //}
+                self.graph[i] = new_geno;
             }
         }
     }

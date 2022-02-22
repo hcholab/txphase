@@ -13,12 +13,13 @@ use std::path::Path;
 use std::str::FromStr;
 
 const SP_PORT: u16 = 1234;
+const CHR: usize = 20;
 
 fn main() {
-    let genetic_map_path = "/home/ndokmai/workspace/shapeit4/maps/chr20.b37.gmap";
-    let input_bcf_path = "/home/ndokmai/workspace/genome-data/data/giab/Ch37_chr20/son.vcf.gz";
-    let ref_panel_path = "/home/ndokmai/workspace/genome-data/data/1kg/m3vcf/20.1000g.Phase3.v5.With.Parameter.Estimates.m3vcf.gz";
-    let ref_sites_path = "/home/ndokmai/workspace/genome-data/data/1kg/sites/chr20_sites.csv";
+    let genetic_map_path = &format!("/home/ndokmai/workspace/shapeit4/maps/chr{}.b37.gmap", CHR);
+    let input_bcf_path = &format!("/home/ndokmai/workspace/genome-data/data/giab/Ch37_chr{}/son.vcf.gz", CHR);
+    let ref_panel_path = &format!("/home/ndokmai/workspace/genome-data/data/1kg/m3vcf/{}.1000g.Phase3.v5.With.Parameter.Estimates.m3vcf.gz", CHR);
+    let ref_sites_path = &format!("/home/ndokmai/workspace/genome-data/data/1kg/sites/chr{}_sites.csv", CHR);
 
     let genetic_map = geneticmap::genetic_map_from_csv_path(&Path::new(genetic_map_path)).unwrap();
     let sites = site::sites_from_csv_path(&Path::new(ref_sites_path)).unwrap();

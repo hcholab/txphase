@@ -47,8 +47,7 @@ const HOST_PORT: u16 = 1234;
 
 fn main() {
     //let min_window_len_cm = 2.5;
-    //let min_window_len_cm = 4.0;
-    let min_window_len_cm = 6.0;
+    let min_window_len_cm = 4.0;
     let pbwt_modulo = 0.02;
     let n_pos_window_overlap = 10;
     let s = 4;
@@ -80,15 +79,6 @@ fn main() {
     };
     println!("#sites = {}", cms.len());
 
-    let mcmc_params = mcmc::McmcSharedParams::new(
-        ref_panel_new,
-        cms,
-        afreqs,
-        min_window_len_cm,
-        n_pos_window_overlap,
-        pbwt_modulo,
-        s,
-    );
 
     let genotypes: Vec<i8> = bincode::deserialize_from(&mut host_stream).unwrap();
 
@@ -100,19 +90,30 @@ fn main() {
 
     let genotypes = Array1::<Genotype>::from_vec(genotypes);
 
+    let mcmc_params = mcmc::McmcSharedParams::new(
+        ref_panel_new,
+        genotypes.view(),
+        cms,
+        afreqs,
+        min_window_len_cm,
+        n_pos_window_overlap,
+        pbwt_modulo,
+        s,
+    );
+
     let mut rng = rand::thread_rng();
     //use rand::SeedableRng;
     //let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
 
     let mut mcmc = mcmc::Mcmc::initialize(&mcmc_params, genotypes.view());
 
-    for _ in 0..6 {
+    for _ in 0..4 {
         mcmc.iteration(IterOption::Burnin, &mut rng);
     }
 
-    for _ in 0..2 {
-        mcmc.iteration(IterOption::Pruning, &mut rng);
+    for _ in 0..3 {
         mcmc.iteration(IterOption::Burnin, &mut rng);
+        mcmc.iteration(IterOption::Pruning, &mut rng);
     }
 
     let phased = mcmc.main_finalize(5, rng);

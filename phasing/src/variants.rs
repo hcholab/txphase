@@ -1,3 +1,6 @@
+use crate::Genotype;
+use ndarray::ArrayView1;
+
 const RARE_VARIANT_FREQ: f64 = 0.001;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -12,6 +15,7 @@ impl Rarity {
     }
 }
 
+#[derive(Debug)]
 pub struct Variant {
     pub cm: f64,
     afreq: f64,
@@ -20,9 +24,10 @@ pub struct Variant {
 }
 
 impl Variant {
-    pub fn new(cm: f64, afreq: f64, n_haps: usize) -> Self {
-        let calt = (n_haps as f64 * afreq).round() as usize;
-        let cref = n_haps - calt;
+    pub fn new(genotype_calt: usize, cm: f64, afreq: f64, n_haps: usize) -> Self {
+        let calt = (n_haps as f64 * afreq).round() as usize + genotype_calt;
+        let cref = n_haps - calt + 2;
+        let afreq = calt as f64 / (calt + cref) as f64;
         Self {
             cm,
             afreq,
@@ -52,10 +57,18 @@ impl Variant {
     }
 }
 
-pub fn build_variants(cms: &[f64], afreqs: &[f64], n_haps: usize) -> Vec<Variant> {
-    afreqs
+pub fn build_variants(
+    genotypes: ArrayView1<Genotype>,
+    cms: &[f64],
+    afreqs: &[f64],
+    n_haps: usize,
+) -> Vec<Variant> {
+    genotypes
         .iter()
+        .zip(afreqs.iter())
         .zip(cms.iter())
-        .map(|(&afreq, &cm)| Variant::new(cm, afreq, n_haps))
+        .map(|((&g, &afreq), &cm)| {
+            Variant::new(if g != -1 { g as usize } else { 0 }, cm, afreq, n_haps)
+        })
         .collect()
 }

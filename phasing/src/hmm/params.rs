@@ -74,5 +74,5 @@ fn compute_all_recomb_probs(variants: &[Variant], n_eff: usize, n_haps: usize) -
 
 #[inline]
 fn compute_recomb_prob(dist_cm: f64, n_eff: usize, n_haps: usize) -> f64 {
-    -1. * (-0.04 * n_eff as f64 * dist_cm / n_haps as f64).exp_m1()
+    -1. * (-0.04 * n_eff as f64 * dist_cm.max(1e-7) / n_haps as f64).exp_m1()
 }

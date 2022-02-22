@@ -46,10 +46,6 @@ impl<'a> Mcmc<'a> {
             unsafe { Array3::<Real>::uninit((estimated_haps.nrows(), P, P)).assume_init() };
         let genotype_graph = GenotypeGraph::build(genotypes);
         let ignored_sites = Self::get_ignored_sites(params.variants.view(), genotypes);
-        println!(
-            "#ignored_sites = {}",
-            ignored_sites.iter().filter(|b| **b).count()
-        );
         println!("Initialization: {} ms", (Instant::now() - now).as_millis());
         println!("",);
         Self {
