@@ -9,7 +9,6 @@ mod pbwt;
 mod ref_panel;
 mod union_filter;
 mod utils;
-mod windows_split;
 mod variants;
 
 #[cfg(feature = "leak-resist")]
@@ -39,18 +38,32 @@ mod inner {
 use inner::*;
 
 use crate::mcmc::IterOption;
+use log::info;
 use ndarray::Array1;
+use rand::{RngCore, SeedableRng};
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::str::FromStr;
 
 const HOST_PORT: u16 = 1234;
 
+pub fn log_template(str1: &str, str2: &str) -> String {
+    format!("\t* {str1}\t: {str2}")
+}
+
 fn main() {
+    env_logger::init();
+
     //let min_window_len_cm = 2.5;
-    let min_window_len_cm = 4.0;
+    let min_window_len_cm = 3.0;
     let pbwt_modulo = 0.02;
     let n_pos_window_overlap = 10;
     let s = 4;
+
+    let seed = rand::thread_rng().next_u64();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+
+    info!("Parameters:");
+    info!("{}", &log_template("Seed", &format!("{seed}")));
 
     let (host_stream, _host_socket) = TcpListener::bind(SocketAddr::from((
         IpAddr::from_str("127.0.0.1").unwrap(),
@@ -71,14 +84,25 @@ fn main() {
 
     let cms = {
         let cms: Vec<f64> = bincode::deserialize_from(&mut host_stream).unwrap();
-        cms.into_iter()
+        let mut cms = cms
+            .into_iter()
+            .zip(sites_bitmask.iter())
+            .filter(|(_, b)| **b)
+            .map(|(cm, _)| cm)
+            .collect::<Vec<_>>();
+        let first = cms[0];
+        cms.iter_mut().for_each(|cm| *cm -= first);
+        cms
+    };
+    println!("#sites = {}", cms.len());
+    let bps = {
+        let bps: Vec<u32> = bincode::deserialize_from(&mut host_stream).unwrap();
+        bps.into_iter()
             .zip(sites_bitmask.iter())
             .filter(|(_, b)| **b)
             .map(|(cm, _)| cm)
             .collect::<Vec<_>>()
     };
-    println!("#sites = {}", cms.len());
-
 
     let genotypes: Vec<i8> = bincode::deserialize_from(&mut host_stream).unwrap();
 
@@ -93,6 +117,7 @@ fn main() {
     let mcmc_params = mcmc::McmcSharedParams::new(
         ref_panel_new,
         genotypes.view(),
+        bps,
         cms,
         afreqs,
         min_window_len_cm,
@@ -100,10 +125,6 @@ fn main() {
         pbwt_modulo,
         s,
     );
-
-    let mut rng = rand::thread_rng();
-    //use rand::SeedableRng;
-    //let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
 
     let mut mcmc = mcmc::Mcmc::initialize(&mcmc_params, genotypes.view());
 
@@ -118,25 +139,23 @@ fn main() {
 
     let phased = mcmc.main_finalize(5, rng);
 
-
-
     bincode::serialize_into(&mut host_stream, &phased).unwrap();
 }
 
-fn analyze_graph(segment_start_markers: &[bool]) {
-    let mut lens = Vec::new();
-    let mut prev_len = 0;
+//fn analyze_graph(segment_start_markers: &[bool]) {
+//let mut lens = Vec::new();
+//let mut prev_len = 0;
 
-    for (i, &b) in segment_start_markers.iter().enumerate() {
-        if b {
-            lens.push(i - prev_len);
-            prev_len = i;
-        }
-    }
-    lens.push(segment_start_markers.len() - prev_len);
-    lens.sort();
+//for (i, &b) in segment_start_markers.iter().enumerate() {
+//if b {
+//lens.push(i - prev_len);
+//prev_len = i;
+//}
+//}
+//lens.push(segment_start_markers.len() - prev_len);
+//lens.sort();
 
-    let avg = lens.iter().sum::<usize>() as f64 / lens.len() as f64;
-    println!("agv: {}", avg);
-    println!("range: {} - {}", lens[0], lens.last().unwrap());
-}
+//let avg = lens.iter().sum::<usize>() as f64 / lens.len() as f64;
+//println!("agv: {}", avg);
+//println!("range: {} - {}", lens[0], lens.last().unwrap());
+//}

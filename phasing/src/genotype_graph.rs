@@ -45,10 +45,40 @@ mod inner {
 #[cfg(feature = "leak-resist")]
 use inner::*;
 
+#[derive(Clone, Copy)]
+pub struct GMeta(U8);
+
+const SEGMENT_MARKER_MASK: u8 = 0b11111110;
+
+impl GMeta {
+    fn new(is_segment_marker: bool, is_het: bool, is_alt_allele: bool) -> Self {
+        let mut inner = 0u8;
+        inner |= is_segment_marker as u8;
+        inner |= (is_het as u8) << 1;
+        inner |= (is_alt_allele as u8) << 2;
+        Self(inner)
+    }
+
+    #[inline]
+    fn get_segment_marker(self) -> bool {
+        self.0 & 1 == 1
+    }
+
+    #[inline]
+    fn get_het(self) -> bool {
+        ((self.0 >> 1) & 1) == 1
+    }
+
+    #[inline]
+    fn unset_segment_marker(&mut self) {
+        self.0 &= SEGMENT_MARKER_MASK
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct G {
-    pub graph: U8,
-    pub segment_marker: bool,
+    graph: U8,
+    meta: GMeta,
 }
 
 impl G {
@@ -61,7 +91,7 @@ impl G {
         };
         Self {
             graph,
-            segment_marker,
+            meta: GMeta::new(segment_marker, true, false),
         }
     }
 
@@ -73,12 +103,12 @@ impl G {
         };
         Self {
             graph,
-            segment_marker,
+            meta: GMeta::new(segment_marker, false, hom == 2),
         }
     }
 
     #[inline]
-    pub fn get_row(self, i: usize) -> Genotype {
+    pub fn get_row(&self, i: usize) -> Genotype {
         (self.graph >> i & 1) as Genotype
     }
 
@@ -90,14 +120,23 @@ impl G {
             _ => panic!("Invalid genotype"),
         };
     }
-
     #[inline]
-    pub fn is_segment_marker(self) -> bool {
-        self.segment_marker
+    pub fn is_het(&self) -> bool {
+        self.meta.get_segment_marker()
     }
 
     #[inline]
-    pub fn get_genotype(self) -> Genotype {
+    pub fn is_segment_marker(&self) -> bool {
+        self.meta.get_segment_marker()
+    }
+
+    #[inline]
+    pub fn unset_segment_marker(&mut self) {
+        self.meta.unset_segment_marker()
+    }
+
+    #[inline]
+    pub fn get_genotype(&self) -> Genotype {
         match self.graph {
             0b0000000 => 0,
             0b1111111 => 2,
@@ -106,16 +145,6 @@ impl G {
     }
 }
 
-impl Default for G {
-    fn default() -> Self {
-        Self {
-            graph: 0,
-            segment_marker: false,
-        }
-    }
-}
-
-//#[cfg(not(feature = "leak-resist"))]
 pub struct GenotypeGraph {
     pub graph: Array1<G>,
 }
@@ -170,7 +199,7 @@ impl GenotypeGraph {
         let mut new_merge_flag;
 
         for i in (0..m - 1).rev() {
-            let (ind1, ind2, prob) = select_top_k(tprob.slice(s![i, .., ..]), P);
+            let (ind1, ind2, prob) = select_top_p(tprob.slice(s![i, .., ..]));
             // If merge flag set then carry over
             for j in 0..P {
                 #[cfg(feature = "leak-resist")]
@@ -227,13 +256,13 @@ impl GenotypeGraph {
 
         // Forward pass to update the graph and block_head
         //let mut new_geno = unsafe { Array1::<Genotype>::uninit(P).assume_init() };
-        let mut new_geno = G::default();
         let mut ind1 = unsafe { Array1::<U8>::uninit(P).assume_init() };
         let mut ind2 = unsafe { Array1::<U8>::uninit(P).assume_init() };
         let mut ind = unsafe { Array1::<U8>::uninit(P).assume_init() };
         let mut block_counter = tp_value!(0, i8);
 
         for i in 0..m {
+            let mut new_geno = self.graph[i];
             #[cfg(feature = "leak-resist")]
             {
                 block_counter = merge_head[i].select(tp_value!(2, i8), block_counter);
@@ -309,15 +338,34 @@ impl GenotypeGraph {
 
                 // Erase block_head flag between the two blocks being merged
                 if self.graph[i].is_segment_marker() && block_counter == 1 {
-                    new_geno.segment_marker = false;
-                } else {
-                    new_geno.segment_marker = self.graph[i].segment_marker;
+                    new_geno.unset_segment_marker();
                 }
 
                 self.graph[i] = new_geno;
             }
         }
     }
+
+    //pub fn prune_(&mut self, tprobs: ArrayView3<Real>) {
+    //const MAX_HETS: usize = 22;
+    //let m = self.graph.len();
+
+    //let mut het_count_cur_segment = 0;
+    //let mut het_count_prev_segment = 0;
+    //for i in 0..m {
+    //het_count_cur_segment += self.graph[i].is_het() as u32;
+    //if self.graph[i].is_segment_marker() {
+
+    ////if het_count < MAX_HETS {
+
+    ////}
+
+    //het_count_prev_segment = het_count_cur_segment;
+    //het_count_cur_segment = 0;
+    //}
+    //}
+
+    //}
 
     pub fn traverse_graph_pair(&self, ind: ArrayView2<u8>, mut haps: ArrayViewMut2<Genotype>) {
         Zip::from(haps.rows_mut())
@@ -339,16 +387,15 @@ pub struct GenotypeGraphSlice<'a> {
 // elements according to M(i,j) * M(p-1-i,p-1-j)
 // To avoid duplicates, restrict i <= p/2
 // Also output associated probability mass
-fn select_top_k(tab: ArrayView2<Real>, k: usize) -> (Array1<U8>, Array1<U8>, Real) {
+fn select_top_p(tab: ArrayView2<Real>) -> (Array1<U8>, Array1<U8>, Real) {
     // Normalize
     let tab = &tab / tab.sum();
 
-    let p = tab.nrows();
-    let n = p * p / 2;
+    let n = P * P / 2;
     let mut elems = Vec::with_capacity(n);
-    for i in 0..p / 2 {
-        for j in 0..p {
-            let dip = tab[[i, j]] * tab[[p - 1 - i, p - 1 - j]];
+    for i in 0..P / 2 {
+        for j in 0..P {
+            let dip = tab[[i, j]] * tab[[P - 1 - i, P - 1 - j]];
             #[cfg(feature = "leak-resist")]
             {
                 elems.push(SortItem {
@@ -381,31 +428,31 @@ fn select_top_k(tab: ArrayView2<Real>, k: usize) -> (Array1<U8>, Array1<U8>, Rea
         elems.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     }
 
-    let mut ind1 = unsafe { Array1::<U8>::uninit(k).assume_init() };
-    let mut ind2 = unsafe { Array1::<U8>::uninit(k).assume_init() };
+    let mut ind1 = unsafe { Array1::<U8>::uninit(P).assume_init() };
+    let mut ind2 = unsafe { Array1::<U8>::uninit(P).assume_init() };
 
     #[cfg(feature = "leak-resist")]
-    let mut sum: Real = elems.iter().take(k / 2).map(|v| v.dip).sum();
+    let mut sum: Real = elems.iter().take(P / 2).map(|v| v.dip).sum();
 
     #[cfg(not(feature = "leak-resist"))]
-    let mut sum: Real = elems.iter().take(k / 2).map(|v| v.0).sum();
+    let mut sum: Real = elems.iter().take(P / 2).map(|v| v.0).sum();
 
     sum /= tot_sum;
-    for i in 0..k / 2 {
+    for i in 0..P / 2 {
         // Choose top k/2 then fill in the rest by inverting
         #[cfg(feature = "leak-resist")]
         {
             ind1[i] = elems[i].i;
             ind2[i] = elems[i].j;
-            ind1[k - 1 - i] = (p as u8) - 1 - elems[i].i;
-            ind2[k - 1 - i] = (p as u8) - 1 - elems[i].j;
+            ind1[P - 1 - i] = (P as u8) - 1 - elems[i].i;
+            ind2[P - 1 - i] = (P as u8) - 1 - elems[i].j;
         }
         #[cfg(not(feature = "leak-resist"))]
         {
             ind1[i] = elems[i].1;
             ind2[i] = elems[i].2;
-            ind1[k - 1 - i] = (p as u8) - 1 - elems[i].1;
-            ind2[k - 1 - i] = (p as u8) - 1 - elems[i].2;
+            ind1[P - 1 - i] = (P as u8) - 1 - elems[i].1;
+            ind2[P - 1 - i] = (P as u8) - 1 - elems[i].2;
         }
     }
     (ind1, ind2, sum)

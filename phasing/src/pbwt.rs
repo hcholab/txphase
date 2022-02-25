@@ -1,6 +1,6 @@
 use ndarray::Array1;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PBWTColumn {
     pub a: Array1<u32>,
     pub d: Array1<u32>,

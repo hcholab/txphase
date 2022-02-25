@@ -17,12 +17,19 @@ const CHR: usize = 20;
 
 fn main() {
     let genetic_map_path = &format!("/home/ndokmai/workspace/shapeit4/maps/chr{}.b37.gmap", CHR);
-    let input_bcf_path = &format!("/home/ndokmai/workspace/genome-data/data/giab/Ch37_chr{}/son.vcf.gz", CHR);
+    let input_bcf_path = &format!(
+        "/home/ndokmai/workspace/genome-data/data/giab/Ch37_chr{}/son.vcf.gz",
+        CHR
+    );
     let ref_panel_path = &format!("/home/ndokmai/workspace/genome-data/data/1kg/m3vcf/{}.1000g.Phase3.v5.With.Parameter.Estimates.m3vcf.gz", CHR);
-    let ref_sites_path = &format!("/home/ndokmai/workspace/genome-data/data/1kg/sites/chr{}_sites.csv", CHR);
+    let ref_sites_path = &format!(
+        "/home/ndokmai/workspace/genome-data/data/1kg/sites/chr{}_sites.csv",
+        CHR
+    );
 
     let genetic_map = geneticmap::genetic_map_from_csv_path(&Path::new(genetic_map_path)).unwrap();
     let sites = site::sites_from_csv_path(&Path::new(ref_sites_path)).unwrap();
+    let bps = sites.iter().map(|s| s.pos).collect::<Vec<_>>();
     let interpolated_cms = geneticmap::interpolate_cm(&genetic_map, &sites);
 
     let (ref_panel_meta, ref_panel_block_iter) =
@@ -44,6 +51,7 @@ fn main() {
     bincode::serialize_into(&mut sp_stream, &ref_panel_blocks).unwrap();
     bincode::serialize_into(&mut sp_stream, &ref_sites_bitmask).unwrap();
     bincode::serialize_into(&mut sp_stream, &interpolated_cms).unwrap();
+    bincode::serialize_into(&mut sp_stream, &bps).unwrap();
     bincode::serialize_into(&mut sp_stream, &target_sample).unwrap();
     sp_stream.flush().unwrap();
 

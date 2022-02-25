@@ -18,7 +18,6 @@ pub fn split(
         boundaries.push((start, end))
     }
     boundaries.push((*boundaries_starts.last().unwrap(), variants.len()));
-
     boundaries
 }
 
@@ -32,7 +31,7 @@ fn recursive_split(
     if variants.len() < MIN_N_VARIANTS_PER_SEGMENT || window_cm < min_window_len_cm {
         None
     } else {
-        let window_midpoint_cm = window_cm * 3./8. + rng.gen_range(0.0..window_cm / 4.);
+        let window_midpoint_cm = window_cm * 3. / 8. + rng.gen_range(0.0..window_cm / 4.);
         let mid_point = match variants.as_slice().unwrap().binary_search_by(|probe| {
             probe
                 .cm
@@ -42,6 +41,9 @@ fn recursive_split(
             Ok(v) => v,
             Err(v) => v,
         };
+
+        //let mid_point = variants.len() / 4 + rng.gen_range(0..variants.len() / 2);
+
         let head = recursive_split(
             variants.slice(s![..mid_point]),
             base_index,

@@ -17,6 +17,7 @@ impl Rarity {
 
 #[derive(Debug)]
 pub struct Variant {
+    pub bp: u32,
     pub cm: f64,
     afreq: f64,
     cref: usize,
@@ -24,11 +25,12 @@ pub struct Variant {
 }
 
 impl Variant {
-    pub fn new(genotype_calt: usize, cm: f64, afreq: f64, n_haps: usize) -> Self {
+    pub fn new(genotype_calt: usize, bp: u32, cm: f64, afreq: f64, n_haps: usize) -> Self {
         let calt = (n_haps as f64 * afreq).round() as usize + genotype_calt;
         let cref = n_haps - calt + 2;
         let afreq = calt as f64 / (calt + cref) as f64;
         Self {
+            bp,
             cm,
             afreq,
             cref,
@@ -59,16 +61,18 @@ impl Variant {
 
 pub fn build_variants(
     genotypes: ArrayView1<Genotype>,
+    bps: &[u32],
     cms: &[f64],
     afreqs: &[f64],
     n_haps: usize,
 ) -> Vec<Variant> {
     genotypes
         .iter()
+        .zip(bps.iter())
         .zip(afreqs.iter())
         .zip(cms.iter())
-        .map(|((&g, &afreq), &cm)| {
-            Variant::new(if g != -1 { g as usize } else { 0 }, cm, afreq, n_haps)
+        .map(|(((&g, &bp), &afreq), &cm)| {
+            Variant::new(if g != -1 { g as usize } else { 0 }, bp, cm, afreq, n_haps)
         })
         .collect()
 }

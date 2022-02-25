@@ -1,10 +1,10 @@
-mod params;
 mod initialize;
+mod params;
 mod sampling;
 mod viterbi;
+mod windows_split;
 pub use params::*;
 
-use crate::windows_split::split;
 use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::forward_backward;
 use crate::neighbors_finding;
@@ -12,6 +12,7 @@ use crate::ref_panel::RefPanelSlice;
 use crate::variants::{Rarity, Variant};
 use crate::{Genotype, Real};
 use rand::Rng;
+use windows_split::split;
 
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut3, Zip};
 use std::time::Instant;
@@ -63,22 +64,32 @@ impl<'a> Mcmc<'a> {
         println!("=== {:?} Iteration ===", iter_option);
         let now = Instant::now();
 
-        let pbwt_filter_bitmask = self.params.randomize_pbwt_bitmask(&mut rng);
+        let pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
         let windows = self.windows(&mut rng);
 
         let mut prev_ind = (0, 0);
+        let mut sum_window_size = 0;
+        let n_windows = windows.len();
+        let mut ks = Vec::new();
+
         for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
+            //println!("({start_w}, {end_w}), ({start_write_w}, {end_write_w})");
+            sum_window_size +=
+                self.params.variants[end_w - 1].bp - self.params.variants[start_w].bp;
             let estimated_haps_w = self.estimated_haps.slice(s![start_w..end_w, ..]).to_owned();
             let genotype_graph_w = self.genotype_graph.slice(start_w, end_w);
             let params_w = self.params.slice(start_w, end_w);
-            let pbwt_filter_bitmask_w = &pbwt_filter_bitmask[start_w..end_w];
+            let pbwt_evaluted_filter_w = &self.params.pbwt_evaluted[start_w..end_w];
+            let pbwt_group_filter_w = &pbwt_group_filter[start_w..end_w];
             let ignored_sites_w = self.ignored_sites.slice(s![start_w..end_w]);
-            let selected_ref_panel = select_ref_panel(
+            let (selected_ref_panel, k) = select_ref_panel(
                 &params_w.ref_panel,
                 estimated_haps_w.view(),
-                pbwt_filter_bitmask_w,
+                pbwt_evaluted_filter_w,
+                pbwt_group_filter_w,
                 self.params.s,
             );
+            ks.push(k as f64);
 
             let mut tprobs_window = forward_backward(
                 selected_ref_panel.view(),
@@ -134,7 +145,27 @@ impl<'a> Mcmc<'a> {
             self.cur_overlap_region_len *= 2;
         }
 
-        println!("Iteration: {} ms", (Instant::now() - now).as_millis());
+        println!(
+            "#Segments: {}",
+            self.genotype_graph
+                .graph
+                .iter()
+                .filter(|g| g.is_segment_marker())
+                .count()
+        );
+        use statrs::statistics::Statistics;
+        println!(
+            "K: {:.3}+/-{:.3}",
+            Statistics::mean(&ks),
+            Statistics::std_dev(&ks)
+        );
+
+        println!(
+            "Window size: {:.2} Mb",
+            sum_window_size as f64 / n_windows as f64 / 1e6
+        );
+
+        println!("Elapsed time: {} ms", (Instant::now() - now).as_millis());
         println!("",);
     }
 
@@ -153,7 +184,11 @@ impl<'a> Mcmc<'a> {
     }
 
     fn windows(&self, mut rng: impl Rng) -> Vec<((usize, usize), (usize, usize))> {
-        let windows = split(self.params.variants.view(), self.params.min_window_len_cm, &mut rng);
+        let windows = split(
+            self.params.variants.view(),
+            self.params.min_window_len_cm,
+            &mut rng,
+        );
         let overlap_len = self.cur_overlap_region_len;
         let mut hmm_windows = Vec::with_capacity(windows.len());
         let mut prev_end_write_boundary = 0;
@@ -197,11 +232,79 @@ impl<'a> Mcmc<'a> {
         hmm_windows
     }
 
+    fn windows_full_segments(&self, mut rng: impl Rng) -> Vec<((usize, usize), (usize, usize))> {
+        let windows = split(
+            self.params.variants.view(),
+            self.params.min_window_len_cm,
+            &mut rng,
+        );
+        let mut hmm_windows = Vec::with_capacity(windows.len());
+        let mut prev_end_write_boundary = 0;
+        let mut start_boundary = 0;
+
+        for (i, window) in windows.iter().enumerate() {
+            let split_point = window.1;
+
+            let mut end_write_boundary = None;
+            let mut next_start_boundary = None;
+
+            let mut j = 0;
+            loop {
+                if split_point + j >= self.genotype_graph.graph.len() {
+                    break;
+                }
+                if self.genotype_graph.graph[split_point + j].is_segment_marker() {
+                    end_write_boundary = Some(split_point + j);
+                    break;
+                }
+                j += 1;
+            }
+
+            let mut j = 0;
+            loop {
+                if split_point < j + 1 {
+                    break;
+                }
+                if self.genotype_graph.graph[split_point - j - 1].is_segment_marker() {
+                    next_start_boundary = Some(split_point - j - 1);
+                    break;
+                }
+                j += 1;
+            }
+
+            let v = if i == 0 {
+                (
+                    (window.0, end_write_boundary.unwrap()),
+                    (window.0, end_write_boundary.unwrap()),
+                )
+            } else if i == windows.len() - 1 {
+                (
+                    (start_boundary, window.1),
+                    (prev_end_write_boundary, window.1),
+                )
+            } else {
+                (
+                    (start_boundary, end_write_boundary.unwrap()),
+                    (prev_end_write_boundary, end_write_boundary.unwrap()),
+                )
+            };
+
+            if v.1 .0 != v.1 .1 {
+                hmm_windows.push(v);
+            }
+
+            if i < windows.len() - 1 {
+                prev_end_write_boundary = end_write_boundary.unwrap();
+                start_boundary = next_start_boundary.unwrap();
+            }
+        }
+        hmm_windows
+    }
+
     fn get_ignored_sites(
         variants: ArrayView1<Variant>,
         genotypes: ArrayView1<Genotype>,
     ) -> Array1<bool> {
-        //Array1::<bool>::from_elem(variants.dim(), false)
         let mut ignored_sites = unsafe { Array1::<bool>::uninit(variants.dim()).assume_init() };
         Zip::from(&mut ignored_sites)
             .and(&variants)
@@ -227,23 +330,26 @@ fn renormalize(mut v: ArrayViewMut3<Real>) {
 fn select_ref_panel(
     ref_panel: &RefPanelSlice,
     estimated_haps: ArrayView2<Genotype>,
-    pbwt_filter_bitmask: &[bool],
+    pbwt_evaluted_filter: &[bool],
+    pbwt_group_filter: &[bool],
     s: usize,
-) -> Array2<Genotype> {
-    let n_pbwt_pos = pbwt_filter_bitmask.iter().filter(|b| **b).count();
+) -> (Array2<Genotype>, usize) {
+    let n_pbwt_pos = pbwt_evaluted_filter.iter().filter(|b| **b).count();
     let neighbors_bitmap = neighbors_finding::find_neighbors(
         ref_panel
             .iter()
-            .zip(pbwt_filter_bitmask.iter())
-            .filter(|(_, b)| **b)
-            .map(|(v, _)| v),
+            .zip(pbwt_evaluted_filter.iter())
+            .filter_map(|(v, &b)| if b { Some(v) } else { None }),
         estimated_haps
             .rows()
             .into_iter()
             .map(|r| r.to_owned())
-            .zip(pbwt_filter_bitmask.iter())
-            .filter(|(_, b)| **b)
-            .map(|(v, _)| v),
+            .zip(pbwt_evaluted_filter.iter())
+            .filter_map(|(v, &b)| if b { Some(v) } else { None }),
+        pbwt_group_filter
+            .iter()
+            .zip(pbwt_evaluted_filter.iter())
+            .filter_map(|(&b1, &b2)| if b2 { Some(b1) } else { None }),
         n_pbwt_pos,
         ref_panel.n_haps,
         estimated_haps.ncols(),
@@ -263,6 +369,6 @@ fn select_ref_panel(
     //.collect::<Vec<_>>()
     //};
 
-    println!("k = {}", neighbors_bitmap.iter().filter(|&&b| b).count());
-    ref_panel.filter(&neighbors_bitmap)
+    let k = neighbors_bitmap.iter().filter(|&&b| b).count();
+    (ref_panel.filter(&neighbors_bitmap), k)
 }

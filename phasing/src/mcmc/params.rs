@@ -13,6 +13,7 @@ pub struct McmcSharedParams {
     pub hmm_params: HmmParams,
     pub min_window_len_cm: f64,
     pub overlap_region_len: usize,
+    pub pbwt_evaluted: Vec<bool>,
     pub pbwt_groups: Vec<Vec<usize>>,
     pub s: usize,
 }
@@ -21,6 +22,7 @@ impl McmcSharedParams {
     pub fn new(
         ref_panel: RefPanel,
         genotypes: ArrayView1<Genotype>,
+        bps: Vec<u32>,
         cms: Vec<f64>,
         afreqs: Vec<f64>,
         min_window_len_cm: f64,
@@ -28,13 +30,14 @@ impl McmcSharedParams {
         pbwt_modulo: f64,
         s: usize,
     ) -> Self {
-        let variants = build_variants(genotypes, &cms, &afreqs, ref_panel.n_haps);
+        let variants = build_variants(genotypes, &bps, &cms, &afreqs, ref_panel.n_haps);
         println!(
             "#rare = {}",
             variants.iter().filter(|v| v.rarity().is_rare()).count()
         );
         let hmm_params = HmmParams::new(&variants, ref_panel.n_haps);
-        let pbwt_groups = Self::pbwt_groups(&variants, pbwt_modulo);
+        let (pbwt_evaluted, pbwt_groups) = Self::get_pbwt_evaluted(&variants, pbwt_modulo);
+
         println!("#pbwt_groups = {}", pbwt_groups.len());
         Self {
             ref_panel,
@@ -42,6 +45,7 @@ impl McmcSharedParams {
             min_window_len_cm,
             hmm_params,
             overlap_region_len,
+            pbwt_evaluted,
             pbwt_groups,
             s,
         }
@@ -55,22 +59,24 @@ impl McmcSharedParams {
         }
     }
 
-    pub fn randomize_pbwt_bitmask(&self, mut rng: impl Rng) -> Vec<bool> {
+    pub fn randomize_pbwt_group_bitmask(&self, mut rng: impl Rng) -> Vec<bool> {
         use rand::prelude::SliceRandom;
-        let mut pbwt_filter_bitmask = vec![false; self.variants.len()];
+        let mut filter = vec![false; self.variants.len()];
         for group in &self.pbwt_groups {
             let i = group.choose(&mut rng).unwrap();
-            pbwt_filter_bitmask[*i] = true;
+            filter[*i] = true;
         }
-        pbwt_filter_bitmask
+        filter
     }
 
-    fn pbwt_groups(variants: &[Variant], pbwt_modulo: f64) -> Vec<Vec<usize>> {
+    fn get_pbwt_evaluted(variants: &[Variant], pbwt_modulo: f64) -> (Vec<bool>, Vec<Vec<usize>>) {
+        let mut pbwt_evaluted = vec![true; variants.len()];
         let mut last_group_id = 0;
         let mut pbwt_groups = Vec::new();
         let mut cur_group = Vec::new();
         for (i, v) in variants.iter().enumerate() {
             if v.get_mac() < PBWT_MAC {
+                pbwt_evaluted[i] = false;
                 continue;
             }
             let group_id = (v.cm / pbwt_modulo).round() as usize;
@@ -80,10 +86,10 @@ impl McmcSharedParams {
                     cur_group = Vec::new();
                 }
                 last_group_id = group_id;
-            } 
+            }
             cur_group.push(i);
         }
-        pbwt_groups
+        (pbwt_evaluted, pbwt_groups)
     }
 }
 

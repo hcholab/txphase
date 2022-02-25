@@ -8,6 +8,7 @@ use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpOrd};
 pub fn find_neighbors(
     ref_panel: impl Iterator<Item = Array1<i8>>,
     mut estimated_haps: impl Iterator<Item = Array1<Genotype>>,
+    mut pbwt_group_filter: impl Iterator<Item = bool>,
     n_pos: usize,
     n_haps_ref: usize,
     n_haps_target: usize,
@@ -15,6 +16,7 @@ pub fn find_neighbors(
 ) -> Vec<bool> {
     let mut pbwt = PBWT::new(ref_panel, n_pos, n_haps_ref);
     let mut prev_col = pbwt.get_init_col().unwrap();
+    let mut cur_pbwt_group_bit = pbwt_group_filter.next();
 
     let mut prev_target = vec![Target::default(); n_haps_target];
 
@@ -34,16 +36,25 @@ pub fn find_neighbors(
                 &prev_col,
             );
 
-            let (new_neighbors, _) =
-                find_neighbors_single_marker(i as u32, s, &cur_target, &cur_col, &prev_col, false);
+            if let Some(b) = cur_pbwt_group_bit {
+                if b {
+                    let (new_neighbors, _) = find_neighbors_single_marker(
+                        i as u32,
+                        s,
+                        &cur_target,
+                        &cur_col,
+                        &prev_col,
+                        false,
+                    );
 
-            for i in new_neighbors {
-                neighbors_bitmap[i as usize] = true;
+                    for i in new_neighbors {
+                        neighbors_bitmap[i as usize] = true;
+                    }
+                }
             }
-
             prev_target[j] = cur_target;
         }
-
+        cur_pbwt_group_bit = pbwt_group_filter.next();
         prev_col = cur_col;
     }
     neighbors_bitmap

@@ -43,10 +43,10 @@ pub fn forward_backward(
 
     let uniform_frac = 1.0 / (n as f32);
 
-    #[cfg(feature = "leak-resist")]
-    let uniform_frac = Real::protect_f32(uniform_frac);
+    //#[cfg(feature = "leak-resist")]
+    //let uniform_frac = Real::protect_f32(uniform_frac);
 
-    let mut last_cm_dist = None; 
+    let mut last_cm_dist = None;
 
     for i in 1..m {
         if !ignored_sites[i] {
@@ -122,7 +122,7 @@ fn backward(
     //#[cfg(feature = "leak-resist")]
     //let uniform_frac = Real::protect_f32(uniform_frac);
 
-    let mut last_cm_dist = None; 
+    let mut last_cm_dist = None;
 
     for i in (0..m - 1).rev() {
         let (mut cur_bprob, prev_bprob) =

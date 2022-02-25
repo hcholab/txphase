@@ -214,22 +214,22 @@ pub fn m3vcf_block_scan(
 
     //// debug
     //for (pos, &afreq) in filtered_haps
-        //.rows()
-        //.into_iter()
-        //.zip(afreqs[afreqs.len() - n_filtered_sites..].iter())
+    //.rows()
+    //.into_iter()
+    //.zip(afreqs[afreqs.len() - n_filtered_sites..].iter())
     //{
-        //let pos = BitSlice::<Lsb0, u8>::from_slice(pos.as_slice().unwrap()).unwrap();
-        //let mut cref = 0;
-        //let mut calt = 0;
+    //let pos = BitSlice::<Lsb0, u8>::from_slice(pos.as_slice().unwrap()).unwrap();
+    //let mut cref = 0;
+    //let mut calt = 0;
 
-        //for &j in &block.indmap {
-            //if pos[j as usize] {
-                //calt += 1;
-            //} else {
-                //cref += 1;
-            //}
-        //}
-        //assert_eq!((afreq * (cref + calt) as f64).round() as usize, calt);
+    //for &j in &block.indmap {
+    //if pos[j as usize] {
+    //calt += 1;
+    //} else {
+    //cref += 1;
+    //}
+    //}
+    //assert_eq!((afreq * (cref + calt) as f64).round() as usize, calt);
     //}
 
     Some(Block {
