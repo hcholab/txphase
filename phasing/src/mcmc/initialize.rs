@@ -1,7 +1,7 @@
 use crate::neighbors_finding::{find_neighbors_single_marker, find_target_single_marker, Target};
-use crate::pbwt::{PBWTColumn, PBWT};
+use crate::pbwt::PBWT;
 use crate::ref_panel::RefPanel;
-use crate::{tp_value, Genotype, Int};
+use crate::{tp_value, Genotype, Int, UInt};
 use ndarray::{Array2, ArrayView1};
 
 #[cfg(feature = "leak-resist")]
@@ -15,81 +15,76 @@ pub fn initialize(ref_panel: &RefPanel, genotypes: ArrayView1<Genotype>) -> Arra
     let mut estm_haplotypes =
         Array2::<Genotype>::from_elem((genotypes.len(), 2), tp_value!(-1, i8));
 
+    let mut prev_neighbors_0 = Vec::with_capacity(0);
+    let mut prev_neighbors_1 = Vec::with_capacity(0);
+
+    let mut prev_divs_0 = Vec::with_capacity(0);
+    let mut prev_divs_1 = Vec::with_capacity(0);
+
     for i in 0..genotypes.len() {
         let (cur_col, cur_n_zeros, hap_row) = pbwt.next().unwrap();
 
-        //#[cfg(feature = "leak-resist")]
-        //{
-        //let cond = t[i].tp_eq(&1);
-
-        //let target_0 = find_target_single_marker(
-        //hap_row.view(),
-        //cur_n_zeros as u32,
-        //t[i] >> 1,
-        //i as u32,
-        //&prev_target_0,
-        //&prev_col,
-        //);
-
-        //let target_1 = find_target_single_marker(
-        //hap_row.view(),
-        //cur_n_zeros as u32,
-        //t[i] >> 1,
-        //i as u32,
-        //&prev_target_1,
-        //&prev_col,
-        //);
-
-        //let (first, second) = initialize_het_single_marker(
-        //i,
-        //hap_row.view(),
-        //cur_n_zeros,
-        //&mut prev_target_0,
-        //&mut prev_target_1,
-        //&prev_col,
-        //&cur_col,
-        //);
-
-        //prev_target_0 = cond.select(prev_target_0, target_0);
-        //prev_target_1 = cond.select(prev_target_1, target_1);
-        //estm_haplotypes[[0, i]] = cond.select(first, t[i] >> 1);
-        //estm_haplotypes[[1, i]] = cond.select(second, t[i] >> 1);
-        //}
-
-        //#[cfg(not(feature = "leak-resist"))]
-        if genotypes[i] == 1 {
-            let (first, second) = initialize_het_single_marker(
-                i,
-                hap_row.view(),
-                cur_n_zeros,
-                &mut prev_target_0,
-                &mut prev_target_1,
-                &prev_col,
-                &cur_col,
-            );
-            estm_haplotypes[[i, 0]] = first;
-            estm_haplotypes[[i, 1]] = second;
+        let (cur_hap_0, cur_hap_1) = if genotypes[i] == 1 {
+            if i == 0 {
+                (0, 1)
+            } else {
+                initialize_het_single_marker(
+                    hap_row.view(),
+                    &prev_neighbors_0,
+                    &prev_neighbors_1,
+                    &prev_divs_0,
+                    &prev_divs_1,
+                )
+            }
         } else {
-            prev_target_0 = find_target_single_marker(
-                hap_row.view(),
-                cur_n_zeros as u32,
-                genotypes[i] / 2,
-                i as u32,
-                &prev_target_0,
-                &prev_col,
-            );
+            (genotypes[i] / 2, genotypes[i] / 2)
+        };
 
-            prev_target_1 = find_target_single_marker(
-                hap_row.view(),
-                cur_n_zeros as u32,
-                genotypes[i] / 2,
-                i as u32,
-                &prev_target_1,
-                &prev_col,
-            );
-            estm_haplotypes[[i, 0]] = genotypes[i] / 2;
-            estm_haplotypes[[i, 1]] = genotypes[i] / 2;
+        prev_target_0 = find_target_single_marker(
+            hap_row.view(),
+            cur_n_zeros as u32,
+            cur_hap_0,
+            i as u32,
+            &prev_target_0,
+            &prev_col,
+        );
+
+        prev_target_1 = find_target_single_marker(
+            hap_row.view(),
+            cur_n_zeros as u32,
+            cur_hap_1,
+            i as u32,
+            &prev_target_1,
+            &prev_col,
+        );
+        estm_haplotypes[[i, 0]] = cur_hap_0;
+        estm_haplotypes[[i, 1]] = cur_hap_1;
+
+        if i + 1 < genotypes.len() {
+            if genotypes[i + 1] == 1 {
+                let (n, d) = find_neighbors_single_marker(
+                    i as u32,
+                    2,
+                    &prev_target_0,
+                    &cur_col,
+                    &prev_col,
+                    true,
+                );
+                prev_neighbors_0 = n;
+                prev_divs_0 = d.unwrap();
+                let (n, d) = find_neighbors_single_marker(
+                    i as u32,
+                    2,
+                    &prev_target_1,
+                    &cur_col,
+                    &prev_col,
+                    true,
+                );
+                prev_neighbors_1 = n;
+                prev_divs_1 = d.unwrap();
+            }
         }
+
         prev_col = cur_col;
     }
 
@@ -97,32 +92,18 @@ pub fn initialize(ref_panel: &RefPanel, genotypes: ArrayView1<Genotype>) -> Arra
 }
 
 fn initialize_het_single_marker(
-    site_pos: usize,
     x_row: ArrayView1<i8>,
-    cur_n_zeros: u32,
-    prev_target_0: &mut Target,
-    prev_target_1: &mut Target,
-    prev_col: &PBWTColumn,
-    cur_col: &PBWTColumn,
+    neighbors_0: &[UInt],
+    neighbors_1: &[UInt],
+    divs_0: &[UInt],
+    divs_1: &[UInt],
 ) -> (Genotype, Genotype) {
-    let (first, second);
+    let mut s = score_simple(x_row, &neighbors_0, &neighbors_1);
 
-    let (s0, cur_target_0_0, cur_target_0_1) = score(
-        site_pos,
-        x_row,
-        cur_n_zeros,
-        prev_target_0,
-        &prev_col,
-        &cur_col,
-    );
-    let (s1, cur_target_1_0, cur_target_1_1) = score(
-        site_pos,
-        x_row,
-        cur_n_zeros,
-        &prev_target_1,
-        &prev_col,
-        &cur_col,
-    );
+    if s.abs() <= 1 {
+        s = score(x_row, &neighbors_0, &divs_0, &neighbors_1, &divs_1);
+    }
+
     #[cfg(feature = "leak-resist")]
     {
         let cond = s0.tp_gt(&s1);
@@ -133,17 +114,7 @@ fn initialize_het_single_marker(
     }
 
     #[cfg(not(feature = "leak-resist"))]
-    if s0 > s1 {
-        first = 0;
-        second = 1;
-        *prev_target_0 = cur_target_0_0;
-        *prev_target_1 = cur_target_1_1;
-    } else {
-        first = 1;
-        second = 0;
-        *prev_target_0 = cur_target_0_1;
-        *prev_target_1 = cur_target_1_0;
-    }
+    let (first, second) = if s > 0 { (0, 1) } else { (1, 0) };
 
     return (first, second);
 }
@@ -195,30 +166,39 @@ fn initialize_het_single_marker(
 //}
 //out_genotype
 //}
-
-fn score_single(
-    cur_t: Genotype,
-    site_pos: usize,
-    x_row: ArrayView1<i8>,
-    cur_n_zeros: u32,
-    prev_target: &Target,
-    prev_col: &PBWTColumn,
-    cur_col: &PBWTColumn,
-) -> (Int, Target) {
+//
+fn score_simple_single(x_row: ArrayView1<i8>, neighbors: &[UInt]) -> Int {
     let mut s = tp_value!(0, i32);
-    let cur_target = find_target_single_marker(
-        x_row,
-        cur_n_zeros as u32,
-        cur_t,
-        site_pos as u32,
-        prev_target,
-        &prev_col,
-    );
+    #[cfg(feature = "leak-resist")]
+    {
+        for (i, &x) in x_row.iter().enumerate() {
+            for (&k, &d) in neighbors.iter().zip(divs.iter()) {
+                let cond = k.tp_eq(&(i as u32));
+                s += cond.select(
+                    tp_value!(x as i32 * 2 - 1, i32) * d.as_i32(),
+                    tp_value!(0, i32),
+                );
+            }
+        }
+    }
 
-    let (neighbors, divs) =
-        find_neighbors_single_marker(site_pos as u32, 2, &cur_target, &cur_col, &prev_col, true);
+    #[cfg(not(feature = "leak-resist"))]
+    {
+        for &k in neighbors.iter() {
+            s += x_row[k as usize] as i32 * 2 - 1;
+        }
+    }
+    s
+}
 
-    let divs = divs.unwrap();
+fn score_simple(x_row: ArrayView1<i8>, neighbors_0: &[UInt], neighbors_1: &[UInt]) -> Int {
+    let s_0 = score_simple_single(x_row, neighbors_0);
+    let s_1 = score_simple_single(x_row, neighbors_1);
+    s_1 - s_0
+}
+
+fn score_single(x_row: ArrayView1<i8>, neighbors: &[UInt], divs: &[UInt]) -> Int {
+    let mut s = tp_value!(0, i32);
     #[cfg(feature = "leak-resist")]
     {
         for (i, &x) in x_row.iter().enumerate() {
@@ -238,36 +218,19 @@ fn score_single(
             s += (x_row[k as usize] as i32 * 2 - 1) * (d as f64).log2() as i32;
         }
     }
-    (s, cur_target)
+    s
 }
 
 fn score(
-    site_pos: usize,
     x_row: ArrayView1<i8>,
-    cur_n_zeros: u32,
-    prev_target: &Target,
-    prev_col: &PBWTColumn,
-    cur_col: &PBWTColumn,
-) -> (Int, Target, Target) {
-    let (s_0, cur_target_0) = score_single(
-        tp_value!(0, i8),
-        site_pos,
-        x_row,
-        cur_n_zeros,
-        prev_target,
-        prev_col,
-        cur_col,
-    );
-    let (s_1, cur_target_1) = score_single(
-        tp_value!(1, i8),
-        site_pos,
-        x_row,
-        cur_n_zeros,
-        prev_target,
-        prev_col,
-        cur_col,
-    );
-    (s_1 - s_0, cur_target_0, cur_target_1)
+    neighbors_0: &[UInt],
+    divs_0: &[UInt],
+    neighbors_1: &[UInt],
+    divs_1: &[UInt],
+) -> Int {
+    let s_0 = score_single(x_row, neighbors_0, divs_0);
+    let s_1 = score_single(x_row, neighbors_1, divs_1);
+    s_1 - s_0
 }
 
 #[cfg(test)]

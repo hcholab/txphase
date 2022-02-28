@@ -413,7 +413,6 @@ impl GenotypeGraph {
                 *g = new_g;
             }
         }
-
         // backward scan
         let mut trans_ind_iter = trans_ind.iter().rev();
         let mut cur_trans_ind: &Option<Array2<U8>> = &None; 
@@ -464,7 +463,7 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
     for i in 0..P / 2 {
         for j in 0..P {
             let prob = tab[[i, j]] * tab[[P - 1 - i, P - 1 - j]];
-            entrophy += prob * if prob == 0. { 0. } else { prob.log10() };
+            entrophy += if prob == 0. { 0. } else { - prob * prob.log10() };
             #[cfg(feature = "leak-resist")]
             {
                 elems.push(SortItem {
