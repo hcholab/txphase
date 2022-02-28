@@ -1,8 +1,10 @@
 use crate::{tp_value, Genotype, Real, U8};
-use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut2, Zip};
+use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut2, Zip};
 
 pub const HET_PER_SEGMENT: usize = 3;
 pub const P: usize = 1 << HET_PER_SEGMENT;
+pub const MCMC_PRUNE_PROB_THRES: f64 = 0.999; // "mcmc-prune" parameter in ShapeIt4
+pub const MAX_HETS: usize = 22; // "MAX_AMB" constant in ShapeIt4 (utils/otools.h)
 
 #[cfg(feature = "leak-resist")]
 mod inner {
@@ -182,9 +184,6 @@ impl GenotypeGraph {
 
     // TODO: limit merges to maximum of MAX_AMBIGUOUS het sites within a block
     pub fn prune(&mut self, tprob: ArrayView3<Real>) {
-        const MCMC_PRUNE_PROB_THRES: f32 = 0.999; // "mcmc-prune" parameter in ShapeIt4
-        const MAX_AMBIGUOUS: usize = 22; // "MAX_AMB" constant in ShapeIt4 (utils/otools.h)
-
         #[cfg(feature = "leak-resist")]
         let m = tprob.shape()[0];
 
@@ -192,14 +191,13 @@ impl GenotypeGraph {
         let m = tprob.shape()[0];
 
         // Backward pass to identify where to merge adjacent blocks and the new haps
-        let mut ind1_cache = unsafe { Array2::<U8>::uninit((m, P)).assume_init() };
-        let mut ind2_cache = unsafe { Array2::<U8>::uninit((m, P)).assume_init() };
+        let mut ind_cache = unsafe { Array3::<U8>::uninit((m, P, 2)).assume_init() };
         let mut merge_head = vec![tp_value!(false, bool); m];
         let mut merge_flag = tp_value!(false, bool);
         let mut new_merge_flag;
 
         for i in (0..m - 1).rev() {
-            let (ind1, ind2, prob) = select_top_p(tprob.slice(s![i, .., ..]));
+            let (ind, prob, _) = select_top_p(tprob.slice(s![i, .., ..]));
             // If merge flag set then carry over
             for j in 0..P {
                 #[cfg(feature = "leak-resist")]
@@ -210,15 +208,15 @@ impl GenotypeGraph {
 
                 #[cfg(not(feature = "leak-resist"))]
                 {
-                    ind1_cache[[i, j]] = if merge_flag {
-                        ind1_cache[[i + 1, j]]
+                    ind_cache[[i, j, 0]] = if merge_flag {
+                        ind_cache[[i + 1, j, 0]]
                     } else {
-                        ind1[j]
+                        ind[[j, 0]]
                     };
-                    ind2_cache[[i, j]] = if merge_flag {
-                        ind2_cache[[i + 1, j]]
+                    ind_cache[[i, j, 1]] = if merge_flag {
+                        ind_cache[[i + 1, j, 1]]
                     } else {
-                        ind2[j]
+                        ind[[j, 1]]
                     };
                 }
             }
@@ -256,9 +254,8 @@ impl GenotypeGraph {
 
         // Forward pass to update the graph and block_head
         //let mut new_geno = unsafe { Array1::<Genotype>::uninit(P).assume_init() };
-        let mut ind1 = unsafe { Array1::<U8>::uninit(P).assume_init() };
-        let mut ind2 = unsafe { Array1::<U8>::uninit(P).assume_init() };
-        let mut ind = unsafe { Array1::<U8>::uninit(P).assume_init() };
+        let mut ind = unsafe { Array2::<U8>::uninit((P, 2)).assume_init() };
+        let mut ind_final = unsafe { Array1::<U8>::uninit(P).assume_init() };
         let mut block_counter = tp_value!(0, i8);
 
         for i in 0..m {
@@ -314,26 +311,26 @@ impl GenotypeGraph {
                 for j in 0..P {
                     // If at merge head copy cache over
                     if merge_head[i] {
-                        ind1[j] = ind1_cache[[i, j]];
-                        ind2[j] = ind2_cache[[i, j]];
+                        ind[[j, 0]] = ind_cache[[i, j, 0]];
+                        ind[[j, 1]] = ind_cache[[i, j, 1]];
                     }
 
                     // If block_counter hits zero change back to original indicies
                     if block_counter == 0 {
-                        ind1[j] = j as u8;
-                        ind2[j] = j as u8;
+                        ind[[j, 0]] = j as u8;
+                        ind[[j, 1]] = j as u8;
                     }
 
                     // Use ind1 for first block, ind2 for second block
                     if block_counter == 2 {
-                        ind[j] = ind1[j];
+                        ind_final[j] = ind[[j, 0]];
                     } else {
-                        ind[j] = ind2[j];
+                        ind_final[j] = ind[[j, 1]];
                     }
                 }
 
                 for j in 0..P {
-                    new_geno.set_row(j, self.graph[i].get_row(ind[j] as usize));
+                    new_geno.set_row(j, self.graph[i].get_row(ind_final[j] as usize));
                 }
 
                 // Erase block_head flag between the two blocks being merged
@@ -346,26 +343,96 @@ impl GenotypeGraph {
         }
     }
 
-    //pub fn prune_(&mut self, tprobs: ArrayView3<Real>) {
-    //const MAX_HETS: usize = 22;
-    //let m = self.graph.len();
+    pub fn prune_rank(&mut self, tprobs: ArrayView3<Real>) {
+        let mut trans_map = Vec::new();
+        let mut het_count = 0;
+        let mut segment_start_i = 0;
+        for (i, g) in self.graph.iter().enumerate() {
+            if g.is_segment_marker() {
+                trans_map.push((segment_start_i, het_count));
+                segment_start_i = i;
+                het_count = 0;
+            }
+            het_count += g.is_het() as usize;
+        }
+        trans_map.push((segment_start_i, het_count));
 
-    //let mut het_count_cur_segment = 0;
-    //let mut het_count_prev_segment = 0;
-    //for i in 0..m {
-    //het_count_cur_segment += self.graph[i].is_het() as u32;
-    //if self.graph[i].is_segment_marker() {
+        let mut trans_stats = Vec::new();
+        for (i, (t1, t2)) in trans_map.iter().zip(trans_map.iter().skip(1)).enumerate() {
+            let het_count = t1.1 + t2.1;
+            if het_count <= MAX_HETS {
+                let (ind, prob, entrophy) = select_top_p(tprobs.slice(s![t2.0, .., ..]));
+                if prob > MCMC_PRUNE_PROB_THRES {
+                    trans_stats.push((entrophy, i, ind));
+                }
+            }
+        }
 
-    ////if het_count < MAX_HETS {
+        trans_stats.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-    ////}
+        let mut trans_ind = vec![None; trans_map.len() - 1];
 
-    //het_count_prev_segment = het_count_cur_segment;
-    //het_count_cur_segment = 0;
-    //}
-    //}
+        for t in trans_stats {
+            let (_, i, ind) = t;
+            trans_ind[i] = if i == 0 && i == trans_ind.len() - 1 {
+                None
+            } else if i == 0 && i < trans_ind.len() - 1 {
+                if trans_ind[i + 1].is_none() {
+                    Some(ind)
+                } else {
+                    None
+                }
+            } else if i > 0 && i == trans_ind.len() - 1 {
+                if trans_ind[i - 1].is_none() {
+                    Some(ind)
+                } else {
+                    None
+                }
+            } else {
+                if trans_ind[i - 1].is_none() && trans_ind[i + 1].is_none() {
+                    Some(ind)
+                } else {
+                    None
+                }
+            }
+        }
 
-    //}
+        let mut trans_ind_iter = trans_ind.iter();
+        let mut cur_trans_ind = &None; 
+
+        // forward scan 
+        for g in &mut self.graph.iter_mut() {
+            if g.is_segment_marker() {
+                cur_trans_ind = trans_ind_iter.next().unwrap();
+            }
+            if let Some(cur_trans_ind) = cur_trans_ind {
+                let mut new_g = *g;
+                Zip::indexed(cur_trans_ind.rows()).for_each(|i, ind| {
+                    new_g.set_row(i as usize, g.get_row(ind[1] as usize));
+                });
+                *g = new_g;
+            }
+        }
+
+        // backward scan
+        let mut trans_ind_iter = trans_ind.iter().rev();
+        let mut cur_trans_ind: &Option<Array2<U8>> = &None; 
+        for g in &mut self.graph.iter_mut().rev() {
+            if let Some(cur_trans_ind) = cur_trans_ind {
+                let mut new_g = *g;
+                Zip::indexed(cur_trans_ind.rows()).for_each(|i, ind| {
+                    new_g.set_row(i as usize, g.get_row(ind[0] as usize));
+                });
+                *g = new_g;
+            }
+            if g.is_segment_marker() {
+                cur_trans_ind = trans_ind_iter.next().unwrap();
+                if cur_trans_ind.is_some() {
+                    g.unset_segment_marker();
+                }
+            }
+        }
+    }
 
     pub fn traverse_graph_pair(&self, ind: ArrayView2<u8>, mut haps: ArrayViewMut2<Genotype>) {
         Zip::from(haps.rows_mut())
@@ -387,19 +454,21 @@ pub struct GenotypeGraphSlice<'a> {
 // elements according to M(i,j) * M(p-1-i,p-1-j)
 // To avoid duplicates, restrict i <= p/2
 // Also output associated probability mass
-fn select_top_p(tab: ArrayView2<Real>) -> (Array1<U8>, Array1<U8>, Real) {
+fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
     // Normalize
     let tab = &tab / tab.sum();
 
     let n = P * P / 2;
     let mut elems = Vec::with_capacity(n);
+    let mut entrophy = 0.;
     for i in 0..P / 2 {
         for j in 0..P {
-            let dip = tab[[i, j]] * tab[[P - 1 - i, P - 1 - j]];
+            let prob = tab[[i, j]] * tab[[P - 1 - i, P - 1 - j]];
+            entrophy += prob * if prob == 0. { 0. } else { prob.log10() };
             #[cfg(feature = "leak-resist")]
             {
                 elems.push(SortItem {
-                    dip,
+                    prob,
                     i: U8::protect(i as u8),
                     j: U8::protect(j as u8),
                 });
@@ -407,7 +476,7 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array1<U8>, Array1<U8>, Real) {
 
             #[cfg(not(feature = "leak-resist"))]
             {
-                elems.push((dip, i as u8, j as u8));
+                elems.push((prob, i as u8, j as u8));
             }
         }
     }
@@ -428,8 +497,7 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array1<U8>, Array1<U8>, Real) {
         elems.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     }
 
-    let mut ind1 = unsafe { Array1::<U8>::uninit(P).assume_init() };
-    let mut ind2 = unsafe { Array1::<U8>::uninit(P).assume_init() };
+    let mut ind = unsafe { Array2::<U8>::uninit((P, 2)).assume_init() };
 
     #[cfg(feature = "leak-resist")]
     let mut sum: Real = elems.iter().take(P / 2).map(|v| v.dip).sum();
@@ -449,13 +517,13 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array1<U8>, Array1<U8>, Real) {
         }
         #[cfg(not(feature = "leak-resist"))]
         {
-            ind1[i] = elems[i].1;
-            ind2[i] = elems[i].2;
-            ind1[P - 1 - i] = (P as u8) - 1 - elems[i].1;
-            ind2[P - 1 - i] = (P as u8) - 1 - elems[i].2;
+            ind[[i, 0]] = elems[i].1;
+            ind[[i, 1]] = elems[i].2;
+            ind[[P - 1 - i, 0]] = (P as u8) - 1 - elems[i].1;
+            ind[[P - 1 - i, 1]] = (P as u8) - 1 - elems[i].2;
         }
     }
-    (ind1, ind2, sum)
+    (ind, sum, entrophy)
 }
 
 #[cfg(test)]

@@ -231,21 +231,12 @@ fn transition(
 
     // segment transition
     // Add to aggregate sum
-    let sums = Array1::from_shape_fn(cur_probs.ncols(), |i| cur_probs.column(i).sum());
-    Zip::from(cur_probs.rows_mut()).for_each(|mut a| {
-        Zip::from(&mut a).and(&sums).for_each(|b, c| {
-            //#[cfg(feature = "leak-resist")]
-            //{
-            //*b = next_block_head.select(*c, *b);
-            //}
-            //#[cfg(not(feature = "leak-resist"))]
-            //{
-            if prev_segment_marker {
-                *b = *c;
-            }
-            //}
+    if prev_segment_marker {
+        let sums = Array1::from_shape_fn(cur_probs.ncols(), |i| cur_probs.column(i).sum());
+        Zip::from(cur_probs.rows_mut()).for_each(|mut a| {
+            a.assign(&sums);
         });
-    });
+    }
 }
 
 #[inline]

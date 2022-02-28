@@ -141,7 +141,8 @@ impl<'a> Mcmc<'a> {
             .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
 
         if iter_option == IterOption::Pruning {
-            self.genotype_graph.prune(self.tprobs.view());
+            self.genotype_graph.prune_rank(self.tprobs.view());
+            //self.genotype_graph.prune(self.tprobs.view());
             self.cur_overlap_region_len *= 2;
         }
 
