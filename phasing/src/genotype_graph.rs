@@ -158,6 +158,7 @@ impl GenotypeGraph {
         let mut graph = Vec::with_capacity(m);
 
         let mut cur_het_count = tp_value!(HET_PER_SEGMENT - 1, u32);
+        let mut first = true;
 
         for &g in genotypes {
             if g == 1 {
@@ -165,7 +166,11 @@ impl GenotypeGraph {
                 if cur_het_count == HET_PER_SEGMENT as u32 {
                     cur_het_count = 0;
                 }
-                graph.push(G::new_het(cur_het_count))
+                graph.push(G::new_het(cur_het_count));
+                if first {
+                    graph.last_mut().unwrap().unset_segment_marker();
+                    first = false;
+                }
             } else {
                 graph.push(G::new_hom(g));
             }
@@ -360,7 +365,7 @@ impl GenotypeGraph {
         let mut trans_stats = Vec::new();
         for (i, (t1, t2)) in trans_map.iter().zip(trans_map.iter().skip(1)).enumerate() {
             let het_count = t1.1 + t2.1;
-            if het_count <= MAX_HETS {
+            if het_count < MAX_HETS {
                 let (ind, prob, entrophy) = select_top_p(tprobs.slice(s![t2.0, .., ..]));
                 if prob > MCMC_PRUNE_PROB_THRES {
                     trans_stats.push((entrophy, i, ind));
@@ -398,9 +403,9 @@ impl GenotypeGraph {
         }
 
         let mut trans_ind_iter = trans_ind.iter();
-        let mut cur_trans_ind = &None; 
+        let mut cur_trans_ind = &None;
 
-        // forward scan 
+        // forward scan
         for g in &mut self.graph.iter_mut() {
             if g.is_segment_marker() {
                 cur_trans_ind = trans_ind_iter.next().unwrap();
@@ -415,7 +420,7 @@ impl GenotypeGraph {
         }
         // backward scan
         let mut trans_ind_iter = trans_ind.iter().rev();
-        let mut cur_trans_ind: &Option<Array2<U8>> = &None; 
+        let mut cur_trans_ind: &Option<Array2<U8>> = &None;
         for g in &mut self.graph.iter_mut().rev() {
             if let Some(cur_trans_ind) = cur_trans_ind {
                 let mut new_g = *g;
@@ -448,22 +453,15 @@ pub struct GenotypeGraphSlice<'a> {
     pub graph: ArrayView1<'a, G>,
 }
 
-// Takes a p x p matrix M and returns a list of 0-based
-// index pairs (i,j) corresponding to top K largest
-// elements according to M(i,j) * M(p-1-i,p-1-j)
-// To avoid duplicates, restrict i <= p/2
-// Also output associated probability mass
 fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
-    // Normalize
-    let tab = &tab / tab.sum();
-
-    let n = P * P / 2;
+    let n = P * P;
     let mut elems = Vec::with_capacity(n);
     let mut entrophy = 0.;
-    for i in 0..P / 2 {
+    for i in 0..P {
         for j in 0..P {
-            let prob = tab[[i, j]] * tab[[P - 1 - i, P - 1 - j]];
-            entrophy += if prob == 0. { 0. } else { - prob * prob.log10() };
+            //let prob = tab[[i, j]] * tab[[P - 1 - i, P - 1 - j]];
+            let prob = tab[[i, j]];
+            entrophy += if prob == 0. { 0. } else { -prob * prob.log10() };
             #[cfg(feature = "leak-resist")]
             {
                 elems.push(SortItem {
@@ -479,11 +477,6 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
             }
         }
     }
-    #[cfg(feature = "leak-resist")]
-    let tot_sum: Real = elems.iter().map(|v| v.dip).sum();
-
-    #[cfg(not(feature = "leak-resist"))]
-    let tot_sum: Real = elems.iter().map(|v| v.0).sum();
 
     // Descending sort
     #[cfg(feature = "leak-resist")]
@@ -498,28 +491,26 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
 
     let mut ind = unsafe { Array2::<U8>::uninit((P, 2)).assume_init() };
 
-    #[cfg(feature = "leak-resist")]
-    let mut sum: Real = elems.iter().take(P / 2).map(|v| v.dip).sum();
+    let mut taken = Array2::<bool>::from_elem((P, P), false);
 
-    #[cfg(not(feature = "leak-resist"))]
-    let mut sum: Real = elems.iter().take(P / 2).map(|v| v.0).sum();
+    let mut sum = 0.;
+    let mut count = 0;
 
-    sum /= tot_sum;
-    for i in 0..P / 2 {
-        // Choose top k/2 then fill in the rest by inverting
-        #[cfg(feature = "leak-resist")]
-        {
-            ind1[i] = elems[i].i;
-            ind2[i] = elems[i].j;
-            ind1[P - 1 - i] = (P as u8) - 1 - elems[i].i;
-            ind2[P - 1 - i] = (P as u8) - 1 - elems[i].j;
+    for e in elems {
+        sum += e.0;
+        let (i, j) = (e.1 as usize, e.2 as usize);
+        if !taken[[i, j]] && !taken[[P - 1 - i, P - 1 - j]] {
+            ind[[count, 0]] = i as u8;
+            ind[[count, 1]] = j as u8;
+            ind[[P - 1 - count, 0]] = (P - 1 - i) as u8;
+            ind[[P - 1 - count, 1]] = (P - 1 - j) as u8;
+            count += 1;
+            taken[[i, j]] = true;
+            taken[[P - 1 - i, P - 1 - j]] = true;
         }
-        #[cfg(not(feature = "leak-resist"))]
-        {
-            ind[[i, 0]] = elems[i].1;
-            ind[[i, 1]] = elems[i].2;
-            ind[[P - 1 - i, 0]] = (P as u8) - 1 - elems[i].1;
-            ind[[P - 1 - i, 1]] = (P as u8) - 1 - elems[i].2;
+
+        if count == P/2 {
+            break;
         }
     }
     (ind, sum, entrophy)

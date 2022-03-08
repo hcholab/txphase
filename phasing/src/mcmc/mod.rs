@@ -6,13 +6,12 @@ mod windows_split;
 pub use params::*;
 
 use crate::genotype_graph::GenotypeGraph;
-use crate::hmm::forward_backward;
+use crate::hmm::{forward_backward, combine_pairs};
 use crate::neighbors_finding;
 use crate::ref_panel::RefPanelSlice;
 use crate::variants::{Rarity, Variant};
 use crate::{Genotype, Real};
 use rand::Rng;
-use windows_split::split;
 
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut3, Zip};
 use std::time::Instant;
@@ -60,17 +59,43 @@ impl<'a> Mcmc<'a> {
         }
     }
 
+    pub fn initialize_from_input(
+        params: &'a McmcSharedParams,
+        genotypes: ArrayView1<Genotype>,
+        estimated_haps: Array2<Genotype>,
+    ) -> Self {
+        println!("=== Initialization ===",);
+        let now = Instant::now();
+        let phased_ind = unsafe { Array2::<u8>::uninit((estimated_haps.nrows(), 2)).assume_init() };
+        let tprobs =
+            unsafe { Array3::<Real>::uninit((estimated_haps.nrows(), P, P)).assume_init() };
+        let genotype_graph = GenotypeGraph::build(genotypes);
+        let ignored_sites = Self::get_ignored_sites(params.variants.view(), genotypes);
+        println!("Initialization: {} ms", (Instant::now() - now).as_millis());
+        println!("",);
+        Self {
+            params,
+            cur_overlap_region_len: params.overlap_region_len,
+            genotype_graph,
+            estimated_haps,
+            phased_ind,
+            tprobs,
+            ignored_sites,
+        }
+    }
+
     pub fn iteration(&mut self, iter_option: IterOption, mut rng: impl Rng) {
         println!("=== {:?} Iteration ===", iter_option);
         let now = Instant::now();
 
         let pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
-        let windows = self.windows(&mut rng);
+        let windows = self.windows_full_segments(&mut rng);
 
         let mut prev_ind = (0, 0);
         let mut sum_window_size = 0;
         let n_windows = windows.len();
         let mut ks = Vec::new();
+        let mut tprob_pairs = unsafe { Array2::<Real>::uninit((P, P)).assume_init()};
 
         for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
             //println!("({start_w}, {end_w}), ({start_write_w}, {end_write_w})");
@@ -99,34 +124,50 @@ impl<'a> Mcmc<'a> {
                 ignored_sites_w,
             );
 
-            let mut tprobs_window_slice =
+            let tprobs_window_slice =
                 tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
 
             if iter_option == IterOption::Pruning {
-                //save
                 let mut tmp = self
                     .tprobs
                     .slice_mut(s![start_write_w..end_write_w, .., ..]);
-                tmp.assign(&tprobs_window_slice);
+                Zip::from(tmp.outer_iter_mut())
+                    .and(tprobs_window_slice.outer_iter())
+                    .for_each(|a, b| {
+                        combine_pairs(b, a);
+                    });
             }
-
-            // renormalize
-            renormalize(tprobs_window_slice.view_mut());
 
             if let IterOption::Main(first_main) = iter_option {
                 let mut tmp = self
                     .tprobs
                     .slice_mut(s![start_write_w..end_write_w, .., ..]);
                 if first_main {
-                    tmp.assign(&tprobs_window_slice);
+                    Zip::from(tmp.outer_iter_mut())
+                        .and(tprobs_window_slice.outer_iter())
+                        .for_each(|a, b| {
+                            combine_pairs(b, a);
+                        });
                 } else {
-                    tmp += &tprobs_window_slice
+                    Zip::from(tmp.outer_iter_mut())
+                        .and(tprobs_window_slice.outer_iter())
+                        .for_each(|mut a, b| {
+                            combine_pairs(b, tprob_pairs.view_mut());
+                            a += &tprob_pairs;
+                        });
                 }
             }
 
             // sample
-            let phased_ind_window =
-                sampling::forward_sampling(prev_ind, tprobs_window_slice.view(), &mut rng);
+            let phased_ind_window = sampling::forward_sampling(
+                prev_ind,
+                tprobs_window_slice.view(),
+                genotype_graph_w
+                    .graph
+                    .slice(s![start_write_w - start_w..end_write_w - start_w]),
+                &mut rng,
+            );
+
             let mut tmp = self
                 .phased_ind
                 .slice_mut(s![start_write_w..end_write_w, ..]);
@@ -178,14 +219,20 @@ impl<'a> Mcmc<'a> {
             self.iteration(IterOption::Main(false), &mut rng);
         }
 
-        self.phased_ind = viterbi::viterbi(self.tprobs.view());
+        self.phased_ind = viterbi::viterbi(self.tprobs.view(), self.genotype_graph.graph.view());
         self.genotype_graph
             .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
         self.estimated_haps
     }
 
     fn windows(&self, mut rng: impl Rng) -> Vec<((usize, usize), (usize, usize))> {
-        let windows = split(
+        //let windows = split(
+        //self.params.variants.view(),
+        //self.params.min_window_len_cm,
+        //&mut rng,
+        //);
+        let windows = windows_split::split_by_segment(
+            &self.genotype_graph,
             self.params.variants.view(),
             self.params.min_window_len_cm,
             &mut rng,
@@ -234,11 +281,17 @@ impl<'a> Mcmc<'a> {
     }
 
     fn windows_full_segments(&self, mut rng: impl Rng) -> Vec<((usize, usize), (usize, usize))> {
-        let windows = split(
+        let windows = windows_split::split_by_segment(
+            &self.genotype_graph,
             self.params.variants.view(),
             self.params.min_window_len_cm,
             &mut rng,
         );
+        //let windows = windows_split::split(
+        //self.params.variants.view(),
+        //self.params.min_window_len_cm,
+        //&mut rng,
+        //);
         let mut hmm_windows = Vec::with_capacity(windows.len());
         let mut prev_end_write_boundary = 0;
         let mut start_boundary = 0;
@@ -319,13 +372,6 @@ impl<'a> Mcmc<'a> {
             });
         ignored_sites
     }
-}
-
-#[inline]
-fn renormalize(mut v: ArrayViewMut3<Real>) {
-    Zip::from(v.outer_iter_mut()).for_each(|mut v_pos| {
-        Zip::from(v_pos.outer_iter_mut()).for_each(|mut v_row| v_row /= v_row.sum())
-    });
 }
 
 fn select_ref_panel(

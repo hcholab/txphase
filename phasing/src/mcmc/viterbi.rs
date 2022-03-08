@@ -1,5 +1,6 @@
+use crate::genotype_graph::G;
 use crate::{Real, U8};
-use ndarray::{Array1, Array2, ArrayView3};
+use ndarray::{Array1, Array2, ArrayView1, ArrayView3};
 
 #[cfg(feature = "leak-resist")]
 mod inner {
@@ -9,17 +10,15 @@ mod inner {
 #[cfg(feature = "leak-resist")]
 use inner::*;
 
-// Takes in p(x1), p(x2|x1), ..., p(xn|xn-1)
-// Outputs most likely (paired) assignment using Viterbi algorithm
-pub fn viterbi(tprob: ArrayView3<Real>) -> Array2<U8> {
-    let m = tprob.shape()[0];
-    let p = tprob.shape()[1];
+pub fn viterbi(tprob_pairs: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> Array2<U8> {
+    let m = tprob_pairs.shape()[0];
+    let p = tprob_pairs.shape()[1];
 
     let mut backtrace = unsafe { Array2::<U8>::uninit((m, p)).assume_init() };
     let mut maxprob = unsafe { Array1::<Real>::uninit(p).assume_init() };
     let mut maxprob_next = unsafe { Array1::<Real>::uninit(p).assume_init() };
     for h1 in 0..p {
-        maxprob[h1] = tprob[[0, 0, h1]] * tprob[[0, 0, p - 1 - h1]]; // p(x1), diploid prob
+        maxprob[h1] = tprob_pairs[[0, 0, h1]]; // p(x1), diploid prob
     }
 
     let mut max_val: Real = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
@@ -28,7 +27,15 @@ pub fn viterbi(tprob: ArrayView3<Real>) -> Array2<U8> {
     for i in 1..m {
         for h2 in 0..p {
             for h1 in 0..p {
-                let val = maxprob[h1] * tprob[[i, h1, h2]] * tprob[[i, p - 1 - h1, p - 1 - h2]]; // diploid
+                let val = if genotype_graph[i].is_segment_marker() {
+                    maxprob[h1] * tprob_pairs[[i, h1, h2]]
+                } else {
+                    if h1 == h2 {
+                        maxprob[h1]
+                    } else {
+                        0.
+                    }
+                };
                 if h1 == 0 {
                     max_val = val;
                     #[cfg(feature = "leak-resist")]
@@ -111,7 +118,6 @@ pub fn viterbi(tprob: ArrayView3<Real>) -> Array2<U8> {
         map_ind[[i - 1, 0]] = max_ind;
         map_ind[[i - 1, 1]] = (p as u8) - 1 - max_ind;
     }
-
     map_ind
 }
 

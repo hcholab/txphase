@@ -1,3 +1,4 @@
+use crate::genotype_graph::G;
 use crate::{tp_convert_to, tp_value, Real, UInt, U8};
 use ndarray::{s, Array1, Array2, ArrayView1, ArrayView3};
 use rand::Rng;
@@ -5,6 +6,7 @@ use rand::Rng;
 pub fn forward_sampling(
     prev_ind: (u8, u8),
     tprobs: ArrayView3<Real>,
+    genotype_graph: ArrayView1<G>,
     mut rng: impl Rng,
 ) -> Array2<U8> {
     let m = tprobs.shape()[0];
@@ -17,11 +19,16 @@ pub fn forward_sampling(
             (phase_ind[[i - 1, 0]], phase_ind[[i - 1, 1]])
         };
 
-        let (ind1, ind2) = constrained_paired_sample(
-            tprobs.slice(s![i, prev_ind1 as usize, ..]),
-            tprobs.slice(s![i, prev_ind2 as usize, ..]),
-            &mut rng,
-        );
+
+        let (ind1, ind2) =  if genotype_graph[i].is_segment_marker() {
+            constrained_paired_sample(
+                tprobs.slice(s![i, prev_ind1 as usize, ..]),
+                tprobs.slice(s![i, prev_ind2 as usize, ..]),
+                &mut rng,
+            )
+        } else {
+            (prev_ind1 as u32, prev_ind2 as u32)
+        };
         phase_ind[[i, 0]] = tp_convert_to!(ind1, u8);
         phase_ind[[i, 1]] = tp_convert_to!(ind2, u8);
     }
@@ -35,6 +42,8 @@ fn constrained_paired_sample(
     weights2: ArrayView1<Real>,
     rng: impl Rng,
 ) -> (UInt, UInt) {
+    let weights1 = &weights1 / weights1.sum();
+    let weights2 = &weights2 / weights2.sum();
     let n = weights1.len();
     let mut combined = unsafe { Array1::<Real>::uninit(n).assume_init() };
     for i in 0..n {

@@ -109,23 +109,25 @@ fn process_input_bcf(
         while let Some(ref_site) = ref_sites_iter.next() {
             if ref_site == site {
                 ref_sites_bitmask.push(true);
-                while let Some((target_site, target_record)) = bcf_iter.next() {
-                    if target_site == site {
-                        let genotypes = target_record.genotypes().unwrap();
-                        for (i, sample) in samples.iter_mut().enumerate() {
-                            let genotype: record::Genotype = genotypes.get(i).into();
-                            let genotype: i8 = genotype.as_unphased().into();
-                            sample.push(genotype);
-                        }
-                        input_records_filtered.push(target_record);
-                        break;
-                    }
-                }
                 break;
             } else {
                 ref_sites_bitmask.push(false);
             }
         }
+
+        while let Some((target_site, target_record)) = bcf_iter.next() {
+            if target_site == site {
+                let genotypes = target_record.genotypes().unwrap();
+                for (i, sample) in samples.iter_mut().enumerate() {
+                    let genotype: record::Genotype = genotypes.get(i).into();
+                    let genotype: i8 = genotype.as_unphased().into();
+                    sample.push(genotype);
+                }
+                input_records_filtered.push(target_record);
+                break;
+            }
+        }
+
     }
 
     while ref_sites_iter.next().is_some() {

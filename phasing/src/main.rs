@@ -52,9 +52,8 @@ pub fn log_template(str1: &str, str2: &str) -> String {
 
 fn main() {
     env_logger::init();
-
-    //let min_window_len_cm = 2.5;
-    let min_window_len_cm = 3.0;
+    let min_window_len_cm = 2.5;
+    //let min_window_len_cm = 3.0;
     let pbwt_modulo = 0.02;
     let n_pos_window_overlap = 10;
     let s = 4;
@@ -105,14 +104,22 @@ fn main() {
     };
 
     let genotypes: Vec<i8> = bincode::deserialize_from(&mut host_stream).unwrap();
-
-    //#[cfg(feature = "leak-resist")]
-    //let genotypes = genotypes
-    //.into_iter()
-    //.map(|g| Genotype::protect(g))
-    //.collect::<Vec<_>>();
-
     let genotypes = Array1::<Genotype>::from_vec(genotypes);
+
+    //let estimated_haps = {
+        //use std::io::BufRead;
+        //let path = "/home/ndokmai/workspace/phasing-oram/ref_chr20_init.txt";
+        //let f = std::fs::File::open(std::path::Path::new(path)).unwrap();
+        //let reader = std::io::BufReader::new(f);
+        //let mut estimated_haps = ndarray::Array2::<Genotype>::zeros((genotypes.len(),2));
+        //for (i, line) in reader.lines().enumerate() {
+            //let line = line.unwrap();
+            //let tokens = line.split(&[' ', ',']).collect::<Vec<_>>();
+            //estimated_haps[[i, 0]] = tokens[1].parse::<Genotype>().unwrap();
+            //estimated_haps[[i, 1]] = tokens[3].parse::<Genotype>().unwrap();
+        //}
+        //estimated_haps
+    //};
 
     let mcmc_params = mcmc::McmcSharedParams::new(
         ref_panel_new,
@@ -127,6 +134,7 @@ fn main() {
     );
 
     let mut mcmc = mcmc::Mcmc::initialize(&mcmc_params, genotypes.view());
+    //let mut mcmc = mcmc::Mcmc::initialize_from_input(&mcmc_params, genotypes.view(), estimated_haps);
 
     for _ in 0..4 {
         mcmc.iteration(IterOption::Burnin, &mut rng);
@@ -139,23 +147,6 @@ fn main() {
 
     let phased = mcmc.main_finalize(5, rng);
 
+
     bincode::serialize_into(&mut host_stream, &phased).unwrap();
 }
-
-//fn analyze_graph(segment_start_markers: &[bool]) {
-//let mut lens = Vec::new();
-//let mut prev_len = 0;
-
-//for (i, &b) in segment_start_markers.iter().enumerate() {
-//if b {
-//lens.push(i - prev_len);
-//prev_len = i;
-//}
-//}
-//lens.push(segment_start_markers.len() - prev_len);
-//lens.sort();
-
-//let avg = lens.iter().sum::<usize>() as f64 / lens.len() as f64;
-//println!("agv: {}", avg);
-//println!("range: {} - {}", lens[0], lens.last().unwrap());
-//}
