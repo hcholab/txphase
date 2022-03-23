@@ -13,19 +13,20 @@ use std::path::Path;
 use std::str::FromStr;
 
 const SP_PORT: u16 = 1234;
-const CHR: usize = 20;
 
 fn main() {
-    let genetic_map_path = &format!("/home/ndokmai/workspace/shapeit4/maps/chr{}.b37.gmap", CHR);
-    let input_bcf_path = &format!(
-        "/home/ndokmai/workspace/genome-data/data/giab/Ch37_chr{}/son.vcf.gz",
-        CHR
-    );
-    let ref_panel_path = &format!("/home/ndokmai/workspace/genome-data/data/1kg/m3vcf/{}.1000g.Phase3.v5.With.Parameter.Estimates.m3vcf.gz", CHR);
-    let ref_sites_path = &format!(
-        "/home/ndokmai/workspace/genome-data/data/1kg/sites/chr{}_sites.csv",
-        CHR
-    );
+    let args = std::env::args().collect::<Vec<_>>();
+    let ref_panel_path = &args[1];
+    let ref_sites_path = &args[2];
+    let genetic_map_path = &args[3];
+    let input_path = &args[4];
+    let output_path = &args[5];
+
+    eprintln!("Reference panel: \t{ref_panel_path}");
+    eprintln!("Reference sites: \t{ref_sites_path}");
+    eprintln!("Genetic map: \t\t{genetic_map_path}");
+    eprintln!("Input: \t\t\t{input_path}");
+    eprintln!("Output: \t\t{output_path}");
 
     let genetic_map = geneticmap::genetic_map_from_csv_path(&Path::new(genetic_map_path)).unwrap();
     let sites = site::sites_from_csv_path(&Path::new(ref_sites_path)).unwrap();
@@ -37,7 +38,7 @@ fn main() {
     let ref_panel_blocks = ref_panel_block_iter.collect::<Vec<_>>();
 
     let (mut target_samples, ref_sites_bitmask, input_bcf_header, input_records_filtered) =
-        process_input_bcf(&Path::new(input_bcf_path), &mut Path::new(ref_sites_path));
+        process_input(&Path::new(input_path), &mut Path::new(ref_sites_path));
     let target_sample = target_samples.pop().unwrap();
 
     let mut sp_stream = bufstream::BufStream::new(tcp_keep_connecting(SocketAddr::from((
@@ -57,7 +58,7 @@ fn main() {
 
     let phased: ndarray::Array2<i8> = bincode::deserialize_from(&mut sp_stream).unwrap();
     write_vcf(
-        "phased.vcf.gz",
+        &output_path,
         phased.view(),
         &input_bcf_header,
         &input_records_filtered,
@@ -66,8 +67,8 @@ fn main() {
     eprintln!("Host: done");
 }
 
-fn process_input_bcf(
-    input_bcf_path: &Path,
+fn process_input(
+    input_path: &Path,
     ref_sites_path: &Path,
 ) -> (
     Vec<Vec<i8>>,
@@ -78,7 +79,7 @@ fn process_input_bcf(
     let ref_sites = site::sites_from_csv_path(ref_sites_path).unwrap();
 
     let (input_sites, input_bcf_header, input_bcf_records) =
-        site::sites_from_bcf_path(input_bcf_path).unwrap();
+        site::sites_from_bcf_path(input_path).unwrap();
 
     assert_eq!(input_sites.len(), input_bcf_records.len());
 
@@ -127,7 +128,6 @@ fn process_input_bcf(
                 break;
             }
         }
-
     }
 
     while ref_sites_iter.next().is_some() {

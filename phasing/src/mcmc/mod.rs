@@ -6,14 +6,14 @@ mod windows_split;
 pub use params::*;
 
 use crate::genotype_graph::GenotypeGraph;
-use crate::hmm::{forward_backward, combine_pairs};
+use crate::hmm::{combine_dips, forward_backward};
 use crate::neighbors_finding;
 use crate::ref_panel::RefPanelSlice;
 use crate::variants::{Rarity, Variant};
 use crate::{Genotype, Real};
 use rand::Rng;
 
-use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut3, Zip};
+use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, Zip};
 use std::time::Instant;
 
 const N_HETS_PER_SEGMENT: usize = 3;
@@ -95,10 +95,9 @@ impl<'a> Mcmc<'a> {
         let mut sum_window_size = 0;
         let n_windows = windows.len();
         let mut ks = Vec::new();
-        let mut tprob_pairs = unsafe { Array2::<Real>::uninit((P, P)).assume_init()};
+        let mut tprob_pairs = unsafe { Array2::<Real>::uninit((P, P)).assume_init() };
 
         for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
-            //println!("({start_w}, {end_w}), ({start_write_w}, {end_write_w})");
             sum_window_size +=
                 self.params.variants[end_w - 1].bp - self.params.variants[start_w].bp;
             let estimated_haps_w = self.estimated_haps.slice(s![start_w..end_w, ..]).to_owned();
@@ -119,40 +118,38 @@ impl<'a> Mcmc<'a> {
             let mut tprobs_window = forward_backward(
                 selected_ref_panel.view(),
                 genotype_graph_w.graph.view(),
-                &params_w.hmm_params,
+                &self.params.hmm_params,
                 params_w.variants,
                 ignored_sites_w,
             );
 
-            let tprobs_window_slice =
+            let tprobs_window_src =
                 tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
 
-            if iter_option == IterOption::Pruning {
-                let mut tmp = self
-                    .tprobs
+            let mut tprobs_window_target =
+                self.tprobs
                     .slice_mut(s![start_write_w..end_write_w, .., ..]);
-                Zip::from(tmp.outer_iter_mut())
-                    .and(tprobs_window_slice.outer_iter())
+
+            if iter_option == IterOption::Pruning {
+                Zip::from(tprobs_window_target.outer_iter_mut())
+                    .and(tprobs_window_src.outer_iter())
                     .for_each(|a, b| {
-                        combine_pairs(b, a);
+                        combine_dips(b, a);
                     });
             }
 
             if let IterOption::Main(first_main) = iter_option {
-                let mut tmp = self
-                    .tprobs
-                    .slice_mut(s![start_write_w..end_write_w, .., ..]);
                 if first_main {
-                    Zip::from(tmp.outer_iter_mut())
-                        .and(tprobs_window_slice.outer_iter())
+                    Zip::from(tprobs_window_target.outer_iter_mut())
+                        .and(tprobs_window_src.outer_iter())
                         .for_each(|a, b| {
-                            combine_pairs(b, a);
+                            combine_dips(b, a);
                         });
                 } else {
-                    Zip::from(tmp.outer_iter_mut())
-                        .and(tprobs_window_slice.outer_iter())
+                    Zip::from(tprobs_window_target.outer_iter_mut())
+                        .and(tprobs_window_src.outer_iter())
                         .for_each(|mut a, b| {
-                            combine_pairs(b, tprob_pairs.view_mut());
+                            combine_dips(b, tprob_pairs.view_mut());
                             a += &tprob_pairs;
                         });
                 }
@@ -161,7 +158,7 @@ impl<'a> Mcmc<'a> {
             // sample
             let phased_ind_window = sampling::forward_sampling(
                 prev_ind,
-                tprobs_window_slice.view(),
+                tprobs_window_src.view(),
                 genotype_graph_w
                     .graph
                     .slice(s![start_write_w - start_w..end_write_w - start_w]),

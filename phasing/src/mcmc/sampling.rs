@@ -1,15 +1,15 @@
-use crate::genotype_graph::G;
-use crate::{tp_convert_to, tp_value, Real, UInt, U8};
+use crate::genotype_graph::{G, P};
+use crate::{tp_convert_to, Real, UInt, U8};
 use ndarray::{s, Array1, Array2, ArrayView1, ArrayView3};
 use rand::Rng;
 
 pub fn forward_sampling(
     prev_ind: (u8, u8),
-    tprobs: ArrayView3<Real>,
+    tprobs_dips: ArrayView3<Real>,
     genotype_graph: ArrayView1<G>,
     mut rng: impl Rng,
 ) -> Array2<U8> {
-    let m = tprobs.shape()[0];
+    let m = tprobs_dips.shape()[0];
     let mut phase_ind = unsafe { Array2::<U8>::uninit((m, 2)).assume_init() };
 
     for i in 0..m {
@@ -19,11 +19,10 @@ pub fn forward_sampling(
             (phase_ind[[i - 1, 0]], phase_ind[[i - 1, 1]])
         };
 
-
-        let (ind1, ind2) =  if genotype_graph[i].is_segment_marker() {
+        let (ind1, ind2) = if genotype_graph[i].is_segment_marker() {
             constrained_paired_sample(
-                tprobs.slice(s![i, prev_ind1 as usize, ..]),
-                tprobs.slice(s![i, prev_ind2 as usize, ..]),
+                tprobs_dips.slice(s![i, prev_ind1 as usize, ..]),
+                tprobs_dips.slice(s![i, prev_ind2 as usize, ..]),
                 &mut rng,
             )
         } else {
@@ -44,9 +43,8 @@ fn constrained_paired_sample(
 ) -> (UInt, UInt) {
     let weights1 = &weights1 / weights1.sum();
     let weights2 = &weights2 / weights2.sum();
-    let n = weights1.len();
-    let mut combined = unsafe { Array1::<Real>::uninit(n).assume_init() };
-    for i in 0..n {
+    let mut combined = unsafe { Array1::<Real>::uninit(P).assume_init() };
+    for i in 0..P {
         #[cfg(feature = "leak-resist")]
         {
             #[cfg(not(feature = "leak-resist-fast"))]
@@ -62,12 +60,12 @@ fn constrained_paired_sample(
 
         #[cfg(not(feature = "leak-resist"))]
         {
-            combined[i] = weights1[i] * weights2[n - 1 - i];
+            combined[i] = weights1[i] * weights2[P - 1 - i];
         }
     }
     let ind1 = weighted_sample(combined.view(), rng);
     assert!(ind1 < 8);
-    (ind1, tp_value!(n, u32) - 1 - ind1)
+    (ind1, P as u32 - 1 - ind1)
 }
 
 fn weighted_sample(weights: ArrayView1<Real>, mut rng: impl Rng) -> UInt {

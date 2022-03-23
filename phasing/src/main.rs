@@ -107,18 +107,18 @@ fn main() {
     let genotypes = Array1::<Genotype>::from_vec(genotypes);
 
     //let estimated_haps = {
-        //use std::io::BufRead;
-        //let path = "/home/ndokmai/workspace/phasing-oram/ref_chr20_init.txt";
-        //let f = std::fs::File::open(std::path::Path::new(path)).unwrap();
-        //let reader = std::io::BufReader::new(f);
-        //let mut estimated_haps = ndarray::Array2::<Genotype>::zeros((genotypes.len(),2));
-        //for (i, line) in reader.lines().enumerate() {
-            //let line = line.unwrap();
-            //let tokens = line.split(&[' ', ',']).collect::<Vec<_>>();
-            //estimated_haps[[i, 0]] = tokens[1].parse::<Genotype>().unwrap();
-            //estimated_haps[[i, 1]] = tokens[3].parse::<Genotype>().unwrap();
-        //}
-        //estimated_haps
+    //use std::io::BufRead;
+    //let path = "/home/ndokmai/workspace/phasing-oram/ref_chr20_init.txt";
+    //let f = std::fs::File::open(std::path::Path::new(path)).unwrap();
+    //let reader = std::io::BufReader::new(f);
+    //let mut estimated_haps = ndarray::Array2::<Genotype>::zeros((genotypes.len(),2));
+    //for (i, line) in reader.lines().enumerate() {
+    //let line = line.unwrap();
+    //let tokens = line.split(&[' ', ',']).collect::<Vec<_>>();
+    //estimated_haps[[i, 0]] = tokens[1].parse::<Genotype>().unwrap();
+    //estimated_haps[[i, 1]] = tokens[3].parse::<Genotype>().unwrap();
+    //}
+    //estimated_haps
     //};
 
     let mcmc_params = mcmc::McmcSharedParams::new(
@@ -146,7 +146,6 @@ fn main() {
     }
 
     let phased = mcmc.main_finalize(5, rng);
-
 
     bincode::serialize_into(&mut host_stream, &phased).unwrap();
 }

@@ -41,52 +41,63 @@ pub fn interpolate_cm(genetic_map: &[(u32, f64)], sites: &[Site]) -> Vec<f64> {
         }
         site_ptr = sites_iter.next();
     }
-
     // Middle positions
     for (start_map, end_map) in genetic_map.iter().zip(genetic_map.iter().skip(1)) {
-        if let Some((_site_i, site)) = site_ptr {
+        while let Some((_site_i, site)) = site_ptr {
             if site.pos == start_map.0 {
                 interpolated.push(start_map.1);
                 site_ptr = sites_iter.next();
+            } else {
+                break;
             }
-        } else {
+        } 
+
+        if site_ptr.is_none() {
             break;
         }
 
         if let Some((site_i, site)) = site_ptr {
             if site.pos > start_map.0 && site.pos < end_map.0 {
                 let start_site_i = site_i;
+                let mut end_site_i = site_i;
 
                 site_ptr = sites_iter.next();
                 while let Some((site_i, site)) = site_ptr {
                     if site.pos >= end_map.0 {
-                        interpolate_cm_middle(
-                            &start_map,
-                            &end_map,
-                            &sites[start_site_i..site_i],
-                            &mut interpolated,
-                        );
+                        end_site_i = site_i;
                         break;
                     }
                     site_ptr = sites_iter.next();
                 }
+                interpolate_cm_middle(
+                    &start_map,
+                    &end_map,
+                    &sites[start_site_i..end_site_i],
+                    &mut interpolated,
+                );
             }
         } else {
             break;
         }
 
-        if let Some((_site_i, site)) = site_ptr {
+        while let Some((_site_i, site)) = site_ptr {
             if site.pos == end_map.0 {
                 interpolated.push(end_map.1);
                 site_ptr = sites_iter.next();
+            } else {
+                break;
             }
-        } else {
+        } 
+
+        if site_ptr.is_none() {
             break;
         }
     }
-
     //Tail positions
     if let Some((site_i, _)) = site_ptr {
+        for site in &sites[site_i..] {
+            assert!(site.pos > last_map.0);
+        }
         interpolate_cm_tail(&last_map, mean_rate, &sites[site_i..], &mut interpolated);
     }
 
@@ -104,6 +115,10 @@ fn interpolate_cm_middle(
     sites: &[Site],
     out: &mut Vec<f64>,
 ) {
+    for site in sites {
+        assert!(site.pos > first_map.0);
+        assert!(site.pos < last_map.0);
+    }
     let rate = (last_map.1 - first_map.1) / (last_map.0 - first_map.0) as f64;
     interpolate_cm_tail(first_map, rate, sites, out);
 }
@@ -118,6 +133,7 @@ fn interpolate_cm_head(first_map: &(u32, f64), mean_rate: f64, sites: &[Site], o
 
 fn interpolate_cm_tail(last_map: &(u32, f64), mean_rate: f64, sites: &[Site], out: &mut Vec<f64>) {
     sites.iter().for_each(|s| {
+        assert!(s.pos > last_map.0);
         let dist = s.pos - last_map.0;
         let cm = last_map.1 + mean_rate * dist as f64;
         out.push(cm);

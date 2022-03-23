@@ -509,7 +509,7 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
             taken[[P - 1 - i, P - 1 - j]] = true;
         }
 
-        if count == P/2 {
+        if count == P / 2 {
             break;
         }
     }

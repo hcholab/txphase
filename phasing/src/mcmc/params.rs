@@ -1,4 +1,4 @@
-use crate::hmm::{HmmParams, HmmParamsSlice};
+use crate::hmm::HmmParams;
 use crate::ref_panel::{RefPanel, RefPanelSlice};
 use crate::variants::{build_variants, Variant};
 use crate::Genotype;
@@ -35,7 +35,7 @@ impl McmcSharedParams {
             "#rare = {}",
             variants.iter().filter(|v| v.rarity().is_rare()).count()
         );
-        let hmm_params = HmmParams::new(&variants, ref_panel.n_haps);
+        let hmm_params = HmmParams::new(ref_panel.n_haps);
         let (pbwt_evaluted, pbwt_groups) = Self::get_pbwt_evaluted(&variants, pbwt_modulo);
 
         println!("#pbwt_groups = {}", pbwt_groups.len());
@@ -55,7 +55,6 @@ impl McmcSharedParams {
         McmcSharedParamsSlice {
             ref_panel: self.ref_panel.slice(start, end),
             variants: self.variants.slice(s![start..end]),
-            hmm_params: self.hmm_params.slice(start, end),
         }
     }
 
@@ -96,5 +95,4 @@ impl McmcSharedParams {
 pub struct McmcSharedParamsSlice<'a> {
     pub ref_panel: RefPanelSlice<'a>,
     pub variants: ArrayView1<'a, Variant>,
-    pub hmm_params: HmmParamsSlice<'a>,
 }

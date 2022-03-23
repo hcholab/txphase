@@ -10,15 +10,15 @@ mod inner {
 #[cfg(feature = "leak-resist")]
 use inner::*;
 
-pub fn viterbi(tprob_pairs: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> Array2<U8> {
-    let m = tprob_pairs.shape()[0];
-    let p = tprob_pairs.shape()[1];
+pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> Array2<U8> {
+    let m = tprob_dips.shape()[0];
+    let p = tprob_dips.shape()[1];
 
     let mut backtrace = unsafe { Array2::<U8>::uninit((m, p)).assume_init() };
     let mut maxprob = unsafe { Array1::<Real>::uninit(p).assume_init() };
     let mut maxprob_next = unsafe { Array1::<Real>::uninit(p).assume_init() };
     for h1 in 0..p {
-        maxprob[h1] = tprob_pairs[[0, 0, h1]]; // p(x1), diploid prob
+        maxprob[h1] = tprob_dips[[0, 0, h1]]; // p(x1), diploid prob
     }
 
     let mut max_val: Real = unsafe { std::mem::MaybeUninit::uninit().assume_init() };
@@ -28,7 +28,7 @@ pub fn viterbi(tprob_pairs: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> 
         for h2 in 0..p {
             for h1 in 0..p {
                 let val = if genotype_graph[i].is_segment_marker() {
-                    maxprob[h1] * tprob_pairs[[i, h1, h2]]
+                    maxprob[h1] * tprob_dips[[i, h1, h2]]
                 } else {
                     if h1 == h2 {
                         maxprob[h1]
@@ -67,9 +67,7 @@ pub fn viterbi(tprob_pairs: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> 
             backtrace[[i, h2]] = max_ind;
         }
 
-        let sum: Real = maxprob_next.iter().sum();
-
-        maxprob = &maxprob_next / sum;
+        maxprob = &maxprob_next / maxprob_next.sum();
     }
 
     // Find max value in the final vector
