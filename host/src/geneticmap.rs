@@ -50,7 +50,7 @@ pub fn interpolate_cm(genetic_map: &[(u32, f64)], sites: &[Site]) -> Vec<f64> {
             } else {
                 break;
             }
-        } 
+        }
 
         if site_ptr.is_none() {
             break;
@@ -87,7 +87,7 @@ pub fn interpolate_cm(genetic_map: &[(u32, f64)], sites: &[Site]) -> Vec<f64> {
             } else {
                 break;
             }
-        } 
+        }
 
         if site_ptr.is_none() {
             break;

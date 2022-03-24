@@ -129,18 +129,18 @@ pub unsafe fn cmov_byte_slice_a8(
     //
     // The condition is passed in through temp, then neg moves the value to CF.
     // After that we don't need condition in a register, so temp register can be reused.
-    asm!("neg {0}
-            2:
-            mov {0}, [{3} + 8*{1} - 8]
-            cmovc {0}, [{2} + 8*{1} - 8]
-            mov [{3} + 8*{1} - 8], {0} 
-            dec {1} 
-            jnz 2" ,
-            inout(reg) temp,
-            inout(reg) count,
-            in(reg) src,
-            in(reg) dest,
-            options(nostack),
+    asm!("neg {0}",
+        "2:",
+        "mov {0}, [{3} + 8*{1} - 8]",
+        "cmovc {0}, [{2} + 8*{1} - 8]",
+        "mov [{3} + 8*{1} - 8], {0}",
+        "dec {1}",
+        "jnz 2b" ,
+        inout(reg) temp,
+        inout(reg) count,
+        in(reg) src,
+        in(reg) dest,
+        options(nostack),
     );
 
     //llvm_asm!("neg $0
@@ -217,18 +217,17 @@ pub unsafe fn cmov_byte_slice_a64(
     // TODO: Does unrolling the loop more help?
     let mut temp: u64 = condition as u64;
 
-    asm!("neg {0}
-            vmovq xmm2, {0}
-            vbroadcastsd ymm1, xmm2
-            mov {0}, {3}
-            2:
-            vmovdqa ymm2, [{1} + {0} - 64]
-            vpmaskmovq [{2} + {0} - 64], ymm1, ymm2
-            vmovdqa ymm3, [{1} + {0} - 32]
-            vpmaskmovq [{2} + {0} - 32], ymm1, ymm3
-            sub {0}, 64
-            jnz 2 
-        ",
+    asm!("neg {0}",
+        "vmovq xmm2, {0}",
+        "vbroadcastsd ymm1, xmm2",
+        "mov {0}, {3}",
+        "2:",
+        "vmovdqa ymm2, [{1} + {0} - 64]",
+        "vpmaskmovq [{2} + {0} - 64], ymm1, ymm2",
+        "vmovdqa ymm3, [{1} + {0} - 32]",
+        "vpmaskmovq [{2} + {0} - 32], ymm1, ymm3",
+        "sub {0}, 64",
+        "jnz 2b",
         inout(reg) temp,
         in(reg) src,
         in(reg) dest,

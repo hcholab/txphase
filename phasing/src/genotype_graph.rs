@@ -196,7 +196,7 @@ impl GenotypeGraph {
         let m = tprob.shape()[0];
 
         // Backward pass to identify where to merge adjacent blocks and the new haps
-        let mut ind_cache = unsafe { Array3::<U8>::uninit((m, P, 2)).assume_init() };
+        let mut ind_cache = Array3::<U8>::zeros((m, P, 2));
         let mut merge_head = vec![tp_value!(false, bool); m];
         let mut merge_flag = tp_value!(false, bool);
         let mut new_merge_flag;
@@ -258,9 +258,8 @@ impl GenotypeGraph {
         }
 
         // Forward pass to update the graph and block_head
-        //let mut new_geno = unsafe { Array1::<Genotype>::uninit(P).assume_init() };
-        let mut ind = unsafe { Array2::<U8>::uninit((P, 2)).assume_init() };
-        let mut ind_final = unsafe { Array1::<U8>::uninit(P).assume_init() };
+        let mut ind = Array2::<U8>::zeros((P, 2));
+        let mut ind_final = Array1::<U8>::zeros(P);
         let mut block_counter = tp_value!(0, i8);
 
         for i in 0..m {
@@ -489,7 +488,7 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
         elems.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     }
 
-    let mut ind = unsafe { Array2::<U8>::uninit((P, 2)).assume_init() };
+    let mut ind = Array2::<U8>::zeros((P, 2));
 
     let mut taken = Array2::<bool>::from_elem((P, P), false);
 
@@ -514,101 +513,4 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
         }
     }
     (ind, sum, entrophy)
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use rand::{Rng, SeedableRng};
-
-    #[test]
-    fn genotype_graph_node_test() {
-        let n = 20;
-        let m = 200;
-
-        let ref_rprob = 0.05;
-        let ref_eprob = 0.01;
-        // hmm parameters
-        let rprob = ref_rprob; // recombination
-        let rev_rprob = 1. - ref_rprob; // recombination
-        let eprob = ref_eprob; // error
-        let rev_eprob = 1. - eprob; // error
-
-        #[cfg(feature = "leak-resist")]
-        let (rprob, rev_rprob, eprob, rev_eprob) = (
-            Real::protect_f32(rprob),
-            Real::protect_f32(rev_rprob),
-            Real::protect_f32(eprob),
-            Real::protect_f32(rev_eprob),
-        );
-
-        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
-
-        let ref_x = (0..m)
-            .map(|_| (0..n).map(|_| rng.gen_range(0..2)).collect::<Vec<_>>())
-            .collect::<Vec<_>>();
-
-        let t = (0..m)
-            .map(|_| rng.gen_range(0..2) as u8)
-            .collect::<Vec<_>>();
-
-        let p = 1 << HET_PER_BLOCK;
-
-        // Building
-
-        #[cfg(feature = "leak-resist")]
-        let (x, t) = (
-            Array2::from_shape_fn((m, n), |(i, j)| Genotype::protect(ref_x[i][j] as i8)),
-            Array1::from_shape_fn(m, |i| Genotype::protect(t[i] as i8)),
-        );
-
-        #[cfg(not(feature = "leak-resist"))]
-        let (x, t) = (
-            Array2::from_shape_fn((m, n), |(i, j)| ref_x[i][j] as i8),
-            Array1::from_shape_fn(m, |i| t[i] as i8),
-        );
-
-        let mut graph = GenotypeGraph::build(t.view());
-
-        Zip::from(&graph.block_head)
-            .and(graph.graph.rows())
-            .for_each(|b, g| {
-                let sum = g.sum();
-                if *b {
-                    assert_eq!(sum, 4);
-                } else {
-                    assert!((sum == 8 || sum == 0 || sum == 4));
-                }
-            });
-    }
-
-    #[test]
-    fn top_k_test() {
-        let mut rng = rand::thread_rng();
-        let p = 1 << HET_PER_BLOCK;
-        let ref_prob_matrix = (0..p)
-            .map(|_| (0..p).map(|_| rng.gen_range(0.0..1.0)).collect::<Vec<_>>())
-            .collect::<Vec<_>>();
-
-        #[cfg(feature = "leak-resist")]
-        let prob_matrix =
-            Array2::from_shape_fn((p, p), |(i, j)| Real::protect_f32(ref_prob_matrix[i][j]));
-
-        #[cfg(not(feature = "leak-resist"))]
-        let prob_matrix = Array2::<Real>::from_shape_fn((p, p), |(i, j)| ref_prob_matrix[i][j]);
-
-        let (ref_ind1, ref_ind2, ref_sum) = ref_algs::select_top_k(&ref_prob_matrix, p);
-        let (ind1, ind2, sum) = select_top_k(prob_matrix.view(), p);
-
-        #[cfg(feature = "leak-resist")]
-        let (ind1, ind2, sum) = (
-            Array1::from_shape_fn(p, |i| ind1[i].expose()),
-            Array1::from_shape_fn(p, |i| ind2[i].expose()),
-            sum.expose_into_f32(),
-        );
-
-        assert_eq!(ind1.as_slice().unwrap(), ref_ind1.as_slice());
-        assert_eq!(ind2.as_slice().unwrap(), ref_ind2.as_slice());
-        assert!((sum - ref_sum).abs() < 1e-3);
-    }
 }

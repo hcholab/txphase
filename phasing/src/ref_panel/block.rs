@@ -2,7 +2,7 @@
 use crate::Genotype;
 use bitvec::prelude::{BitSlice, Lsb0};
 use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
-use oram_sgx::align::A64Bytes;
+//use oram_sgx::align::A64Bytes;
 
 pub struct Block {
     index_map: Array1<u16>,
@@ -34,8 +34,7 @@ impl Block {
 
     pub fn transpose(&self) -> TransposedBlock {
         let ncols = (self.n_sites() + 7) / 8;
-        let mut transposed_haplotypes =
-            unsafe { Array2::<u8>::uninit((self.n_unique(), ncols)).assume_init() };
+        let mut transposed_haplotypes = Array2::<u8>::zeros((self.n_unique(), ncols));
         Zip::indexed(self.haplotypes.rows()).for_each(|i, s| {
             let s = BitSlice::<Lsb0, u8>::from_slice(s.as_slice().unwrap()).unwrap();
             for (b, mut hap) in s.iter().zip(transposed_haplotypes.rows_mut().into_iter()) {
@@ -167,20 +166,20 @@ impl ExpandedBlock {
 //transposed
 //}
 
-pub fn block_to_aligned_transposed<'a, const N: usize>(
-    block: &BlockSlice,
-    nhap: usize,
-) -> Vec<A64Bytes<N>> {
-    let mut transposed = vec![A64Bytes::<N>::default(); nhap];
-    Zip::indexed(block.haplotypes.rows()).for_each(|i, row| {
-        let row = BitSlice::<Lsb0, u8>::from_slice(row.as_slice().unwrap()).unwrap();
-        for (t, &index) in transposed.iter_mut().zip(block.index_map.iter()) {
-            assert!((index as usize) < row.len());
-            t.as_mut_slice()[i] = row[index as usize] as u8;
-        }
-    });
-    transposed
-}
+//pub fn block_to_aligned_transposed<'a, const N: usize>(
+//block: &BlockSlice,
+//nhap: usize,
+//) -> Vec<A64Bytes<N>> {
+//let mut transposed = vec![A64Bytes::<N>::default(); nhap];
+//Zip::indexed(block.haplotypes.rows()).for_each(|i, row| {
+//let row = BitSlice::<Lsb0, u8>::from_slice(row.as_slice().unwrap()).unwrap();
+//for (t, &index) in transposed.iter_mut().zip(block.index_map.iter()) {
+//assert!((index as usize) < row.len());
+//t.as_mut_slice()[i] = row[index as usize] as u8;
+//}
+//});
+//transposed
+//}
 
 pub fn m3vcf_block_scan(
     block: &m3vcf::Block,

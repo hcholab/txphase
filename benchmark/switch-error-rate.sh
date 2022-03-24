@@ -6,7 +6,7 @@ REF2=$3
 TRIO=$4
 
 MERGED_NAME=.switch_rate_merged.vcf.gz
-rm $MERGED_NAME
+rm $MERGED_NAME 2> /dev/null
 bcftools index -t $TEST > /dev/null 2>&1
 bcftools merge -m none -o $MERGED_NAME -O z $TEST $REF1 $REF2 > /dev/null 2>&1
 

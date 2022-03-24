@@ -132,8 +132,7 @@ impl<'a> RefPanelSlice<'a> {
 
     pub fn filter(&self, bitmask: &[bool]) -> Array2<Genotype> {
         let n_haps = bitmask.iter().filter(|b| **b).count();
-        let mut ref_panel =
-            unsafe { Array2::<Genotype>::uninit((self.n_sites, n_haps)).assume_init() };
+        let mut ref_panel = Array2::<Genotype>::zeros((self.n_sites, n_haps));
         let mut pos = 0;
         for block in self.transposed_blocks.iter() {
             block.filter(

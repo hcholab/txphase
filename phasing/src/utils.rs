@@ -50,6 +50,7 @@ mod inner {
     }
 }
 
+#[cfg(feature = "leak-resist")]
 use timing_shield::{TpOrd, TpU32};
 
 #[inline]
@@ -63,6 +64,7 @@ pub fn log2(v: u32) -> u32 {
 }
 
 // long division algorithm
+#[cfg(feature = "leak-resist")]
 pub fn tp_u32_div(n: TpU32, d: TpU32, max_n: u32) -> (TpU32, TpU32) {
     let n_bits = next_log2(max_n);
     let mut q = TpU32::protect(0);
@@ -77,6 +79,7 @@ pub fn tp_u32_div(n: TpU32, d: TpU32, max_n: u32) -> (TpU32, TpU32) {
     (q, r)
 }
 
+#[cfg(feature = "leak-resist")]
 pub fn tp_u32_shl(a: TpU32, b: TpU32, max_b: u32) -> TpU32 {
     let mut out = a;
     for i in 0..max_b {

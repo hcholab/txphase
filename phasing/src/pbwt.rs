@@ -21,7 +21,7 @@ where
     pub fn new(x: R, npos: usize, nhap: usize) -> Self {
         let prev_col = PBWTColumn {
             a: Array1::<u32>::from_iter(0..nhap as u32),
-            d: unsafe { Array1::<u32>::uninit(nhap).assume_init() },
+            d: Array1::<u32>::zeros(nhap),
         };
         Self {
             prev_col,
@@ -51,8 +51,8 @@ where
             None
         } else {
             let mut cur_col = PBWTColumn {
-                a: unsafe { Array1::<u32>::uninit(self.nhap).assume_init() },
-                d: unsafe { Array1::<u32>::uninit(self.nhap).assume_init() },
+                a: Array1::<u32>::zeros(self.nhap),
+                d: Array1::<u32>::zeros(self.nhap),
             };
             let i = self.cur_i;
             let hap_row = self.x.next().unwrap();

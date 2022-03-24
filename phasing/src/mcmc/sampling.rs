@@ -10,7 +10,7 @@ pub fn forward_sampling(
     mut rng: impl Rng,
 ) -> Array2<U8> {
     let m = tprobs_dips.shape()[0];
-    let mut phase_ind = unsafe { Array2::<U8>::uninit((m, 2)).assume_init() };
+    let mut phase_ind = Array2::<U8>::zeros((m, 2));
 
     for i in 0..m {
         let (prev_ind1, prev_ind2) = if i == 0 {
@@ -43,7 +43,7 @@ fn constrained_paired_sample(
 ) -> (UInt, UInt) {
     let weights1 = &weights1 / weights1.sum();
     let weights2 = &weights2 / weights2.sum();
-    let mut combined = unsafe { Array1::<Real>::uninit(P).assume_init() };
+    let mut combined = Array1::<Real>::zeros(P);
     for i in 0..P {
         #[cfg(feature = "leak-resist")]
         {

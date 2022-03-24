@@ -31,7 +31,7 @@ pub fn forward_backward(
 
     let bprobs = backward(ref_panel, genograph, hmm_params, variants, ignored_sites);
 
-    let mut tprobs = unsafe { Array3::<Real>::uninit((m, P, P)).assume_init() };
+    let mut tprobs = Array3::<Real>::zeros((m, P, P));
 
     {
         let init_probs = Array1::<Real>::from_shape_fn(P, |i| bprobs.slice(s![0, i, ..]).sum());
@@ -39,8 +39,8 @@ pub fn forward_backward(
             .for_each(|mut r| r.assign(&init_probs));
     }
 
-    let mut prev_fprobs = unsafe { Array2::<Real>::uninit((P, k)).assume_init() };
-    let mut cur_fprobs = unsafe { Array2::<Real>::uninit((P, k)).assume_init() };
+    let mut prev_fprobs = Array2::<Real>::zeros((P, k));
+    let mut cur_fprobs = Array2::<Real>::zeros((P, k));
 
     init(
         ref_panel.slice(s![0, ..]),
@@ -94,7 +94,7 @@ fn backward(
     let m = ref_panel.nrows();
     let n = ref_panel.ncols();
 
-    let mut bprobs = unsafe { Array3::<Real>::uninit((m, P, n)).assume_init() };
+    let mut bprobs = Array3::<Real>::zeros((m, P, n));
 
     let mut last_cm = variants[m - 1].cm;
 
