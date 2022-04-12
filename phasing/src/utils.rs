@@ -26,12 +26,21 @@ mod inner {
     }
 }
 
-#[cfg(not(feature = "leak-resist"))]
+#[cfg(feature = "leak-resist-new")]
 mod inner {
     #[macro_export]
     macro_rules! tp_value {
         ($x: expr, $t: ty) => {
             $x as $t
+        };
+    }
+
+    #[macro_export]
+    macro_rules! tp_value_real {
+        ($x: expr, $t: ty) => {
+            paste::paste! {
+                crate::RealHmm::[<protect_ $t>](($x) as $t)
+            }
         };
     }
 
@@ -45,7 +54,52 @@ mod inner {
     #[macro_export]
     macro_rules! tp_expose {
         ($x: expr) => {
-            x
+            $x
+        };
+    }
+
+    #[macro_export]
+    macro_rules! tp_expose_real {
+        ($x: expr) => {
+            $x.expose_into_f32()
+        };
+    }
+}
+
+#[cfg(not(feature = "leak-resist-new"))]
+mod inner {
+    #[macro_export]
+    macro_rules! tp_value {
+        ($x: expr, $t: ty) => {
+            $x as $t
+        };
+    }
+
+    #[macro_export]
+    macro_rules! tp_value_real {
+        ($x: expr, $t: ty) => {
+            $x as f64 
+        };
+    }
+
+    #[macro_export]
+    macro_rules! tp_convert_to {
+        ($x: expr, $t: ty) => {
+            $x as $t
+        };
+    }
+
+    #[macro_export]
+    macro_rules! tp_expose {
+        ($x: expr) => {
+            $x
+        };
+    }
+
+    #[macro_export]
+    macro_rules! tp_expose_real {
+        ($x: expr) => {
+            $x
         };
     }
 }

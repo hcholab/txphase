@@ -11,5 +11,9 @@ filename=${filename##*/}
 log_filename=${filename}_round_$ROUND.log
 filename=${filename}_phased_round_$ROUND.vcf.gz
 
-cd ..
-./run.sh $REF_PANEL $REF_SITES $GMAP $INPUT $TAR_DIR/$filename 2>&1 | tee $TAR_DIR/$log_filename
+BIN_DIR=oblivious-bins
+RUN=$BIN_DIR/run.sh
+HOST=$BIN_DIR/host
+SERVER=$BIN_DIR/phasing_oblivious_hmm
+
+./$RUN $HOST $SERVER $REF_PANEL $REF_SITES $GMAP $INPUT $TAR_DIR/$filename 2>&1 | tee $TAR_DIR/$log_filename

@@ -66,7 +66,6 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
             maxprob_next[h2] = max_val;
             backtrace[[i, h2]] = max_ind;
         }
-
         maxprob = &maxprob_next / maxprob_next.sum();
     }
 

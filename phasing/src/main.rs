@@ -1,3 +1,4 @@
+#![feature(stmt_expr_attributes)]
 #![allow(dead_code)]
 mod genotype_graph;
 mod hmm;
@@ -25,14 +26,30 @@ mod inner {
     pub type Real = tp_fixedpoint::TpFixed64<30>;
 }
 
-#[cfg(not(feature = "leak-resist"))]
+#[cfg(feature = "leak-resist-new")]
 mod inner {
+    use tp_fixedpoint::timing_shield::{TpBool};
     pub type Genotype = i8;
     pub type UInt = u32;
     pub type Int = i32;
     pub type U8 = u8;
     pub type Bool = bool;
+    pub type NewBool = TpBool;
     pub type Real = f64;
+    pub type RealHmm = tp_fixedpoint::TpFixed64<53>;
+}
+
+
+#[cfg(not(feature = "leak-resist-new"))]
+mod inner {
+    pub type Genotype = i8;
+    pub type UInt = u32;
+    pub type Int = i32;
+    pub type U8 = u8;
+    pub type NewBool = bool;
+    pub type Bool = bool;
+    pub type Real = f64;
+    pub type RealHmm = f64;
 }
 
 use inner::*;
@@ -53,16 +70,18 @@ pub fn log_template(str1: &str, str2: &str) -> String {
 fn main() {
     env_logger::init();
     let min_window_len_cm = 2.5;
+    //let min_window_len_cm = 3.0;
     let pbwt_modulo = 0.02;
-    let n_pos_window_overlap = 10;
+    let min_het_rate = 0.3f64;
+    let n_pos_window_overlap = (3. / min_het_rate).ceil() as usize;
     let s = 4;
 
     let seed = rand::thread_rng().next_u64();
     //let seed = 1235;
     let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
-    info!("Parameters:");
-    info!("{}", &log_template("Seed", &format!("{seed}")));
+    println!("Parameters:");
+    println!("{}", &log_template("Seed", &format!("{seed}")));
 
     let (host_stream, _host_socket) = TcpListener::bind(SocketAddr::from((
         IpAddr::from_str("127.0.0.1").unwrap(),

@@ -181,7 +181,7 @@ impl GenotypeGraph {
         }
     }
 
-    pub fn slice<'a>(&'a mut self, start: usize, end: usize) -> GenotypeGraphSlice<'a> {
+    pub fn slice<'a>(&'a self, start: usize, end: usize) -> GenotypeGraphSlice<'a> {
         GenotypeGraphSlice {
             graph: self.graph.slice(s![start..end]),
         }
@@ -458,9 +458,12 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
     let mut entrophy = 0.;
     for i in 0..P {
         for j in 0..P {
-            //let prob = tab[[i, j]] * tab[[P - 1 - i, P - 1 - j]];
             let prob = tab[[i, j]];
             entrophy += if prob == 0. { 0. } else { -prob * prob.log10() };
+            if entrophy.is_nan() {
+                println!("prob: {:?}", tab);
+                panic!();
+            }
             #[cfg(feature = "leak-resist")]
             {
                 elems.push(SortItem {
