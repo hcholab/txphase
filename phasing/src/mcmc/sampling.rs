@@ -24,7 +24,7 @@ pub fn forward_sampling(
         };
 
         let (ind1, ind2) = if genotype_graph[i].is_segment_marker() || (is_first_window && i == 0) {
-        //let (ind1, ind2) = if genotype_graph[i].is_segment_marker() {
+            //let (ind1, ind2) = if genotype_graph[i].is_segment_marker() {
             constrained_paired_sample(
                 tprobs_dips.slice(s![i, prev_ind1 as usize, ..]),
                 tprobs_dips.slice(s![i, prev_ind2 as usize, ..]),
@@ -47,9 +47,9 @@ fn constrained_paired_sample(
     rng: impl Rng,
 ) -> (UInt, UInt) {
     let scale_1 = tp_value_real!(1, i64) / weights1.sum();
-    let weights1 = &weights1 * scale_1; 
+    let weights1 = &weights1 * scale_1;
     let scale_2 = tp_value_real!(1, i64) / weights2.sum();
-    let weights2 = &weights2 * scale_2; 
+    let weights2 = &weights2 * scale_2;
     let mut combined = Array1::<RealHmm>::zeros(P);
     for i in 0..P {
         combined[i] = weights1[i] * weights2[P - 1 - i];

@@ -78,7 +78,7 @@ mod inner {
     #[macro_export]
     macro_rules! tp_value_real {
         ($x: expr, $t: ty) => {
-            $x as f64 
+            $x as f64
         };
     }
 

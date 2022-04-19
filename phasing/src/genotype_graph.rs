@@ -460,10 +460,6 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
         for j in 0..P {
             let prob = tab[[i, j]];
             entrophy += if prob == 0. { 0. } else { -prob * prob.log10() };
-            if entrophy.is_nan() {
-                println!("prob: {:?}", tab);
-                panic!();
-            }
             #[cfg(feature = "leak-resist")]
             {
                 elems.push(SortItem {

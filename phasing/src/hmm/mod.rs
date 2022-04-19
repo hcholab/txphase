@@ -3,14 +3,13 @@ pub use params::*;
 
 use crate::genotype_graph::{G, P};
 use crate::tp_value_real;
-use crate::variants::Variant;
 use crate::{Genotype, Real, RealHmm};
+#[cfg(feature = "leak-resist-new")]
+use ndarray::ArrayViewMut1;
 #[cfg(feature = "leak-resist-new")]
 use timing_shield::{TpBool, TpI16, TpOrd};
 
-use ndarray::{
-    s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut1, ArrayViewMut2, Zip,
-};
+use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
 
 #[cfg(not(feature = "leak-resist-new"))]
 pub struct Hmm {}
@@ -64,14 +63,15 @@ impl Hmm {
         ref_panel: ArrayView2<Genotype>,
         genograph: ArrayView1<G>,
         hmm_params: &HmmParams,
-        variants: ArrayView1<Variant>,
+        rprobs: &RprobsSlice,
         ignored_sites: ArrayView1<bool>,
         is_first_window: bool,
     ) -> Array3<RealHmm> {
         let m = ref_panel.nrows();
         let k = ref_panel.ncols();
+        let mut rprobs_iter = rprobs.get_forward();
 
-        let bprobs = self.backward(ref_panel, genograph, hmm_params, variants, ignored_sites);
+        let bprobs = self.backward(ref_panel, genograph, hmm_params, rprobs, ignored_sites);
 
         #[cfg(feature = "leak-resist-new")]
         {
@@ -94,20 +94,15 @@ impl Hmm {
             prev_fprobs.view_mut(),
         );
 
-        let mut last_cm = tp_value_real!(variants[0].cm, f32);
-
         for i in 1..m {
+            let rprobs = rprobs_iter.next().unwrap();
+
             #[cfg(feature = "leak-resist-new")]
             {
                 self.cur_i = i;
             }
 
             if !ignored_sites[i] {
-                let rprobs = {
-                    let cm_dist = tp_value_real!(variants[i].cm, f32) - last_cm;
-                    hmm_params.get_rprobs(cm_dist)
-                };
-
                 self.transition(rprobs, prev_fprobs.view(), cur_fprobs.view_mut());
 
                 if genograph[i].is_segment_marker() {
@@ -129,18 +124,15 @@ impl Hmm {
                 prev_fprobs.assign(&cur_fprobs);
                 #[cfg(feature = "leak-resist-new")]
                 self.prev_fprobs_e.assign(&self.cur_fprobs_e);
-
-                last_cm = tp_value_real!(variants[i].cm, f32);
             }
         }
         tprobs
     }
 
-    pub fn combine_dips(
-        &mut self,
-        tprobs: ArrayView2<RealHmm>,
-        mut tprobs_dips: ArrayViewMut2<Real>,
-    ) {
+    pub fn combine_dips(&mut self, tprobs: ArrayView2<RealHmm>, tprobs_dips: ArrayViewMut2<Real>) {
+        #[cfg(not(feature = "leak-resist-new"))]
+        let mut tprobs_dips = tprobs_dips;
+
         #[cfg(feature = "leak-resist-new")]
         let mut tprobs_e = self.bprobs_e.row_mut(self.cur_i);
 
@@ -201,16 +193,6 @@ impl Hmm {
                 tprobs_dips.view(),
                 tprobs_dips_e.view(),
             ));
-
-            //for &i in &_tprobs_dips {
-                //if i > 1. {
-                    //println!("{}: sum = {}", self.cur_i, _tprobs_dips.sum());
-                    //println!("s {:?}", debug_expose_s(tprobs_dips.view()));
-                    //println!("e {:?}", debug_expose_e(tprobs_dips_e.view()));
-                    //println!("r {:?}", _tprobs_dips);
-                    //panic!();
-                //}
-            //}
         }
     }
 
@@ -219,11 +201,12 @@ impl Hmm {
         ref_panel: ArrayView2<Genotype>,
         genograph: ArrayView1<G>,
         hmm_params: &HmmParams,
-        variants: ArrayView1<Variant>,
+        rprobs: &RprobsSlice,
         ignored_sites: ArrayView1<bool>,
     ) -> Array3<RealHmm> {
         let m = ref_panel.nrows();
         let n = ref_panel.ncols();
+        let mut rprobs_iter = rprobs.get_backward();
 
         let mut bprobs = Array3::<RealHmm>::zeros((m, P, n));
 
@@ -233,7 +216,7 @@ impl Hmm {
             self.cur_i = m - 1;
         }
 
-        let mut last_cm = tp_value_real!(variants[m - 1].cm, f32);
+        //let mut last_cm = tp_value_real!(variants[m - 1].cm, f32);
 
         self.init(
             ref_panel.row(m - 1),
@@ -243,6 +226,7 @@ impl Hmm {
         );
 
         for i in (0..m - 1).rev() {
+            let rprobs = rprobs_iter.next().unwrap();
             let (mut cur_bprob, prev_bprob) =
                 bprobs.multi_slice_mut((s![i, .., ..], s![i + 1, .., ..]));
 
@@ -252,11 +236,6 @@ impl Hmm {
             }
 
             if !ignored_sites[i] || genograph[i + 1].is_segment_marker() {
-                let rprobs = {
-                    let cm_dist = last_cm - tp_value_real!(variants[i].cm, f32);
-                    hmm_params.get_rprobs(cm_dist)
-                };
-
                 self.transition(rprobs, prev_bprob.view(), cur_bprob.view_mut());
 
                 if genograph[i + 1].is_segment_marker() {
@@ -269,7 +248,6 @@ impl Hmm {
                     hmm_params,
                     cur_bprob.view_mut(),
                 );
-                last_cm = tp_value_real!(variants[i].cm, f32);
             } else {
                 cur_bprob.assign(&prev_bprob);
 
@@ -333,7 +311,8 @@ impl Hmm {
         let (mut cur_probs_e, prev_probs_e) = self.get_probs_e();
 
         #[cfg(feature = "leak-resist-new")]
-        let (mut all_sum_h, mut all_sum_h_e) = sum_scale_by_row(prev_probs.view(), prev_probs_e.view());
+        let (mut all_sum_h, mut all_sum_h_e) =
+            sum_scale_by_row(prev_probs.view(), prev_probs_e.view());
 
         #[cfg(not(feature = "leak-resist-new"))]
         let all_sum_h = Array1::from_shape_fn(prev_probs.nrows(), |i| prev_probs.row(i).sum());
@@ -362,7 +341,6 @@ impl Hmm {
                     });
             });
 
-
         #[cfg(feature = "leak-resist-new")]
         {
             cur_probs_e.assign(&all_sum_h_e);
@@ -370,8 +348,7 @@ impl Hmm {
         }
 
         #[cfg(feature = "leak-resist-new")]
-        let (sum, sum_e) =
-            sum_scale_arr1(all_sum_h.view_mut(), all_sum_h_e.view_mut());
+        let (sum, sum_e) = sum_scale_arr1(all_sum_h.view_mut(), all_sum_h_e.view_mut());
 
         #[cfg(not(feature = "leak-resist-new"))]
         let sum: RealHmm = all_sum_h.sum();
@@ -670,8 +647,7 @@ mod inner {
     }
 
     pub fn max_e(e: ArrayView1<TpI16>) -> TpI16 {
-        e 
-            .iter()
+        e.iter()
             .cloned()
             .reduce(|accu, item| (accu.tp_gt(&item)).select(accu, item))
             .unwrap()

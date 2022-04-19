@@ -10,7 +10,7 @@ use crate::hmm::Hmm;
 use crate::neighbors_finding;
 use crate::ref_panel::RefPanelSlice;
 use crate::variants::{Rarity, Variant};
-use crate::{Genotype, Real, tp_value_real};
+use crate::{Genotype, Real};
 use rand::Rng;
 
 #[cfg(feature = "leak-resist-new")]
@@ -87,10 +87,10 @@ impl<'a> Mcmc<'a> {
         }
 
         //let mut ref_file = std::io::BufReader::new(
-            //std::fs::File::open(
-                //"/home/ndokmai/workspace/phasing-oram/phasing/tests/ref_tprobs_chr20.bin",
-            //)
-            //.unwrap(),
+        //std::fs::File::open(
+        //"/home/ndokmai/workspace/phasing-oram/phasing/tests/ref_tprobs_chr20.bin",
+        //)
+        //.unwrap(),
         //);
 
         //let mut ref_file = std::io::BufWriter::new(
@@ -116,8 +116,8 @@ impl<'a> Mcmc<'a> {
         }
 
         //#[cfg(feature = "leak-resist-new")]
-        //let tprobs = Array3::<Real>::from_shape_fn(mcmc.tprobs.dim(), |(i, j, l)| 
-            //crate::hmm::debug_expose(mcmc.tprobs[[i, j, l]], self.bprobs_e[[i, j]])
+        //let tprobs = Array3::<Real>::from_shape_fn(mcmc.tprobs.dim(), |(i, j, l)|
+        //crate::hmm::debug_expose(mcmc.tprobs[[i, j, l]], self.bprobs_e[[i, j]])
         //);
 
         //#[cfg(not(feature = "leak-resist-new"))]
@@ -162,27 +162,27 @@ impl<'a> Mcmc<'a> {
     }
 
     //fn initialize_from_input(
-        //params: &'a McmcSharedParams,
-        //genotypes: ArrayView1<Genotype>,
-        //estimated_haps: Array2<Genotype>,
+    //params: &'a McmcSharedParams,
+    //genotypes: ArrayView1<Genotype>,
+    //estimated_haps: Array2<Genotype>,
     //) -> Self {
-        //println!("=== Initialization ===",);
-        //let now = Instant::now();
-        //let phased_ind = Array2::<u8>::zeros((estimated_haps.nrows(), 2));
-        //let tprobs = Array3::<Real>::zeros((estimated_haps.nrows(), P, P));
-        //let genotype_graph = GenotypeGraph::build(genotypes);
-        //let ignored_sites = Self::get_ignored_sites(params.variants.view(), genotypes);
-        //println!("Initialization: {} ms", (Instant::now() - now).as_millis());
-        //println!("",);
-        //Self {
-            //params,
-            //cur_overlap_region_len: params.overlap_region_len,
-            //genotype_graph,
-            //estimated_haps,
-            //phased_ind,
-            //tprobs,
-            //ignored_sites,
-        //}
+    //println!("=== Initialization ===",);
+    //let now = Instant::now();
+    //let phased_ind = Array2::<u8>::zeros((estimated_haps.nrows(), 2));
+    //let tprobs = Array3::<Real>::zeros((estimated_haps.nrows(), P, P));
+    //let genotype_graph = GenotypeGraph::build(genotypes);
+    //let ignored_sites = Self::get_ignored_sites(params.variants.view(), genotypes);
+    //println!("Initialization: {} ms", (Instant::now() - now).as_millis());
+    //println!("",);
+    //Self {
+    //params,
+    //cur_overlap_region_len: params.overlap_region_len,
+    //genotype_graph,
+    //estimated_haps,
+    //phased_ind,
+    //tprobs,
+    //ignored_sites,
+    //}
     //}
 
     fn iteration(&mut self, iter_option: IterOptionInternal, mut rng: impl Rng) {
@@ -190,7 +190,7 @@ impl<'a> Mcmc<'a> {
         let now = Instant::now();
 
         //let max_k = Some(MAX_K);
-        let max_k = None; 
+        let max_k = None;
         if let Some(max_k) = max_k {
             println!("Max K: {max_k}");
         } else {
@@ -207,7 +207,13 @@ impl<'a> Mcmc<'a> {
         let mut tprob_pairs = Array2::<Real>::zeros((P, P));
 
         let mut i = 0;
-        let mut is_first_window = true; 
+        let mut is_first_window = true;
+
+        let rprobs = self.params.hmm_params.get_rprobs(
+            self.ignored_sites.view(),
+            &self.genotype_graph,
+            self.params.variants.view(),
+        );
 
         for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
             sum_window_size +=
@@ -215,6 +221,7 @@ impl<'a> Mcmc<'a> {
             let estimated_haps_w = self.estimated_haps.slice(s![start_w..end_w, ..]).to_owned();
             let genotype_graph_w = self.genotype_graph.slice(start_w, end_w);
             let params_w = self.params.slice(start_w, end_w);
+            let rprobs_w = rprobs.slice(start_w, end_w);
             let pbwt_evaluted_filter_w = &self.params.pbwt_evaluted[start_w..end_w];
             let pbwt_group_filter_w = &pbwt_group_filter[start_w..end_w];
             let ignored_sites_w = self.ignored_sites.slice(s![start_w..end_w]);
@@ -233,7 +240,7 @@ impl<'a> Mcmc<'a> {
                 selected_ref_panel.view(),
                 genotype_graph_w.graph.view(),
                 &self.params.hmm_params,
-                params_w.variants,
+                &rprobs_w,
                 ignored_sites_w,
                 is_first_window,
             );
@@ -251,19 +258,18 @@ impl<'a> Mcmc<'a> {
 
             //// TODO: for debugging. Delete this
             //if iter_option == IterOptionInternal::Burnin {
-                //Zip::from(tprobs_window_target.outer_iter_mut())
-                    //.and(tprobs_window_src.outer_iter())
-                    //.for_each(|mut a, b| {
-                        //#[cfg(feature = "leak-resist-new")]
-                        //{
-                            //a.assign(&crate::hmm::debug_expose_array(b, hmm.bprobs_e.row(j)));
-                            //j += 1;
-                        //}
-                        //#[cfg(not(feature = "leak-resist-new"))]
-                        //a.assign(&b);
-                    //});
+            //Zip::from(tprobs_window_target.outer_iter_mut())
+            //.and(tprobs_window_src.outer_iter())
+            //.for_each(|mut a, b| {
+            //#[cfg(feature = "leak-resist-new")]
+            //{
+            //a.assign(&crate::hmm::debug_expose_array(b, hmm.bprobs_e.row(j)));
+            //j += 1;
             //}
-
+            //#[cfg(not(feature = "leak-resist-new"))]
+            //a.assign(&b);
+            //});
+            //}
 
             if iter_option == IterOptionInternal::Pruning {
                 Zip::from(tprobs_window_target.outer_iter_mut())
@@ -274,7 +280,7 @@ impl<'a> Mcmc<'a> {
                             hmm.cur_i = j;
                             j += 1;
                         }
-                        if i==0 || genotype_graph.graph[i].is_segment_marker() {
+                        if i == 0 || genotype_graph.graph[i].is_segment_marker() {
                             hmm.combine_dips(b, a);
                         } else {
                             a.fill(0.);
@@ -293,7 +299,7 @@ impl<'a> Mcmc<'a> {
                                 hmm.cur_i = j;
                                 j += 1;
                             }
-                            if i==0 || genotype_graph.graph[i].is_segment_marker() {
+                            if i == 0 || genotype_graph.graph[i].is_segment_marker() {
                                 hmm.combine_dips(b, a);
                             } else {
                                 a.fill(0.);
@@ -309,7 +315,7 @@ impl<'a> Mcmc<'a> {
                                 hmm.cur_i = j;
                                 j += 1;
                             }
-                            if i==0 || genotype_graph.graph[i].is_segment_marker() {
+                            if i == 0 || genotype_graph.graph[i].is_segment_marker() {
                                 hmm.combine_dips(b, tprob_pairs.view_mut());
                             }
                             i += 1;
@@ -317,7 +323,6 @@ impl<'a> Mcmc<'a> {
                         });
                 }
             }
-
 
             // sample
             let phased_ind_window = sampling::forward_sampling(
@@ -446,10 +451,10 @@ impl<'a> Mcmc<'a> {
                         assert_eq!(ref_t, t);
                     }
                     //for (a, b) in ref_t.iter().zip(t.iter()) {
-                        //if (a-b).abs() >= 1e-4 {
-                            //println!("{a}, {b}, {}", (a-b).abs());
-                        //}
-                        //assert!((a-b).abs() < 1e-4);
+                    //if (a-b).abs() >= 1e-4 {
+                    //println!("{a}, {b}, {}", (a-b).abs());
+                    //}
+                    //assert!((a-b).abs() < 1e-4);
                     //}
                 }
             });
@@ -564,7 +569,7 @@ fn select_ref_panel(
     pbwt_evaluted_filter: &[bool],
     pbwt_group_filter: &[bool],
     s: usize,
-    max_k: Option<usize>
+    max_k: Option<usize>,
 ) -> (Array2<Genotype>, usize) {
     let n_pbwt_pos = pbwt_evaluted_filter.iter().filter(|b| **b).count();
     let neighbors_bitmap = neighbors_finding::find_neighbors(
@@ -590,7 +595,12 @@ fn select_ref_panel(
 
     let neighbors_bitmap = if let Some(max_k) = max_k {
         let mut neighbors_bitmap_new = vec![false; neighbors_bitmap.len()];
-        let neighbors_idx = neighbors_bitmap.into_iter().enumerate().filter_map(|(i, v)| if v { Some(i) } else { None }).take(max_k).collect::<Vec<_>>();
+        let neighbors_idx = neighbors_bitmap
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, v)| if v { Some(i) } else { None })
+            .take(max_k)
+            .collect::<Vec<_>>();
         for i in neighbors_idx {
             neighbors_bitmap_new[i] = true;
         }

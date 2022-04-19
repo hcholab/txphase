@@ -28,17 +28,16 @@ mod inner {
 
 #[cfg(feature = "leak-resist-new")]
 mod inner {
-    use tp_fixedpoint::timing_shield::{TpBool};
+    use tp_fixedpoint::timing_shield::TpBool;
     pub type Genotype = i8;
     pub type UInt = u32;
     pub type Int = i32;
     pub type U8 = u8;
     pub type Bool = bool;
-    pub type NewBool = TpBool;
+    pub type BoolMcc = TpBool;
     pub type Real = f64;
     pub type RealHmm = tp_fixedpoint::TpFixed64<53>;
 }
-
 
 #[cfg(not(feature = "leak-resist-new"))]
 mod inner {
@@ -46,8 +45,8 @@ mod inner {
     pub type UInt = u32;
     pub type Int = i32;
     pub type U8 = u8;
-    pub type NewBool = bool;
     pub type Bool = bool;
+    pub type BoolMcc = bool;
     pub type Real = f64;
     pub type RealHmm = f64;
 }
