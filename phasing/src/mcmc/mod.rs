@@ -10,7 +10,7 @@ use crate::hmm::Hmm;
 use crate::neighbors_finding;
 use crate::ref_panel::RefPanelSlice;
 use crate::variants::{Rarity, Variant};
-use crate::{Genotype, Real};
+use crate::{tp_value_new, BoolMcc, Genotype, Real};
 use rand::Rng;
 
 #[cfg(feature = "leak-resist-new")]
@@ -41,7 +41,7 @@ pub struct Mcmc<'a> {
     params: &'a McmcSharedParams,
     cur_overlap_region_len: usize,
     genotype_graph: GenotypeGraph,
-    ignored_sites: Array1<bool>,
+    ignored_sites: Array1<BoolMcc>,
     estimated_haps: Array2<Genotype>,
     phased_ind: Array2<u8>,
     tprobs: Array3<Real>,
@@ -279,7 +279,10 @@ impl<'a> Mcmc<'a> {
                         {
                             hmm.cur_i = j;
                             j += 1;
+                            hmm.combine_dips(b, a);
                         }
+
+                        #[cfg(not(feature = "leak-resist-new"))]
                         if i == 0 || genotype_graph.graph[i].is_segment_marker() {
                             hmm.combine_dips(b, a);
                         } else {
@@ -298,7 +301,10 @@ impl<'a> Mcmc<'a> {
                             {
                                 hmm.cur_i = j;
                                 j += 1;
+                                hmm.combine_dips(b, a);
                             }
+
+                            #[cfg(not(feature = "leak-resist-new"))]
                             if i == 0 || genotype_graph.graph[i].is_segment_marker() {
                                 hmm.combine_dips(b, a);
                             } else {
@@ -314,12 +320,17 @@ impl<'a> Mcmc<'a> {
                             {
                                 hmm.cur_i = j;
                                 j += 1;
+                                hmm.combine_dips(b, tprob_pairs.view_mut());
+                                a += &tprob_pairs;
                             }
+
+                            #[cfg(not(feature = "leak-resist-new"))]
                             if i == 0 || genotype_graph.graph[i].is_segment_marker() {
                                 hmm.combine_dips(b, tprob_pairs.view_mut());
+                                a += &tprob_pairs;
                             }
+
                             i += 1;
-                            a += &tprob_pairs;
                         });
                 }
             }
@@ -547,17 +558,20 @@ impl<'a> Mcmc<'a> {
     fn get_ignored_sites(
         variants: ArrayView1<Variant>,
         genotypes: ArrayView1<Genotype>,
-    ) -> Array1<bool> {
-        let mut ignored_sites = Array1::<bool>::from_elem(variants.dim(), false);
+    ) -> Array1<BoolMcc> {
+        let mut ignored_sites = Array1::<BoolMcc>::from_elem(variants.dim(), tp_value_new!(false, bool));
         Zip::from(&mut ignored_sites)
             .and(&variants)
             .and(&genotypes)
             .for_each(|s, v, &g| {
                 let rarity = v.rarity();
-                *s = (g == 0 || g == 2)
-                    && !(rarity == Rarity::NotRare
-                        || (rarity == Rarity::Rare(true) && g == 2)
-                        || (rarity == Rarity::Rare(false) && g == 0));
+                *s = tp_value_new!(
+                    (g == 0 || g == 2)
+                        && !(rarity == Rarity::NotRare
+                            || (rarity == Rarity::Rare(true) && g == 2)
+                            || (rarity == Rarity::Rare(false) && g == 0)),
+                    bool
+                );
             });
         ignored_sites
     }

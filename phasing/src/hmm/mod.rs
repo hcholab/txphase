@@ -3,7 +3,7 @@ pub use params::*;
 
 use crate::genotype_graph::{G, P};
 use crate::tp_value_real;
-use crate::{Genotype, Real, RealHmm};
+use crate::{BoolMcc, Genotype, Real, RealHmm};
 #[cfg(feature = "leak-resist-new")]
 use ndarray::ArrayViewMut1;
 #[cfg(feature = "leak-resist-new")]
@@ -64,7 +64,7 @@ impl Hmm {
         genograph: ArrayView1<G>,
         hmm_params: &HmmParams,
         rprobs: &RprobsSlice,
-        ignored_sites: ArrayView1<bool>,
+        ignored_sites: ArrayView1<BoolMcc>,
         is_first_window: bool,
     ) -> Array3<RealHmm> {
         let m = ref_panel.nrows();
@@ -97,35 +97,74 @@ impl Hmm {
         for i in 1..m {
             let rprobs = rprobs_iter.next().unwrap();
 
+            #[cfg(not(feature = "leak-resist-new"))]
+            if ignored_sites[i] {
+                continue;
+            }
+
             #[cfg(feature = "leak-resist-new")]
             {
                 self.cur_i = i;
             }
 
-            if !ignored_sites[i] {
-                self.transition(rprobs, prev_fprobs.view(), cur_fprobs.view_mut());
+            self.transition(rprobs, prev_fprobs.view(), cur_fprobs.view_mut());
 
-                if genograph[i].is_segment_marker() {
-                    self.combine(
-                        cur_fprobs.view(),
-                        bprobs.slice(s![i, .., ..]),
-                        tprobs.slice_mut(s![i, .., ..]),
-                    );
-                    self.collapse(cur_fprobs.view_mut());
-                }
-
-                self.emission(
-                    ref_panel.slice(s![i, ..]),
-                    genograph[i],
-                    hmm_params,
-                    cur_fprobs.view_mut(),
+            #[cfg(feature = "leak-resist-new")]
+            {
+                self.combine(
+                    cur_fprobs.view(),
+                    bprobs.slice(s![i, .., ..]),
+                    tprobs.slice_mut(s![i, .., ..]),
                 );
 
-                prev_fprobs.assign(&cur_fprobs);
-                #[cfg(feature = "leak-resist-new")]
-                self.prev_fprobs_e.assign(&self.cur_fprobs_e);
+                let cond = TpBool::protect(genograph[i].is_segment_marker());
+                let tmp = cur_fprobs.clone();
+                let tmp_e = self.cur_fprobs_e.clone();
+                self.collapse(cur_fprobs.view_mut());
+
+                Zip::from(&tmp)
+                    .and(&mut cur_fprobs)
+                    .for_each(|t, c| *c = cond.select(*c, *t));
+
+                Zip::from(&tmp_e)
+                    .and(&mut self.cur_fprobs_e)
+                    .for_each(|t, c| *c = cond.select(*c, *t));
+                    
             }
+
+            #[cfg(not(feature = "leak-resist-new"))]
+            if genograph[i].is_segment_marker() {
+                self.combine(
+                    cur_fprobs.view(),
+                    bprobs.slice(s![i, .., ..]),
+                    tprobs.slice_mut(s![i, .., ..]),
+                );
+                self.collapse(cur_fprobs.view_mut());
+            }
+
+            self.emission(
+                ref_panel.slice(s![i, ..]),
+                genograph[i],
+                hmm_params,
+                cur_fprobs.view_mut(),
+            );
+
+            #[cfg(feature = "leak-resist-new")]
+            {
+                let cond = !ignored_sites[i];
+                Zip::from(&cur_fprobs)
+                    .and(&mut prev_fprobs)
+                    .for_each(|c, p| *p = cond.select(*c, *p));
+
+                Zip::from(&self.cur_fprobs_e)
+                    .and(&mut self.prev_fprobs_e)
+                    .for_each(|c, p| *p = cond.select(*c, *p));
+            }
+
+            #[cfg(not(feature = "leak-resist-new"))]
+            prev_fprobs.assign(&cur_fprobs);
         }
+
         tprobs
     }
 
@@ -202,7 +241,7 @@ impl Hmm {
         genograph: ArrayView1<G>,
         hmm_params: &HmmParams,
         rprobs: &RprobsSlice,
-        ignored_sites: ArrayView1<bool>,
+        ignored_sites: ArrayView1<BoolMcc>,
     ) -> Array3<RealHmm> {
         let m = ref_panel.nrows();
         let n = ref_panel.ncols();
@@ -230,34 +269,46 @@ impl Hmm {
             let (mut cur_bprob, prev_bprob) =
                 bprobs.multi_slice_mut((s![i, .., ..], s![i + 1, .., ..]));
 
+            #[cfg(not(feature = "leak-resist-new"))]
+            if ignored_sites[i] && !genograph[i + 1].is_segment_marker() {
+                cur_bprob.assign(&prev_bprob);
+                continue;
+            }
+
             #[cfg(feature = "leak-resist-new")]
             {
                 self.cur_i = i;
             }
 
-            if !ignored_sites[i] || genograph[i + 1].is_segment_marker() {
-                self.transition(rprobs, prev_bprob.view(), cur_bprob.view_mut());
+            self.transition(rprobs, prev_bprob.view(), cur_bprob.view_mut());
 
-                if genograph[i + 1].is_segment_marker() {
-                    self.collapse(cur_bprob.view_mut());
-                }
+            if genograph[i + 1].is_segment_marker() {
+                self.collapse(cur_bprob.view_mut());
+            }
 
-                self.emission(
-                    ref_panel.row(i),
-                    genograph[i],
-                    hmm_params,
-                    cur_bprob.view_mut(),
-                );
-            } else {
-                cur_bprob.assign(&prev_bprob);
+            self.emission(
+                ref_panel.row(i),
+                genograph[i],
+                hmm_params,
+                cur_bprob.view_mut(),
+            );
 
-                #[cfg(feature = "leak-resist-new")]
-                {
-                    let (mut cur_bprobs_e, prev_bprobs_e) = self.get_probs_e();
-                    cur_bprobs_e.assign(&prev_bprobs_e);
-                }
+            #[cfg(feature = "leak-resist-new")]
+            {
+                let cond =
+                    !ignored_sites[i] | TpBool::protect(genograph[i + 1].is_segment_marker());
+                Zip::from(&mut cur_bprob)
+                    .and(&prev_bprob)
+                    .for_each(|c, p| *c = cond.select(*c, *p));
+
+                let (mut cur_bprob_e, prev_bprob_e) = self.get_probs_e();
+
+                Zip::from(&mut cur_bprob_e)
+                    .and(&prev_bprob_e)
+                    .for_each(|c, p| *c = cond.select(*c, *p));
             }
         }
+
         bprobs
     }
 

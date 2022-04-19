@@ -1,6 +1,6 @@
 use crate::genotype_graph::GenotypeGraph;
 use crate::variants::Variant;
-use crate::{tp_value_real, RealHmm};
+use crate::{tp_value_new, tp_value_real, BoolMcc, RealHmm};
 use ndarray::ArrayView1;
 #[cfg(feature = "leak-resist-new")]
 use timing_shield::{TpBool, TpEq, TpOrd, TpU32};
@@ -37,25 +37,21 @@ impl HmmParams {
 
     pub fn get_rprobs(
         &self,
-        ignored_sites: ArrayView1<bool>,
+        ignored_sites: ArrayView1<BoolMcc>,
         genotype_graph: &GenotypeGraph,
         variants: ArrayView1<Variant>,
     ) -> Rprobs {
         let mut fwd_rprobs = Vec::new();
         let mut bwd_rprobs = Vec::new();
 
-        #[cfg(feature = "leak-resist-new")]
-        let mut n_skips = TpU32::protect(0);
-
-        #[cfg(not(feature = "leak-resist-new"))]
-        let mut n_skips = 0;
+        let mut n_skips = tp_value_new!(0, u32);
 
         let mut last_cm = tp_value_real!(variants[0].cm, f32);
 
         for i in 1..variants.len() {
             #[cfg(feature = "leak-resist-new")]
             let r = {
-                let cond = !TpBool::protect(ignored_sites[i]);
+                let cond = !ignored_sites[i];
                 let r0 = {
                     let cm = variants[i].cm - variants[i - 1].cm;
                     compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
@@ -66,7 +62,7 @@ impl HmmParams {
                         let cm = variants[i].cm - variants[i - 2].cm;
                         compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
                     } else {
-                        assert!(n_skips.expose()!=1);
+                        assert!(n_skips.expose() != 1);
                         (tp_value_real!(0, i64), tp_value_real!(0, i64))
                     }
                 };
@@ -121,22 +117,14 @@ impl HmmParams {
             fwd_rprobs.push(r);
         }
 
-        #[cfg(feature = "leak-resist-new")]
-        {
-            n_skips = TpU32::protect(0);
-        }
-
-        #[cfg(not(feature = "leak-resist-new"))]
-        {
-            n_skips = 0;
-        }
+        n_skips = tp_value_new!(0, u32);
 
         last_cm = tp_value_real!(variants.last().unwrap().cm, f32);
 
         for i in (0..variants.len() - 1).rev() {
             #[cfg(feature = "leak-resist-new")]
             let r = {
-                let cond = !TpBool::protect(ignored_sites[i])
+                let cond = !ignored_sites[i]
                     | TpBool::protect(genotype_graph.graph[i + 1].is_segment_marker());
                 let r0 = {
                     let cm = variants[i + 1].cm - variants[i].cm;
@@ -147,7 +135,7 @@ impl HmmParams {
                         let cm = variants[i + 2].cm - variants[i].cm;
                         compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
                     } else {
-                        assert!(n_skips.expose()!=1);
+                        assert!(n_skips.expose() != 1);
                         (tp_value_real!(0, i64), tp_value_real!(0, i64))
                     }
                 };

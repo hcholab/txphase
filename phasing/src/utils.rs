@@ -36,6 +36,15 @@ mod inner {
     }
 
     #[macro_export]
+    macro_rules! tp_value_new {
+        ($x: expr, $t: ty) => {
+            paste::paste! {
+                tp_fixedpoint::timing_shield::[<Tp $t:camel>]::protect($x as $t)
+            }
+        };
+    }
+
+    #[macro_export]
     macro_rules! tp_value_real {
         ($x: expr, $t: ty) => {
             paste::paste! {
@@ -70,6 +79,13 @@ mod inner {
 mod inner {
     #[macro_export]
     macro_rules! tp_value {
+        ($x: expr, $t: ty) => {
+            $x as $t
+        };
+    }
+
+    #[macro_export]
+    macro_rules! tp_value_new {
         ($x: expr, $t: ty) => {
             $x as $t
         };
