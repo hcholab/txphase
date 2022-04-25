@@ -54,7 +54,7 @@ mod inner {
 use inner::*;
 
 use crate::mcmc::IterOption;
-use log::info;
+//use log::info;
 use ndarray::Array1;
 use rand::{RngCore, SeedableRng};
 use std::net::{IpAddr, SocketAddr, TcpListener};

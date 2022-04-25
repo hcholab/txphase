@@ -5,11 +5,22 @@ use crate::genotype_graph::{G, P};
 use crate::tp_value_real;
 use crate::{BoolMcc, Genotype, Real, RealHmm};
 #[cfg(feature = "leak-resist-new")]
-use ndarray::ArrayViewMut1;
+use ndarray::{Array1, ArrayViewMut1};
 #[cfg(feature = "leak-resist-new")]
-use timing_shield::{TpBool, TpI16, TpOrd};
+use timing_shield::{TpBool, TpEq, TpI16, TpI8, TpOrd};
 
-use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+lazy_static::lazy_static! {
+    pub static ref EMIS_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
+    pub static ref TRAN_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
+    pub static ref COLL_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
+    pub static ref COMB_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
+    pub static ref COMBD_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
+}
+
+use ndarray::{s, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
 
 #[cfg(not(feature = "leak-resist-new"))]
 pub struct Hmm {}
@@ -129,7 +140,6 @@ impl Hmm {
                 Zip::from(&tmp_e)
                     .and(&mut self.cur_fprobs_e)
                     .for_each(|t, c| *c = cond.select(*c, *t));
-                    
             }
 
             #[cfg(not(feature = "leak-resist-new"))]
@@ -169,6 +179,7 @@ impl Hmm {
     }
 
     pub fn combine_dips(&mut self, tprobs: ArrayView2<RealHmm>, tprobs_dips: ArrayViewMut2<Real>) {
+        let t = Instant::now();
         #[cfg(not(feature = "leak-resist-new"))]
         let mut tprobs_dips = tprobs_dips;
 
@@ -233,6 +244,9 @@ impl Hmm {
                 tprobs_dips_e.view(),
             ));
         }
+
+        let mut _t = COMBD_T.lock().unwrap();
+        *_t += Instant::now() - t;
     }
 
     fn backward(
@@ -321,6 +335,14 @@ impl Hmm {
     ) {
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row).and(cond_haps).for_each(|p, &z| {
+                #[cfg(feature = "leak-resist-new")]
+                {
+                    let z = TpI8::protect(z);
+                    let g = TpI8::protect(graph_col.get_row(i));
+                    *p = (z.tp_not_eq(&g)).select(hmm_params.eprob, RealHmm::protect_i64(1));
+                }
+
+                #[cfg(not(feature = "leak-resist-new"))]
                 if z != graph_col.get_row(i) {
                     *p = hmm_params.eprob;
                 } else {
@@ -340,8 +362,18 @@ impl Hmm {
         hmm_params: &HmmParams,
         mut probs: ArrayViewMut2<RealHmm>,
     ) {
+        let t = Instant::now();
+
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row).and(cond_haps).for_each(|p, &z| {
+                #[cfg(feature = "leak-resist-new")]
+                {
+                    let z = TpI8::protect(z);
+                    let g = TpI8::protect(graph_col.get_row(i));
+                    *p = (z.tp_not_eq(&g)).select(*p * hmm_params.eprob, *p);
+                }
+
+                #[cfg(not(feature = "leak-resist-new"))]
                 if z != graph_col.get_row(i) {
                     *p *= hmm_params.eprob;
                 }
@@ -350,6 +382,9 @@ impl Hmm {
 
         #[cfg(feature = "leak-resist-new")]
         renorm_scale(probs, self.get_cur_probs_e());
+
+        let mut _t = EMIS_T.lock().unwrap();
+        *_t += Instant::now() - t;
     }
 
     fn transition(
@@ -358,48 +393,33 @@ impl Hmm {
         prev_probs: ArrayView2<RealHmm>,
         mut cur_probs: ArrayViewMut2<RealHmm>,
     ) {
+        let t = Instant::now();
         #[cfg(feature = "leak-resist-new")]
         let (mut cur_probs_e, prev_probs_e) = self.get_probs_e();
 
-        #[cfg(feature = "leak-resist-new")]
-        let (mut all_sum_h, mut all_sum_h_e) =
-            sum_scale_by_row(prev_probs.view(), prev_probs_e.view());
-
-        #[cfg(not(feature = "leak-resist-new"))]
-        let all_sum_h = Array1::from_shape_fn(prev_probs.nrows(), |i| prev_probs.row(i).sum());
+        let all_sum_h = Zip::from(prev_probs.rows()).map_collect(|r| r.sum());
 
         #[cfg(feature = "leak-resist-new")]
-        let prev_probs = {
-            let mut prev_probs = prev_probs.to_owned();
-            let mut prev_probs_e = prev_probs_e.to_owned();
-            Zip::from(prev_probs.rows_mut())
-                .and(&mut prev_probs_e)
-                .and(&all_sum_h_e)
-                .for_each(|p, e, &e_to_match| {
-                    match_scale_row(e_to_match, p, e);
-                });
-            prev_probs
-        };
+        let mut all_sum_h_e = prev_probs_e.to_owned();
 
+        let _all_sum_h = &all_sum_h * rprob.0;
+        cur_probs.assign(&(&prev_probs * rprob.1));
         Zip::from(cur_probs.rows_mut())
-            .and(prev_probs.rows())
-            .and(&all_sum_h)
-            .for_each(|mut cur_p_row, prev_p_row, &sum_h| {
-                Zip::from(&mut cur_p_row)
-                    .and(&prev_p_row)
-                    .for_each(|cp, &pp| {
-                        *cp = pp * rprob.1 + sum_h * rprob.0;
-                    });
-            });
+            .and(&_all_sum_h)
+            .for_each(|mut r, &s| r += s);
 
         #[cfg(feature = "leak-resist-new")]
         {
             cur_probs_e.assign(&all_sum_h_e);
-            renorm_scale(cur_probs.view_mut(), cur_probs_e.view_mut());
         }
 
         #[cfg(feature = "leak-resist-new")]
-        let (sum, sum_e) = sum_scale_arr1(all_sum_h.view_mut(), all_sum_h_e.view_mut());
+        let (sum, sum_e) = {
+            let mut all_sum_h = all_sum_h;
+            let sum_e = renorm_equalize_scale_arr1(all_sum_h.view_mut(), all_sum_h_e.view_mut());
+            let sum = all_sum_h.sum();
+            (sum, sum_e)
+        };
 
         #[cfg(not(feature = "leak-resist-new"))]
         let sum: RealHmm = all_sum_h.sum();
@@ -413,16 +433,19 @@ impl Hmm {
             cur_probs_e.iter_mut().for_each(|v| *v -= sum_e);
             renorm_scale(cur_probs.view_mut(), cur_probs_e.view_mut());
         }
+        let mut _t = TRAN_T.lock().unwrap();
+        *_t += Instant::now() - t;
+
     }
 
     fn collapse(&mut self, mut cur_probs: ArrayViewMut2<RealHmm>) {
+        let t = Instant::now();
         #[cfg(feature = "leak-resist-new")]
         let (mut sum_k, mut sum_k_e) =
             sum_scale_by_column(cur_probs.view(), self.get_cur_probs_e().view());
 
         #[cfg(not(feature = "leak-resist-new"))]
-        let mut sum_k =
-            Array1::<RealHmm>::from_shape_fn(cur_probs.ncols(), |i| cur_probs.column(i).sum());
+        let mut sum_k = Zip::from(cur_probs.columns()).map_collect(|c| c.sum());
 
         let sum = sum_k.sum();
 
@@ -448,6 +471,8 @@ impl Hmm {
         }
 
         Zip::from(cur_probs.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_k));
+        let mut _t = COLL_T.lock().unwrap();
+        *_t += Instant::now() - t;
     }
 
     fn first_combine(
@@ -455,7 +480,7 @@ impl Hmm {
         first_bprobs: ArrayView2<RealHmm>,
         mut first_tprobs: ArrayViewMut2<RealHmm>,
     ) {
-        let init_probs = Array1::<RealHmm>::from_shape_fn(P, |i| first_bprobs.row(i).sum());
+        let init_probs = Zip::from(first_bprobs.rows()).map_collect(|r| r.sum());
 
         #[cfg(feature = "leak-resist-new")]
         let init_probs = {
@@ -478,41 +503,22 @@ impl Hmm {
         bprobs: ArrayView2<RealHmm>,
         mut tprobs: ArrayViewMut2<RealHmm>,
     ) {
+        let t = Instant::now();
+
         #[cfg(feature = "leak-resist-new")]
         {
+            RealHmm::matmul(fprobs, bprobs.t(), tprobs.view_mut());
             let bprobs_e = self.bprobs_e.slice_mut(s![self.cur_i, ..]);
             let fprobs_e = self.cur_fprobs_e.view_mut();
-            let mut tprobs_e = Array2::from_elem((P, P), TpI16::protect(0));
-            Zip::from(tprobs.rows_mut())
-                .and(tprobs_e.rows_mut())
-                .and(fprobs.rows())
-                .and(&fprobs_e)
-                .for_each(|mut t_row, mut t_row_e, f_row, &f_e| {
-                    Zip::from(&mut t_row)
-                        .and(&mut t_row_e)
-                        .and(bprobs.rows())
-                        .and(&bprobs_e)
-                        .for_each(|t, t_e, b_row, &b_e| {
-                            let mut mult = &f_row * &b_row;
-                            let mut e = f_e + b_e;
-                            renorm_scale_row(mult.view_mut(), &mut e);
-                            let mut dot_product = mult.sum();
-                            renorm_scale_single(&mut dot_product, &mut e);
-                            *t = dot_product;
-                            *t_e = e;
-                        });
-                });
-            equalize_scale(tprobs.view_mut(), tprobs_e.view_mut(), bprobs_e);
+            let mut tprobs_e = Array2::from_shape_fn((P, P), |(i, j)| fprobs_e[i] + bprobs_e[j]);
+            renorm_equalize_scale(tprobs.view_mut(), tprobs_e.view_mut(), bprobs_e);
         }
 
         #[cfg(not(feature = "leak-resist-new"))]
-        Zip::from(tprobs.rows_mut())
-            .and(fprobs.rows())
-            .for_each(|mut t_row, f_row| {
-                Zip::from(&mut t_row)
-                    .and(bprobs.rows())
-                    .for_each(|t, b_row| *t = f_row.dot(&b_row));
-            });
+        tprobs.assign(&fprobs.dot(&bprobs.t()));
+
+        let mut _t = COMB_T.lock().unwrap();
+        *_t += Instant::now() - t;
     }
 }
 
@@ -571,9 +577,9 @@ mod inner {
         adjust_scale_row(e, probs, probs_e);
     }
 
-    pub fn match_scale_arr1(
+    pub fn match_scale_arr1<const F: usize>(
         e_to_match: TpI16,
-        mut probs: ArrayViewMut1<RealHmm>,
+        mut probs: ArrayViewMut1<TpFixed64<F>>,
         mut probs_e: ArrayViewMut1<TpI16>,
     ) {
         Zip::from(&mut probs)
@@ -634,7 +640,7 @@ mod inner {
         probs: ArrayView2<RealHmm>,
         probs_e: ArrayView1<TpI16>,
     ) -> (Array1<RealHmm>, Array1<TpI16>) {
-        let mut sum_by_row = Array1::from_shape_fn(probs.nrows(), |i| probs.row(i).sum());
+        let mut sum_by_row = Zip::from(probs.rows()).map_collect(|r| r.sum());
         let mut sum_by_row_e = probs_e.to_owned();
         renorm_scale_arr1(sum_by_row.view_mut(), sum_by_row_e.view_mut());
         (sum_by_row, sum_by_row_e)
@@ -654,7 +660,7 @@ mod inner {
                 match_scale_row(sum_e, p, e);
             });
 
-        let mut sum = Array1::<RealHmm>::from_shape_fn(probs.ncols(), |i| probs.column(i).sum());
+        let mut sum = Zip::from(probs.columns()).map_collect(|c| c.sum());
 
         renorm_scale_row(sum.view_mut(), &mut sum_e);
 
@@ -682,7 +688,7 @@ mod inner {
         sum_scale_arr1(sum_by_row.view_mut(), sum_by_row_e.view_mut())
     }
 
-    pub fn equalize_scale(
+    pub fn renorm_equalize_scale(
         mut probs: ArrayViewMut2<RealHmm>,
         mut probs_e: ArrayViewMut2<TpI16>,
         mut equalized_probs_e: ArrayViewMut1<TpI16>,
@@ -690,11 +696,26 @@ mod inner {
         Zip::from(probs.rows_mut())
             .and(probs_e.rows_mut())
             .and(&mut equalized_probs_e)
-            .for_each(|mut p_row, mut p_row_e, tar_e| {
-                *tar_e = max_e(p_row_e.view());
-                match_scale_arr1(*tar_e, p_row.view_mut(), p_row_e.view_mut());
-                renorm_scale_row(p_row, tar_e);
+            .for_each(|p_row, p_row_e, tar_e| {
+                *tar_e = renorm_equalize_scale_arr1(p_row, p_row_e);
             });
+    }
+
+    pub fn renorm_equalize_scale_arr1<const F: usize>(
+        probs: ArrayViewMut1<TpFixed64<F>>,
+        probs_e: ArrayViewMut1<TpI16>,
+    ) -> TpI16 {
+        let e_to_match =
+            Zip::from(&probs)
+                .and(&probs_e)
+                .fold(TpI16::protect(i16::MIN), |accu, p, &e| {
+                    let new_e =
+                        TpI16::protect(64) - p.leading_zeros().as_i16() - TpI16::protect(F as i16)
+                            + e;
+                    accu.tp_gt(&new_e).select(accu, new_e)
+                });
+        match_scale_arr1(e_to_match, probs, probs_e);
+        e_to_match
     }
 
     pub fn max_e(e: ArrayView1<TpI16>) -> TpI16 {

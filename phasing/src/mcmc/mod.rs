@@ -7,17 +7,19 @@ pub use params::*;
 
 use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::Hmm;
+use crate::hmm::{COLL_T, COMB_T, COMBD_T, EMIS_T, TRAN_T};
 use crate::neighbors_finding;
 use crate::ref_panel::RefPanelSlice;
 use crate::variants::{Rarity, Variant};
 use crate::{tp_value_new, BoolMcc, Genotype, Real};
 use rand::Rng;
 
+use std::time::{Duration, Instant};
+
 #[cfg(feature = "leak-resist-new")]
 use timing_shield::TpI8;
 
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, Zip};
-use std::time::Instant;
 
 const N_HETS_PER_SEGMENT: usize = 3;
 const P: usize = 1 << N_HETS_PER_SEGMENT;
@@ -186,6 +188,14 @@ impl<'a> Mcmc<'a> {
     //}
 
     fn iteration(&mut self, iter_option: IterOptionInternal, mut rng: impl Rng) {
+        {
+            *EMIS_T.lock().unwrap() = Duration::from_millis(0);
+            *TRAN_T.lock().unwrap() = Duration::from_millis(0);
+            *COLL_T.lock().unwrap() = Duration::from_millis(0);
+            *COMB_T.lock().unwrap() = Duration::from_millis(0);
+            *COMBD_T.lock().unwrap() = Duration::from_millis(0);
+        }
+
         println!("=== {:?} Iteration ===", iter_option);
         let now = Instant::now();
 
@@ -247,6 +257,7 @@ impl<'a> Mcmc<'a> {
 
             let tprobs_window_src =
                 tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
+            #[cfg(not(feature = "leak-resist-new"))]
             let genotype_graph = &self.genotype_graph;
 
             let mut tprobs_window_target =
@@ -274,7 +285,7 @@ impl<'a> Mcmc<'a> {
             if iter_option == IterOptionInternal::Pruning {
                 Zip::from(tprobs_window_target.outer_iter_mut())
                     .and(tprobs_window_src.outer_iter())
-                    .for_each(|mut a, b| {
+                    .for_each(|a, b| {
                         #[cfg(feature = "leak-resist-new")]
                         {
                             hmm.cur_i = j;
@@ -286,6 +297,7 @@ impl<'a> Mcmc<'a> {
                         if i == 0 || genotype_graph.graph[i].is_segment_marker() {
                             hmm.combine_dips(b, a);
                         } else {
+                            let mut a = a;
                             a.fill(0.);
                         }
                         i += 1;
@@ -296,7 +308,7 @@ impl<'a> Mcmc<'a> {
                 if first_main {
                     Zip::from(tprobs_window_target.outer_iter_mut())
                         .and(tprobs_window_src.outer_iter())
-                        .for_each(|mut a, b| {
+                        .for_each(|a, b| {
                             #[cfg(feature = "leak-resist-new")]
                             {
                                 hmm.cur_i = j;
@@ -308,6 +320,7 @@ impl<'a> Mcmc<'a> {
                             if i == 0 || genotype_graph.graph[i].is_segment_marker() {
                                 hmm.combine_dips(b, a);
                             } else {
+                                let mut a = a;
                                 a.fill(0.);
                             }
                             i += 1;
@@ -387,6 +400,11 @@ impl<'a> Mcmc<'a> {
         );
 
         println!("Elapsed time: {} ms", (Instant::now() - now).as_millis());
+        println!("Emission: {} ms", EMIS_T.lock().unwrap().as_millis());
+        println!("Transition: {} ms", TRAN_T.lock().unwrap().as_millis());
+        println!("Collapse: {} ms", COLL_T.lock().unwrap().as_millis());
+        println!("Combine: {} ms", COMB_T.lock().unwrap().as_millis());
+        println!("Combine Diploid: {} ms", COMBD_T.lock().unwrap().as_millis());
         println!("",);
     }
 
@@ -559,7 +577,8 @@ impl<'a> Mcmc<'a> {
         variants: ArrayView1<Variant>,
         genotypes: ArrayView1<Genotype>,
     ) -> Array1<BoolMcc> {
-        let mut ignored_sites = Array1::<BoolMcc>::from_elem(variants.dim(), tp_value_new!(false, bool));
+        let mut ignored_sites =
+            Array1::<BoolMcc>::from_elem(variants.dim(), tp_value_new!(false, bool));
         Zip::from(&mut ignored_sites)
             .and(&variants)
             .and(&genotypes)
