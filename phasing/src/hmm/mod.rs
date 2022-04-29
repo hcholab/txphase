@@ -7,7 +7,7 @@ use crate::{BoolMcc, Genotype, Real, RealHmm};
 #[cfg(feature = "leak-resist-new")]
 use ndarray::{Array1, ArrayViewMut1};
 #[cfg(feature = "leak-resist-new")]
-use timing_shield::{TpBool, TpEq, TpI16, TpI8, TpOrd};
+use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpI16, TpI8, TpOrd};
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -30,6 +30,7 @@ pub struct Hmm {
     pub bprobs_e: Array2<TpI16>,
     cur_fprobs_e: Array1<TpI16>,
     prev_fprobs_e: Array1<TpI16>,
+    pub tprobs_e: Array3<TpI16>,
     pub cur_i: usize,
     is_backward: bool,
 }
@@ -41,6 +42,7 @@ impl Hmm {
             bprobs_e: Array2::from_elem((0, 0), TpI16::protect(0)),
             cur_fprobs_e: Array1::from_elem(P, TpI16::protect(0)),
             prev_fprobs_e: Array1::from_elem(P, TpI16::protect(0)),
+            tprobs_e: Array3::from_elem((0, 0, 0), TpI16::protect(0)),
             cur_i: 0,
             is_backward: true,
         }
@@ -91,6 +93,11 @@ impl Hmm {
 
         let mut tprobs = Array3::<RealHmm>::zeros((m, P, P));
 
+        #[cfg(feature = "leak-resist-new")]
+        {
+            self.tprobs_e = Array3::<TpI16>::from_elem((m, P, P), TpI16::protect(0));
+        }
+
         if is_first_window {
             self.first_combine(bprobs.slice(s![0, .., ..]), tprobs.slice_mut(s![0, .., ..]));
         }
@@ -104,6 +111,22 @@ impl Hmm {
             hmm_params,
             prev_fprobs.view_mut(),
         );
+
+        #[cfg(feature = "leak-resist-new")]
+        self.prev_fprobs_e.assign(&self.cur_fprobs_e);
+
+        #[cfg(feature = "leak-resist-new")]
+        let mut tprobs_3x = Array3::<RealHmm>::zeros(((m + 2) / 3, P, P));
+        #[cfg(feature = "leak-resist-new")]
+        let mut tprobs_3x_e = Array3::<TpI16>::from_elem(((m + 2) / 3, P, P), TpI16::protect(0));
+        #[cfg(feature = "leak-resist-new")]
+        let mut tprobs_3x_fwd = prev_fprobs.clone();
+        #[cfg(feature = "leak-resist-new")]
+        let mut tprobs_3x_fwd_e = self.prev_fprobs_e.clone();
+        #[cfg(feature = "leak-resist-new")]
+        let mut tprobs_3x_bwd = bprobs.slice(s![0, .., ..]).to_owned();
+        #[cfg(feature = "leak-resist-new")]
+        let mut tprobs_3x_bwd_e = self.bprobs_e.row(0).to_owned();
 
         for i in 1..m {
             let rprobs = rprobs_iter.next().unwrap();
@@ -122,13 +145,38 @@ impl Hmm {
 
             #[cfg(feature = "leak-resist-new")]
             {
-                self.combine(
-                    cur_fprobs.view(),
-                    bprobs.slice(s![i, .., ..]),
-                    tprobs.slice_mut(s![i, .., ..]),
-                );
-
                 let cond = TpBool::protect(genograph[i].is_segment_marker());
+
+                let bprobs_e = self.bprobs_e.slice_mut(s![i, ..]);
+                let fprobs_e = self.cur_fprobs_e.view_mut();
+
+                Zip::from(&mut tprobs_3x_fwd)
+                    .and(&cur_fprobs)
+                    .for_each(|t, &f| *t = cond.select(f, *t));
+
+                Zip::from(&mut tprobs_3x_fwd_e)
+                    .and(&fprobs_e)
+                    .for_each(|t, &f| *t = cond.select(f, *t));
+
+                Zip::from(&mut tprobs_3x_bwd)
+                    .and(&bprobs.slice(s![i, .., ..]))
+                    .for_each(|t, &b| *t = cond.select(b, *t));
+
+                Zip::from(&mut tprobs_3x_bwd_e)
+                    .and(&bprobs_e)
+                    .for_each(|t, &b| *t = cond.select(b, *t));
+
+                if i % 3 == 2 {
+                    Self::combine(
+                        tprobs_3x_fwd.view(),
+                        tprobs_3x_fwd_e.view(),
+                        tprobs_3x_bwd.view(),
+                        tprobs_3x_bwd_e.view(),
+                        tprobs_3x.slice_mut(s![i / 3, .., ..]),
+                        tprobs_3x_e.slice_mut(s![i / 3, .., ..]),
+                    );
+                };
+
                 let tmp = cur_fprobs.clone();
                 let tmp_e = self.cur_fprobs_e.clone();
                 self.collapse(cur_fprobs.view_mut());
@@ -144,7 +192,7 @@ impl Hmm {
 
             #[cfg(not(feature = "leak-resist-new"))]
             if genograph[i].is_segment_marker() {
-                self.combine(
+                Self::combine(
                     cur_fprobs.view(),
                     bprobs.slice(s![i, .., ..]),
                     tprobs.slice_mut(s![i, .., ..]),
@@ -175,34 +223,45 @@ impl Hmm {
             prev_fprobs.assign(&cur_fprobs);
         }
 
+        #[cfg(feature = "leak-resist-new")]
+        for i in 0..m {
+            tprobs
+                .slice_mut(s![i, .., ..])
+                .assign(&tprobs_3x.slice(s![i / 3, .., ..]));
+            self.tprobs_e
+                .slice_mut(s![i, .., ..])
+                .assign(&tprobs_3x_e.slice(s![i / 3, .., ..]));
+        }
+
         tprobs
     }
 
-    pub fn combine_dips(&mut self, tprobs: ArrayView2<RealHmm>, tprobs_dips: ArrayViewMut2<Real>) {
+    pub fn combine_dips(&self, tprobs: ArrayView2<RealHmm>, tprobs_dips: ArrayViewMut2<Real>) {
         let t = Instant::now();
+
         #[cfg(not(feature = "leak-resist-new"))]
         let mut tprobs_dips = tprobs_dips;
 
         #[cfg(feature = "leak-resist-new")]
-        let mut tprobs_e = self.bprobs_e.row_mut(self.cur_i);
+        let tprobs_e = self.tprobs_e.slice(s![self.cur_i, .., ..]);
 
-        #[cfg(feature = "leak-resist-new")]
-        let (sum, sum_e) = sum_scale(tprobs.view(), tprobs_e.view());
+        //let tprobs = tprobs.to_owned();
+        //let (tprobs, tprobs_e_ext) = {
+        //let mut tprobs = tprobs.to_owned();
+        //let tprobs_e = self.bprobs_e.row(self.cur_i);
+        //let mut tprobs_e_ext = Array2::<TpI16>::from_elem((P, P), TpI16::protect(0));
+        //Zip::from(tprobs_e_ext.rows_mut())
+        //.and(&tprobs_e)
+        //.for_each(|mut r, &e| r.fill(e));
+
+        //Zip::from(&mut tprobs)
+        //.and(&mut tprobs_e_ext)
+        //.for_each(|t, e| renorm_scale_single(t, e));
+        //(tprobs, tprobs_e_ext)
+        //};
 
         #[cfg(not(feature = "leak-resist-new"))]
-        let sum = tprobs.sum();
-
-        let scale = tp_value_real!(1, i64) / sum;
-
-        let tprobs = &tprobs * scale;
-
-        #[cfg(feature = "leak-resist-new")]
-        let tprobs = {
-            let mut tprobs = tprobs;
-            tprobs_e.iter_mut().for_each(|v| *v -= sum_e);
-            renorm_scale(tprobs.view_mut(), tprobs_e.view_mut());
-            tprobs
-        };
+        let tprobs = &tprobs * (1. / tprobs.sum());
 
         #[cfg(feature = "leak-resist-new")]
         let mut _tprobs_dips = tprobs_dips;
@@ -211,19 +270,28 @@ impl Hmm {
         let mut tprobs_dips = Array2::<RealHmm>::zeros((P, P));
 
         #[cfg(feature = "leak-resist-new")]
-        let mut tprobs_dips_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
+        let mut tprobs_dips_e_ext = Array2::<TpI16>::from_elem((P, P), TpI16::protect(0));
 
         for i in 0..P {
             for j in 0..P {
                 tprobs_dips[[i, j]] = tprobs[[i, j]] * tprobs[[P - 1 - i, P - 1 - j]];
-            }
-
-            #[cfg(feature = "leak-resist-new")]
-            {
-                tprobs_dips_e[i] = tprobs_e[i] + tprobs_e[P - 1 - i];
-                renorm_scale_row(tprobs_dips.row_mut(i), &mut tprobs_dips_e[i]);
+                #[cfg(feature = "leak-resist-new")]
+                {
+                    tprobs_dips_e_ext[[i, j]] = tprobs_e[[i, j]] + tprobs_e[[P - 1 - i, P - 1 - j]];
+                }
             }
         }
+
+        #[cfg(feature = "leak-resist-new")]
+        let mut tprobs_dips_e = {
+            let mut tprobs_dips_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
+            renorm_equalize_scale(
+                tprobs_dips.view_mut(),
+                tprobs_dips_e_ext.view_mut(),
+                tprobs_dips_e.view_mut(),
+            );
+            tprobs_dips_e
+        };
 
         #[cfg(feature = "leak-resist-new")]
         let (sum, sum_e) = sum_scale(tprobs_dips.view(), tprobs_dips_e.view());
@@ -231,9 +299,7 @@ impl Hmm {
         #[cfg(not(feature = "leak-resist-new"))]
         let sum = tprobs_dips.sum();
 
-        let scale = tp_value_real!(1, i64) / sum;
-
-        tprobs_dips *= scale;
+        tprobs_dips *= tp_value_real!(1, i64) / sum;
 
         #[cfg(feature = "leak-resist-new")]
         {
@@ -269,8 +335,6 @@ impl Hmm {
             self.cur_i = m - 1;
         }
 
-        //let mut last_cm = tp_value_real!(variants[m - 1].cm, f32);
-
         self.init(
             ref_panel.row(m - 1),
             genograph[m - 1],
@@ -296,6 +360,22 @@ impl Hmm {
 
             self.transition(rprobs, prev_bprob.view(), cur_bprob.view_mut());
 
+            #[cfg(feature = "leak-resist-new")]
+            {
+                let cond = TpBool::protect(genograph[i + 1].is_segment_marker());
+                let tmp = cur_bprob.to_owned();
+                let tmp_e = self.get_cur_probs_e().to_owned();
+                self.collapse(cur_bprob.view_mut());
+                Zip::from(&tmp)
+                    .and(&mut cur_bprob)
+                    .for_each(|t, c| *c = cond.select(*c, *t));
+
+                Zip::from(&tmp_e)
+                    .and(&mut self.get_cur_probs_e())
+                    .for_each(|t, c| *c = cond.select(*c, *t));
+            }
+
+            #[cfg(not(feature = "leak-resist-new"))]
             if genograph[i + 1].is_segment_marker() {
                 self.collapse(cur_bprob.view_mut());
             }
@@ -370,7 +450,9 @@ impl Hmm {
                 {
                     let z = TpI8::protect(z);
                     let g = TpI8::protect(graph_col.get_row(i));
-                    *p = (z.tp_not_eq(&g)).select(*p * hmm_params.eprob, *p);
+                    //*p = (z.tp_not_eq(&g)).select(*p * hmm_params.eprob, *p);
+                    *p = (z.tp_not_eq(&g))
+                        .select((*p >> 14) + (*p >> 15) + (*p >> 17) + (*p >> 20), *p);
                 }
 
                 #[cfg(not(feature = "leak-resist-new"))]
@@ -397,78 +479,58 @@ impl Hmm {
         #[cfg(feature = "leak-resist-new")]
         let (mut cur_probs_e, prev_probs_e) = self.get_probs_e();
 
+        //#[cfg(feature = "leak-resist-new")]
+        //debug_sum_by_row(prev_probs, prev_probs_e.view());
+
         let all_sum_h = Zip::from(prev_probs.rows()).map_collect(|r| r.sum());
 
         #[cfg(feature = "leak-resist-new")]
-        let mut all_sum_h_e = prev_probs_e.to_owned();
+        let all_sum_h_e = prev_probs_e.to_owned();
 
-        let _all_sum_h = &all_sum_h * rprob.0;
-        cur_probs.assign(&(&prev_probs * rprob.1));
+        let rprob = rprob.0 / rprob.1;
+
+        let _all_sum_h = &all_sum_h * rprob;
+
         Zip::from(cur_probs.rows_mut())
+            .and(prev_probs.rows())
             .and(&_all_sum_h)
-            .for_each(|mut r, &s| r += s);
+            .for_each(|mut cr, pr, &s| cr.assign(&(&pr + s)));
 
         #[cfg(feature = "leak-resist-new")]
         {
             cur_probs_e.assign(&all_sum_h_e);
-        }
-
-        #[cfg(feature = "leak-resist-new")]
-        let (sum, sum_e) = {
-            let mut all_sum_h = all_sum_h;
-            let sum_e = renorm_equalize_scale_arr1(all_sum_h.view_mut(), all_sum_h_e.view_mut());
-            let sum = all_sum_h.sum();
-            (sum, sum_e)
-        };
-
-        #[cfg(not(feature = "leak-resist-new"))]
-        let sum: RealHmm = all_sum_h.sum();
-
-        let scale = tp_value_real!(1, i64) / sum;
-
-        cur_probs *= scale;
-
-        #[cfg(feature = "leak-resist-new")]
-        {
-            cur_probs_e.iter_mut().for_each(|v| *v -= sum_e);
             renorm_scale(cur_probs.view_mut(), cur_probs_e.view_mut());
         }
+
+        #[cfg(not(feature = "leak-resist-new"))]
+        {
+            let sum: RealHmm = all_sum_h.sum();
+            let scale = tp_value_real!(1, i64) / sum;
+            cur_probs *= scale;
+        }
+
         let mut _t = TRAN_T.lock().unwrap();
         *_t += Instant::now() - t;
-
     }
 
     fn collapse(&mut self, mut cur_probs: ArrayViewMut2<RealHmm>) {
         let t = Instant::now();
+
         #[cfg(feature = "leak-resist-new")]
-        let (mut sum_k, mut sum_k_e) =
-            sum_scale_by_column(cur_probs.view(), self.get_cur_probs_e().view());
+        let (sum_k, sum_k_e) = sum_scale_by_column(cur_probs.view(), self.get_cur_probs_e().view());
 
         #[cfg(not(feature = "leak-resist-new"))]
         let mut sum_k = Zip::from(cur_probs.columns()).map_collect(|c| c.sum());
 
-        let sum = sum_k.sum();
-
-        #[cfg(feature = "leak-resist-new")]
-        let mut sum_e = sum_k_e;
-
-        #[cfg(feature = "leak-resist-new")]
-        let sum = {
-            let mut sum = sum;
-            renorm_scale_single(&mut sum, &mut sum_e);
-            sum
-        };
-
-        let scale = tp_value_real!(1, i64) / sum;
-
-        sum_k *= scale;
-
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(not(feature = "leak-resist-new"))]
         {
-            sum_k_e -= sum_e;
-            renorm_scale_row(sum_k.view_mut(), &mut sum_k_e);
-            self.get_cur_probs_e().fill(sum_k_e);
+            let sum = sum_k.sum();
+            let scale = tp_value_real!(1, i64) / sum;
+            sum_k *= scale;
         }
+
+        #[cfg(feature = "leak-resist-new")]
+        self.get_cur_probs_e().fill(sum_k_e);
 
         Zip::from(cur_probs.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_k));
         let mut _t = COLL_T.lock().unwrap();
@@ -480,6 +542,9 @@ impl Hmm {
         first_bprobs: ArrayView2<RealHmm>,
         mut first_tprobs: ArrayViewMut2<RealHmm>,
     ) {
+        //#[cfg(feature = "leak-resist-new")]
+        //debug_sum_by_row(first_bprobs, self.bprobs_e.row(0));
+
         let init_probs = Zip::from(first_bprobs.rows()).map_collect(|r| r.sum());
 
         #[cfg(feature = "leak-resist-new")]
@@ -497,26 +562,43 @@ impl Hmm {
         Zip::from(first_tprobs.rows_mut()).for_each(|mut r| r.assign(&init_probs));
     }
 
+    #[cfg(feature = "leak-resist-new")]
     fn combine(
-        &mut self,
+        fprobs: ArrayView2<RealHmm>,
+        fprobs_e: ArrayView1<TpI16>,
+        bprobs: ArrayView2<RealHmm>,
+        bprobs_e: ArrayView1<TpI16>,
+        mut tprobs: ArrayViewMut2<RealHmm>,
+        mut tprobs_e: ArrayViewMut2<TpI16>,
+    ) {
+        let t = Instant::now();
+
+        RealHmm::matmul(fprobs, bprobs.t(), tprobs.view_mut());
+
+        Zip::from(tprobs_e.rows_mut())
+            .and(&fprobs_e)
+            .for_each(|mut t_r, &f_e| {
+                Zip::from(&mut t_r).and(&bprobs_e).for_each(|t, &b_e| {
+                    *t = f_e + b_e;
+                })
+            });
+
+        Zip::from(&mut tprobs)
+            .and(&mut tprobs_e)
+            .for_each(|t, e| renorm_scale_single(t, e));
+
+        let mut _t = COMB_T.lock().unwrap();
+        *_t += Instant::now() - t;
+    }
+
+    #[cfg(not(feature = "leak-resist-new"))]
+    fn combine(
         fprobs: ArrayView2<RealHmm>,
         bprobs: ArrayView2<RealHmm>,
         mut tprobs: ArrayViewMut2<RealHmm>,
     ) {
         let t = Instant::now();
-
-        #[cfg(feature = "leak-resist-new")]
-        {
-            RealHmm::matmul(fprobs, bprobs.t(), tprobs.view_mut());
-            let bprobs_e = self.bprobs_e.slice_mut(s![self.cur_i, ..]);
-            let fprobs_e = self.cur_fprobs_e.view_mut();
-            let mut tprobs_e = Array2::from_shape_fn((P, P), |(i, j)| fprobs_e[i] + bprobs_e[j]);
-            renorm_equalize_scale(tprobs.view_mut(), tprobs_e.view_mut(), bprobs_e);
-        }
-
-        #[cfg(not(feature = "leak-resist-new"))]
         tprobs.assign(&fprobs.dot(&bprobs.t()));
-
         let mut _t = COMB_T.lock().unwrap();
         *_t += Instant::now() - t;
     }
@@ -640,10 +722,25 @@ mod inner {
         probs: ArrayView2<RealHmm>,
         probs_e: ArrayView1<TpI16>,
     ) -> (Array1<RealHmm>, Array1<TpI16>) {
+        //debug_sum_by_row(probs, probs_e);
         let mut sum_by_row = Zip::from(probs.rows()).map_collect(|r| r.sum());
         let mut sum_by_row_e = probs_e.to_owned();
         renorm_scale_arr1(sum_by_row.view_mut(), sum_by_row_e.view_mut());
         (sum_by_row, sum_by_row_e)
+    }
+
+    pub fn debug_sum_by_row(probs: ArrayView2<RealHmm>, probs_e: ArrayView1<TpI16>) {
+        Zip::from(probs.rows()).and(&probs_e).for_each(|r, &e| {
+            if r.iter()
+                .map(|v| v.into_inner().expose() as f64)
+                .sum::<f64>()
+                > i64::MAX as f64
+            {
+                println!("{:#?}", debug_expose_row(r, e));
+                println!("{:#?}", e.expose());
+                println!("{:#?}", debug_expose_s_arr1(r));
+            }
+        });
     }
 
     pub fn sum_scale_by_column(
@@ -731,8 +828,7 @@ mod inner {
 
     pub fn debug_expose_row(s: ArrayView1<RealHmm>, e: TpI16) -> Array1<f64> {
         let e = (e.expose() as f64).exp2();
-        let n = s.len();
-        Array1::from_shape_fn(n, |i| s[i].expose_into_f32() as f64 * e)
+        s.map(|v| v.expose_into_f32() as f64 * e)
     }
 
     pub fn debug_expose_array(s: ArrayView2<RealHmm>, e: ArrayView1<TpI16>) -> Array2<f64> {
@@ -744,11 +840,20 @@ mod inner {
         s_out
     }
 
+    pub fn debug_expose_array_ext(s: ArrayView2<RealHmm>, e: ArrayView2<TpI16>) -> Array2<f64> {
+        Zip::from(&s)
+            .and(&e)
+            .map_collect(|&_s, &_e| debug_expose(_s, _e))
+    }
+
     pub fn debug_expose_s(s: ArrayView2<RealHmm>) -> Array2<f64> {
-        Array2::<f64>::from_shape_fn(s.dim(), |(i, j)| s[[i, j]].expose_into_f32() as f64)
+        s.map(|v| v.expose_into_f32() as f64)
+    }
+    pub fn debug_expose_s_arr1(s: ArrayView1<RealHmm>) -> Array1<f64> {
+        s.map(|v| v.expose_into_f32() as f64)
     }
 
     pub fn debug_expose_e(e: ArrayView1<TpI16>) -> Array1<i16> {
-        Array1::<i16>::from_shape_fn(e.dim(), |i| e[i].expose())
+        e.map(|v| v.expose())
     }
 }

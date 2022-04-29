@@ -1,1 +1,3 @@
 LITE=1
+PROFILE=--release
+PORT=7777

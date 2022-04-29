@@ -4,16 +4,17 @@ use ndarray::{s, Array1, Array2, ArrayView1, ArrayView3};
 use rand::Rng;
 
 #[cfg(feature = "leak-resist-new")]
-use timing_shield::{TpBool, TpEq, TpOrd, TpU32};
+use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpI16, TpOrd, TpU32};
 
 pub fn forward_sampling(
     prev_ind: (u8, u8),
-    tprobs_dips: ArrayView3<RealHmm>,
+    tprobs: ArrayView3<RealHmm>,
+    #[cfg(feature = "leak-resist-new")] tprobs_e: ArrayView3<TpI16>,
     genotype_graph: ArrayView1<G>,
     is_first_window: bool,
     mut rng: impl Rng,
 ) -> Array2<U8> {
-    let m = tprobs_dips.shape()[0];
+    let m = tprobs.shape()[0];
     let mut phase_ind = Array2::<U8>::zeros((m, 2));
 
     for i in 0..m {
@@ -26,8 +27,12 @@ pub fn forward_sampling(
         let (ind1, ind2) = if genotype_graph[i].is_segment_marker() || (is_first_window && i == 0) {
             //let (ind1, ind2) = if genotype_graph[i].is_segment_marker() {
             constrained_paired_sample(
-                tprobs_dips.slice(s![i, prev_ind1 as usize, ..]),
-                tprobs_dips.slice(s![i, prev_ind2 as usize, ..]),
+                tprobs.slice(s![i, prev_ind1 as usize, ..]),
+                #[cfg(feature = "leak-resist-new")]
+                tprobs_e.slice(s![i, prev_ind1 as usize, ..]),
+                tprobs.slice(s![i, prev_ind2 as usize, ..]),
+                #[cfg(feature = "leak-resist-new")]
+                tprobs_e.slice(s![i, prev_ind2 as usize, ..]),
                 &mut rng,
             )
         } else {
@@ -43,22 +48,37 @@ pub fn forward_sampling(
 // Weight of a pair is the product of the two weights (joint probability)
 fn constrained_paired_sample(
     weights1: ArrayView1<RealHmm>,
+    #[cfg(feature = "leak-resist-new")] weights1_e: ArrayView1<TpI16>,
     weights2: ArrayView1<RealHmm>,
+    #[cfg(feature = "leak-resist-new")] weights2_e: ArrayView1<TpI16>,
     rng: impl Rng,
 ) -> (UInt, UInt) {
-    let scale_1 = tp_value_real!(1, i64) / weights1.sum();
-    let weights1 = &weights1 * scale_1;
-    let scale_2 = tp_value_real!(1, i64) / weights2.sum();
-    let weights2 = &weights2 * scale_2;
+    #[cfg(not(feature = "leak-resist-new"))]
+    let (weights1, weights2) = {
+        let scale_1 = tp_value_real!(1, i64) / weights1.sum();
+        let weights1 = &weights1 * scale_1;
+        let scale_2 = tp_value_real!(1, i64) / weights2.sum();
+        let weights2 = &weights2 * scale_2;
+        (weights1, weights2)
+    };
+
     let mut combined = Array1::<RealHmm>::zeros(P);
+    #[cfg(feature = "leak-resist-new")]
+    let mut combined_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
     for i in 0..P {
         combined[i] = weights1[i] * weights2[P - 1 - i];
+        #[cfg(feature = "leak-resist-new")]
+        {
+            combined_e[i] = weights1_e[i] + weights2_e[P - 1 - i];
+        }
     }
+
+    #[cfg(feature = "leak-resist-new")]
+    crate::hmm::renorm_equalize_scale_arr1(combined.view_mut(), combined_e.view_mut());
+
     let ind1 = weighted_sample(combined.view(), rng);
-    //if ind1 >= 8 {
-    //println!("{:?}", combined);
-    //}
-    assert!(ind1 < 8);
+
+    debug_assert!(ind1 < 8);
     (ind1, P as u32 - 1 - ind1)
 }
 

@@ -7,9 +7,9 @@ edition = "2018"
 
 [features]
 default = []
-leak-resist = ["tp-fixedpoint", "timing-shield"] 
+leak-resist = ["tp-fixedpoint"] 
 leak-resist-fast = ["leak-resist"] 
-leak-resist-new = ["tp-fixedpoint", "timing-shield"]
+leak-resist-new = ["tp-fixedpoint"]
 
 [dependencies]
 rand = "0.8"
@@ -22,8 +22,7 @@ bufstream = "0.1"
 #oram-sgx = { path = "../oram-sgx" }
 tp-fixedpoint = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/tp-fixedpoint", optional = true }
 m3vcf = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/m3vcf" }
-#timing-shield = { git = "https://github.com/ndokmai/rust-timing-shield", optional = true } 
-timing-shield = { version = "0.3", optional = true }
+#timing-shield = { version = "0.3", optional = true }
 rand_chacha = "0.3"
 log = "0.4"
 env_logger = "0.9"
@@ -57,3 +56,5 @@ debug=true
 
 [profile.release]
 debug=true
+overflow-checks = true 
+

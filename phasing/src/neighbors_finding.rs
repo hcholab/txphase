@@ -1,9 +1,16 @@
 use crate::pbwt::{PBWTColumn, PBWT};
-use crate::{tp_value, Genotype, Real, UInt};
+use crate::{tp_value, Genotype, Int, Real, UInt};
 use ndarray::{Array1, ArrayView1};
 
 #[cfg(feature = "leak-resist")]
 use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpOrd};
+
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+lazy_static::lazy_static! {
+    pub static ref PBWT_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
+}
 
 pub fn find_neighbors(
     ref_panel: impl Iterator<Item = Array1<i8>>,
@@ -14,6 +21,7 @@ pub fn find_neighbors(
     n_haps_target: usize,
     s: usize,
 ) -> Vec<bool> {
+    let t = Instant::now();
     let mut pbwt = PBWT::new(ref_panel, n_pos, n_haps_ref);
     let mut prev_col = pbwt.get_init_col().unwrap();
     let mut cur_pbwt_group_bit = pbwt_group_filter.next();
@@ -51,7 +59,58 @@ pub fn find_neighbors(
         cur_pbwt_group_bit = pbwt_group_filter.next();
         prev_col = cur_col;
     }
+    let mut _t = PBWT_T.lock().unwrap();
+    *_t += Instant::now() - t;
     neighbors_bitmap
+}
+
+pub fn find_neighbors_count(
+    ref_panel: impl Iterator<Item = Array1<i8>>,
+    mut estimated_haps: impl Iterator<Item = Array1<Genotype>>,
+    mut pbwt_group_filter: impl Iterator<Item = bool>,
+    n_pos: usize,
+    n_haps_ref: usize,
+    n_haps_target: usize,
+    s: usize,
+) -> Vec<usize> {
+    let mut pbwt = PBWT::new(ref_panel, n_pos, n_haps_ref);
+    let mut prev_col = pbwt.get_init_col().unwrap();
+    let mut cur_pbwt_group_bit = pbwt_group_filter.next();
+
+    let mut prev_target = vec![Target::default(); n_haps_target];
+
+    let mut neighbors_count = vec![0; n_haps_ref];
+
+    for i in 0..n_pos {
+        let (cur_col, cur_n_zeros, hap_row) = pbwt.next().unwrap();
+        let cur_haps = estimated_haps.next().unwrap();
+
+        for j in 0..n_haps_target {
+            let cur_target = find_target_single_marker(
+                hap_row.view(),
+                cur_n_zeros as u32,
+                cur_haps[j],
+                i as u32,
+                &prev_target[j],
+                &prev_col,
+            );
+
+            if let Some(b) = cur_pbwt_group_bit {
+                if b {
+                    let new_neighbors =
+                        PBWTDepth::build(i as u32, s, &cur_target, &cur_col, &prev_col)
+                            .find_neighbors();
+                    for i in new_neighbors {
+                        neighbors_count[i as usize] += 1;
+                    }
+                }
+            }
+            prev_target[j] = cur_target;
+        }
+        cur_pbwt_group_bit = pbwt_group_filter.next();
+        prev_col = cur_col;
+    }
+    neighbors_count
 }
 
 #[derive(Clone)]
@@ -336,13 +395,13 @@ impl PBWTDepth {
         }
     }
 
-    pub fn score(&self, hap_pos: ArrayView1<Genotype>) -> UInt {
+    pub fn score(&self, hap_pos: ArrayView1<Genotype>) -> Int {
         self.saved_a
             .iter()
             .zip(self.is_saved.iter())
             .filter_map(|(&a, &b)| {
                 if b {
-                    Some(hap_pos[a as usize] as u32 * 2 - 1)
+                    Some(hap_pos[a as usize] as i32 * 2 - 1)
                 } else {
                     None
                 }

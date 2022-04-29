@@ -494,7 +494,7 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
     let mut sum = 0.;
     let mut count = 0;
 
-    for e in elems {
+    for e in elems.clone() {
         sum += e.0;
         let (i, j) = (e.1 as usize, e.2 as usize);
         if !taken[[i, j]] && !taken[[P - 1 - i, P - 1 - j]] {

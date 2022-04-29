@@ -12,16 +12,17 @@ use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::path::Path;
 use std::str::FromStr;
 
-const SP_PORT: u16 = 1234;
-
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
-    let ref_panel_path = &args[1];
-    let ref_sites_path = &args[2];
-    let genetic_map_path = &args[3];
-    let input_path = &args[4];
-    let output_path = &args[5];
+    assert_eq!(args.len(), 7);
+    let sp_port = args[1].parse::<u16>().unwrap();
+    let ref_panel_path = &args[2];
+    let ref_sites_path = &args[3];
+    let genetic_map_path = &args[4];
+    let input_path = &args[5];
+    let output_path = &args[6];
 
+    eprintln!("Port: \t\t\t{sp_port}");
     eprintln!("Reference panel: \t{ref_panel_path}");
     eprintln!("Reference sites: \t{ref_sites_path}");
     eprintln!("Genetic map: \t\t{genetic_map_path}");
@@ -43,7 +44,7 @@ fn main() {
 
     let mut sp_stream = bufstream::BufStream::new(tcp_keep_connecting(SocketAddr::from((
         IpAddr::from_str("127.0.0.1").unwrap(),
-        SP_PORT,
+        sp_port,
     ))));
 
     eprintln!("Host: connected to SP");

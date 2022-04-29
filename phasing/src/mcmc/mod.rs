@@ -7,8 +7,9 @@ pub use params::*;
 
 use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::Hmm;
-use crate::hmm::{COLL_T, COMB_T, COMBD_T, EMIS_T, TRAN_T};
+use crate::hmm::{COLL_T, COMBD_T, COMB_T, EMIS_T, TRAN_T};
 use crate::neighbors_finding;
+use crate::neighbors_finding::PBWT_T;
 use crate::ref_panel::RefPanelSlice;
 use crate::variants::{Rarity, Variant};
 use crate::{tp_value_new, BoolMcc, Genotype, Real};
@@ -17,13 +18,17 @@ use rand::Rng;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "leak-resist-new")]
-use timing_shield::TpI8;
+use tp_fixedpoint::timing_shield::TpI8;
 
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, Zip};
 
 const N_HETS_PER_SEGMENT: usize = 3;
 const P: usize = 1 << N_HETS_PER_SEGMENT;
-const MAX_K: usize = 1000;
+
+#[cfg(feature = "leak-resist-new")]
+const MAX_K_OVERFLOW: usize = 1 << (63 - crate::F);
+
+const MAX_K: usize = 2048;
 
 #[derive(PartialEq, Eq, Clone)]
 pub enum IterOption {
@@ -90,14 +95,14 @@ impl<'a> Mcmc<'a> {
 
         //let mut ref_file = std::io::BufReader::new(
         //std::fs::File::open(
-        //"/home/ndokmai/workspace/phasing-oram/phasing/tests/ref_tprobs_chr20.bin",
+        //"/home/ndokmai/workspace/phasing-oram/phasing/tests/ref_tprobs_chr1.bin",
         //)
         //.unwrap(),
         //);
 
         //let mut ref_file = std::io::BufWriter::new(
         //std::fs::File::create(
-        //"/home/ndokmai/workspace/phasing-oram/phasing/tests/ref_tprobs_chr20.bin",
+        //"/home/ndokmai/workspace/phasing-oram/phasing/tests/ref_tprobs_chr1.bin",
         //)
         //.unwrap(),
         //);
@@ -116,14 +121,6 @@ impl<'a> Mcmc<'a> {
             //println!("{:#?}", mcmc.tprobs.slice(s![..10, .., ..]));
             //unimplemented!();
         }
-
-        //#[cfg(feature = "leak-resist-new")]
-        //let tprobs = Array3::<Real>::from_shape_fn(mcmc.tprobs.dim(), |(i, j, l)|
-        //crate::hmm::debug_expose(mcmc.tprobs[[i, j, l]], self.bprobs_e[[i, j]])
-        //);
-
-        //#[cfg(not(feature = "leak-resist-new"))]
-        //let tprobs = mcmc.tprobs.view();
 
         mcmc.phased_ind = viterbi::viterbi(mcmc.tprobs.view(), mcmc.genotype_graph.graph.view());
 
@@ -194,13 +191,19 @@ impl<'a> Mcmc<'a> {
             *COLL_T.lock().unwrap() = Duration::from_millis(0);
             *COMB_T.lock().unwrap() = Duration::from_millis(0);
             *COMBD_T.lock().unwrap() = Duration::from_millis(0);
+            *PBWT_T.lock().unwrap() = Duration::from_millis(0);
         }
 
         println!("=== {:?} Iteration ===", iter_option);
         let now = Instant::now();
 
+        #[cfg(feature = "leak-resist-new")]
         //let max_k = Some(MAX_K);
         let max_k = None;
+
+        #[cfg(not(feature = "leak-resist-new"))]
+        let max_k = None;
+
         if let Some(max_k) = max_k {
             println!("Max K: {max_k}");
         } else {
@@ -242,7 +245,16 @@ impl<'a> Mcmc<'a> {
                 pbwt_group_filter_w,
                 self.params.s,
                 max_k,
+                Some(&mut rng),
             );
+            //let (selected_ref_panel, k) = select_ref_panel_count(
+            //&params_w.ref_panel,
+            //estimated_haps_w.view(),
+            //pbwt_evaluted_filter_w,
+            //pbwt_group_filter_w,
+            //self.params.s,
+            //max_k,
+            //);
             ks.push(k as f64);
 
             let mut hmm = Hmm::new();
@@ -255,8 +267,15 @@ impl<'a> Mcmc<'a> {
                 is_first_window,
             );
 
+            #[cfg(feature = "leak-resist-new")]
+            let tprobs_e_window_src = hmm
+                .tprobs_e
+                .slice(s![start_write_w - start_w..end_write_w - start_w, .., ..])
+                .to_owned();
+
             let tprobs_window_src =
                 tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
+
             #[cfg(not(feature = "leak-resist-new"))]
             let genotype_graph = &self.genotype_graph;
 
@@ -352,6 +371,8 @@ impl<'a> Mcmc<'a> {
             let phased_ind_window = sampling::forward_sampling(
                 prev_ind,
                 tprobs_window_src.view(),
+                #[cfg(feature = "leak-resist-new")]
+                tprobs_e_window_src.view(),
                 genotype_graph_w
                     .graph
                     .slice(s![start_write_w - start_w..end_write_w - start_w]),
@@ -400,11 +421,15 @@ impl<'a> Mcmc<'a> {
         );
 
         println!("Elapsed time: {} ms", (Instant::now() - now).as_millis());
+        println!("PBWT: {} ms", PBWT_T.lock().unwrap().as_millis());
         println!("Emission: {} ms", EMIS_T.lock().unwrap().as_millis());
         println!("Transition: {} ms", TRAN_T.lock().unwrap().as_millis());
         println!("Collapse: {} ms", COLL_T.lock().unwrap().as_millis());
         println!("Combine: {} ms", COMB_T.lock().unwrap().as_millis());
-        println!("Combine Diploid: {} ms", COMBD_T.lock().unwrap().as_millis());
+        println!(
+            "Combine Diploid: {} ms",
+            COMBD_T.lock().unwrap().as_millis()
+        );
         println!("",);
     }
 
@@ -473,18 +498,21 @@ impl<'a> Mcmc<'a> {
             .and(self.tprobs.outer_iter())
             .for_each(|i, g, t| {
                 if g.is_segment_marker() {
-                    assert!(t.into_iter().map(|&v| v != 0.).fold(true, |a, b| a || b));
                     let ref_t: Array2<Real> = bincode::deserialize_from(&mut reader).unwrap();
-                    if ref_t != t {
-                        println!("{i}:");
-                        assert_eq!(ref_t, t);
+                    //if ref_t != t {
+                    //println!("{i}:");
+                    //assert_eq!(ref_t/t );
+                    //}
+                    const R: f64 = 0.1;
+                    for (a, b) in ref_t.iter().zip(t.iter()) {
+                        if a / b >= 1. + R || a / b < 1. - R {
+                            println!("{i}:");
+                            println!("{:#?}", ref_t);
+                            println!("{:#?}", t);
+                            println!("{a}, {b}, {}", a / b);
+                            panic!();
+                        }
                     }
-                    //for (a, b) in ref_t.iter().zip(t.iter()) {
-                    //if (a-b).abs() >= 1e-4 {
-                    //println!("{a}, {b}, {}", (a-b).abs());
-                    //}
-                    //assert!((a-b).abs() < 1e-4);
-                    //}
                 }
             });
     }
@@ -603,6 +631,7 @@ fn select_ref_panel(
     pbwt_group_filter: &[bool],
     s: usize,
     max_k: Option<usize>,
+    rng: Option<impl Rng>,
 ) -> (Array2<Genotype>, usize) {
     let n_pbwt_pos = pbwt_evaluted_filter.iter().filter(|b| **b).count();
     let neighbors_bitmap = neighbors_finding::find_neighbors(
@@ -626,20 +655,107 @@ fn select_ref_panel(
         s,
     );
 
+    #[cfg(feature = "leak-resist-new")]
+    assert!(neighbors_bitmap.iter().filter(|&&b| b).count() <= MAX_K_OVERFLOW);
+
     let neighbors_bitmap = if let Some(max_k) = max_k {
+        let k = neighbors_bitmap.iter().filter(|&&b| b).count();
+        if k > max_k {
+            println!("K > MAX_K: {} > {}", k, max_k);
+        }
         let mut neighbors_bitmap_new = vec![false; neighbors_bitmap.len()];
         let neighbors_idx = neighbors_bitmap
             .into_iter()
             .enumerate()
             .filter_map(|(i, v)| if v { Some(i) } else { None })
-            .take(max_k)
             .collect::<Vec<_>>();
+        let neighbors_idx = if k > max_k {
+            use rand::prelude::SliceRandom;
+            neighbors_idx
+                .choose_multiple(&mut rng.unwrap(), max_k)
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            neighbors_idx
+        };
         for i in neighbors_idx {
             neighbors_bitmap_new[i] = true;
         }
         neighbors_bitmap_new
     } else {
         neighbors_bitmap
+    };
+
+    //#[cfg(feature = "leak-resist")]
+    //let bitmap = {
+    //let mut bitmap = union_filter::OblivBitmap::new(nhap, oram_sgx::LinearScanningORAMCreator);
+    //for i in neighbors.into_iter().flatten().flatten() {
+    //bitmap.set(i);
+    //}
+
+    //bitmap
+    //.into_iter()
+    //.map(|v| tp_value!(v, bool))
+    //.collect::<Vec<_>>()
+    //};
+
+    let k = neighbors_bitmap.iter().filter(|&&b| b).count();
+    (ref_panel.filter(&neighbors_bitmap), k)
+}
+
+fn select_ref_panel_count(
+    ref_panel: &RefPanelSlice,
+    estimated_haps: ArrayView2<Genotype>,
+    pbwt_evaluted_filter: &[bool],
+    pbwt_group_filter: &[bool],
+    s: usize,
+    max_k: Option<usize>,
+) -> (Array2<Genotype>, usize) {
+    let n_pbwt_pos = pbwt_evaluted_filter.iter().filter(|b| **b).count();
+    let neighbors_count = neighbors_finding::find_neighbors_count(
+        ref_panel
+            .iter()
+            .zip(pbwt_evaluted_filter.iter())
+            .filter_map(|(v, &b)| if b { Some(v) } else { None }),
+        estimated_haps
+            .rows()
+            .into_iter()
+            .map(|r| r.to_owned())
+            .zip(pbwt_evaluted_filter.iter())
+            .filter_map(|(v, &b)| if b { Some(v) } else { None }),
+        pbwt_group_filter
+            .iter()
+            .zip(pbwt_evaluted_filter.iter())
+            .filter_map(|(&b1, &b2)| if b2 { Some(b1) } else { None }),
+        n_pbwt_pos,
+        ref_panel.n_haps,
+        estimated_haps.ncols(),
+        s,
+    );
+
+    #[cfg(feature = "leak-resist-new")]
+    debug_assert!(neighbors_count.iter().filter(|&&b| b > 0).count() <= MAX_K_OVERFLOW);
+
+    let neighbors_bitmap = if let Some(max_k) = max_k {
+        let k = neighbors_count.iter().filter(|&&b| b > 0).count();
+        if k > max_k {
+            println!("K > MAX_K: {} > {}", k, max_k);
+            let mut neighbors_bitmap = vec![false; neighbors_count.len()];
+            let mut neighbors_idx = neighbors_count
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, v)| if v > 0 { Some((v, i)) } else { None })
+                .collect::<Vec<_>>();
+            neighbors_idx.sort();
+            for (_, i) in neighbors_idx.into_iter().take(max_k) {
+                neighbors_bitmap[i] = true;
+            }
+            neighbors_bitmap
+        } else {
+            neighbors_count.into_iter().map(|v| v > 0).collect()
+        }
+    } else {
+        neighbors_count.into_iter().map(|v| v > 0).collect()
     };
 
     //#[cfg(feature = "leak-resist")]

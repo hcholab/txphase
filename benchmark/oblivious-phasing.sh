@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+SERVER=$1
+
 REF_PANEL_DIR=$BASE_REF_PANEL_DIR/m3vcf
 REF_PANEL=$(find $REF_PANEL_DIR -name "${CHR}.*.m3vcf.gz")
 INPUT=$(find $INPUT_DIR -name *_$CHR.vcf.gz)
@@ -14,6 +16,5 @@ filename=${filename}_phased_round_$ROUND.vcf.gz
 BIN_DIR=oblivious-bins
 RUN=$BIN_DIR/run.sh
 HOST=$BIN_DIR/host
-SERVER=$BIN_DIR/phasing_oblivious_hmm
 
-./$RUN $HOST $SERVER $REF_PANEL $REF_SITES $GMAP $INPUT $TAR_DIR/$filename 2>&1 | tee $TAR_DIR/$log_filename
+./$RUN $HOST $SERVER $PORT $REF_PANEL $REF_SITES $GMAP $INPUT $TAR_DIR/$filename 2>&1 | tee $TAR_DIR/$log_filename

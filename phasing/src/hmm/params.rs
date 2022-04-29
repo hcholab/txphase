@@ -3,7 +3,7 @@ use crate::variants::Variant;
 use crate::{tp_value_new, tp_value_real, BoolMcc, RealHmm};
 use ndarray::ArrayView1;
 #[cfg(feature = "leak-resist-new")]
-use timing_shield::{TpBool, TpEq, TpOrd, TpU32};
+use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpOrd, TpU32};
 
 const EPROB: f64 = 0.0001;
 const N_EFF: f64 = 15000.;
