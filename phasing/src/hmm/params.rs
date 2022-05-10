@@ -1,6 +1,6 @@
 use crate::genotype_graph::GenotypeGraph;
 use crate::variants::Variant;
-use crate::{tp_value_new, tp_value_real, BoolMcc, RealHmm};
+use crate::{tp_value_new, tp_value_real, BoolMcc, Real};
 use ndarray::ArrayView1;
 #[cfg(feature = "leak-resist-new")]
 use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpOrd, TpU32};
@@ -11,13 +11,13 @@ const MIN_DIST: f64 = 1e-7;
 const R_CONST: f64 = 0.04 * N_EFF;
 
 pub struct HmmParams {
-    pub eprob: RealHmm,
+    pub eprob: Real,
     n_haps_ref_frac: f64,
     r_const: f64,
     #[cfg(feature = "leak-resist-new")]
-    n_haps_ref_frac_obliv: RealHmm,
+    n_haps_ref_frac_obliv: Real,
     #[cfg(feature = "leak-resist-new")]
-    r_const_obliv: RealHmm,
+    r_const_obliv: Real,
 }
 
 impl HmmParams {
@@ -87,7 +87,7 @@ impl HmmParams {
                     ),
                 );
 
-                last_cm = cond.select(RealHmm::protect_f32(variants[i].cm as f32), last_cm);
+                last_cm = cond.select(Real::protect_f32(variants[i].cm as f32), last_cm);
                 n_skips = cond.select(TpU32::protect(0), n_skips + 1);
 
                 r
@@ -160,7 +160,7 @@ impl HmmParams {
                     ),
                 );
 
-                last_cm = cond.select(RealHmm::protect_f32(variants[i].cm as f32), last_cm);
+                last_cm = cond.select(Real::protect_f32(variants[i].cm as f32), last_cm);
                 n_skips = cond.select(TpU32::protect(0), n_skips + 1);
                 r
             };
@@ -198,8 +198,8 @@ impl HmmParams {
 }
 
 pub struct Rprobs {
-    fwd: Vec<(RealHmm, RealHmm)>,
-    bwd: Vec<(RealHmm, RealHmm)>,
+    fwd: Vec<(Real, Real)>,
+    bwd: Vec<(Real, Real)>,
 }
 
 impl Rprobs {
@@ -212,16 +212,16 @@ impl Rprobs {
 }
 
 pub struct RprobsSlice<'a> {
-    fwd: &'a [(RealHmm, RealHmm)],
-    bwd: &'a [(RealHmm, RealHmm)],
+    fwd: &'a [(Real, Real)],
+    bwd: &'a [(Real, Real)],
 }
 
 impl<'a> RprobsSlice<'a> {
-    pub fn get_forward(&self) -> Box<dyn Iterator<Item = (RealHmm, RealHmm)>> {
+    pub fn get_forward(&self) -> Box<dyn Iterator<Item = (Real, Real)>> {
         Box::new(self.fwd.to_owned().into_iter())
     }
 
-    pub fn get_backward(&self) -> Box<dyn Iterator<Item = (RealHmm, RealHmm)>> {
+    pub fn get_backward(&self) -> Box<dyn Iterator<Item = (Real, Real)>> {
         let mut bwd = self.bwd.to_owned();
         bwd.reverse();
         Box::new(bwd.into_iter())
@@ -229,7 +229,7 @@ impl<'a> RprobsSlice<'a> {
 }
 
 #[inline]
-fn compute_recomb_prob(dist_cm: f64, r_const: f64, n_haps_ref_frac: f64) -> (RealHmm, RealHmm) {
+fn compute_recomb_prob(dist_cm: f64, r_const: f64, n_haps_ref_frac: f64) -> (Real, Real) {
     let r = -(-r_const * dist_cm.max(MIN_DIST)).exp_m1();
     (
         tp_value_real!(r * n_haps_ref_frac, f32),
@@ -240,15 +240,15 @@ fn compute_recomb_prob(dist_cm: f64, r_const: f64, n_haps_ref_frac: f64) -> (Rea
 #[inline]
 #[cfg(feature = "leak-resist-new")]
 fn compute_recomb_prob_obliv(
-    dist_cm: RealHmm,
-    r_const: RealHmm,
-    n_haps_ref_frac: RealHmm,
-) -> (RealHmm, RealHmm) {
+    dist_cm: Real,
+    r_const: Real,
+    n_haps_ref_frac: Real,
+) -> (Real, Real) {
     let dist_cm = {
-        let min_dist = RealHmm::protect_f32(MIN_DIST as f32);
+        let min_dist = Real::protect_f32(MIN_DIST as f32);
         dist_cm.tp_gt(&min_dist).select(dist_cm, min_dist)
     };
     let x = r_const * dist_cm;
-    let r = x.tp_lt(&RealHmm::protect_f32(0.02)).select(x, x.ode());
-    (r * n_haps_ref_frac, RealHmm::protect_i64(1) - r)
+    let r = x.tp_lt(&Real::protect_f32(0.02)).select(x, x.ode());
+    (r * n_haps_ref_frac, Real::protect_i64(1) - r)
 }

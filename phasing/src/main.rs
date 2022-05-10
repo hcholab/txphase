@@ -35,9 +35,8 @@ mod inner {
     pub type U8 = u8;
     pub type Bool = bool;
     pub type BoolMcc = TpBool;
-    pub type Real = f64;
     pub const F: usize = 52;
-    pub type RealHmm = tp_fixedpoint::TpFixed64<F>;
+    pub type Real = tp_fixedpoint::TpFixed64<F>;
 }
 
 #[cfg(not(feature = "leak-resist-new"))]
@@ -49,13 +48,11 @@ mod inner {
     pub type Bool = bool;
     pub type BoolMcc = bool;
     pub type Real = f64;
-    pub type RealHmm = f64;
 }
 
 use inner::*;
 
 use crate::mcmc::IterOption;
-//use log::info;
 use ndarray::Array1;
 use rand::{RngCore, SeedableRng};
 use std::net::{IpAddr, SocketAddr, TcpListener};
@@ -70,7 +67,6 @@ fn main() {
     assert_eq!(args.len(), 2);
     let host_port = args[1].parse::<u16>().unwrap();
 
-    env_logger::init();
     let min_window_len_cm = 2.5;
     //let min_window_len_cm = 3.0;
     let pbwt_modulo = 0.02;
@@ -78,9 +74,9 @@ fn main() {
     let n_pos_window_overlap = (3. / min_het_rate).ceil() as usize;
     let s = 4;
 
-    let seed = rand::thread_rng().next_u64();
-    //let seed = 14907282476612848385;
-    let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+    //let seed = rand::thread_rng().next_u64();
+    let seed = 17720675695208826401;
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
     println!("Parameters:");
     println!("{}", &log_template("Seed", &format!("{seed}")));
@@ -148,6 +144,17 @@ fn main() {
         IterOption::Pruning(1),
         IterOption::Main(5),
     ];
-    let phased = mcmc::Mcmc::run(&mcmc_params, genotypes.view(), &iterations, rng);
+
+    //let (first, ind, phased) = mcmc::Mcmc::test(&mcmc_params, genotypes.view(), &mut rng);
+    //let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+    //let (first_new, ind_new, phased) = mcmc::Mcmc::test_new(&mcmc_params, genotypes.view(), &mut rng);
+    //assert_eq!(first, first_new);
+    //assert_eq!(ind, ind_new);
+    //assert_eq!(phased, phased_new);
+    //println!("hi");
+
+    //let phased = mcmc::Mcmc::run(&mcmc_params, genotypes.view(), &iterations, &mut rng);
+    let phased = mcmc::Mcmc::run_new(&mcmc_params, genotypes.view(), &iterations, rng);
+    //assert_eq!(phased, phased_2);
     bincode::serialize_into(&mut host_stream, &phased).unwrap();
 }

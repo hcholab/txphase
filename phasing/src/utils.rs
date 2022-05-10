@@ -48,7 +48,7 @@ mod inner {
     macro_rules! tp_value_real {
         ($x: expr, $t: ty) => {
             paste::paste! {
-                crate::RealHmm::[<protect_ $t>](($x) as $t)
+                crate::Real::[<protect_ $t>](($x) as $t)
             }
         };
     }

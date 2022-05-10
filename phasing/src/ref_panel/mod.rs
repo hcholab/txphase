@@ -2,7 +2,7 @@ mod block;
 pub use block::*;
 
 use crate::Genotype;
-use ndarray::{s, Array1, Array2};
+use ndarray::{s, Array1, Array2, ArrayView2};
 
 pub fn m3vcf_scan(
     meta: &m3vcf::RefPanelMeta,
@@ -15,6 +15,8 @@ pub fn m3vcf_scan(
 
     let mut blocks = Vec::new();
     let mut transposed_blocks = Vec::new();
+
+
     for (i, m3vcf_block) in m3vcf_blocks.iter().enumerate() {
         let nvar = if i == 0 {
             m3vcf_block.nvar
@@ -37,21 +39,41 @@ pub fn m3vcf_scan(
         }
     }
 
+    //TODO fix this
+    //let full_ref = Array2::<i8>::zeros((0, 0));
+
     let block_map = gen_block_map(&blocks);
 
     let ref_panel = RefPanel {
         blocks,
         transposed_blocks,
+        //full_ref,
         block_map,
         n_haps: meta.n_haps,
         n_sites: afreqs.len(),
     };
+
+    //let mut full_ref = Array2::<i8>::zeros((afreqs.len(), meta.n_haps));
+    //let mut col_iter = full_ref.rows_mut().into_iter();
+    //let mut cur_col = col_iter.next();
+    //let cur_block_iter = ref_panel.blocks.iter().map(|b| ExpandedBlock::from_block_slice(b.as_slice()));
+    //for cur_block in cur_block_iter {
+        //for block_col in cur_block.rhap.rows().into_iter() {
+            //if let Some(mut cur_col_) = cur_col {
+                //cur_col_.assign(&block_col);
+                //cur_col = col_iter.next();
+            //}
+        //}
+    //}
+
+    //ref_panel.full_ref = full_ref;
 
     (ref_panel, afreqs)
 }
 
 pub struct RefPanel {
     pub blocks: Vec<Block>,
+    //pub full_ref: Array2<i8>,
     pub transposed_blocks: Vec<TransposedBlock>,
     block_map: Vec<usize>,
     pub n_haps: usize,
@@ -60,6 +82,7 @@ pub struct RefPanel {
 
 impl RefPanel {
     pub fn slice<'a>(&'a self, start: usize, end: usize) -> RefPanelSlice<'a> {
+        //let full_ref = self.full_ref.slice(s![start..end, ..]).to_owned();
         let start_block_id = match self.block_map.binary_search(&start) {
             Ok(i) => i + 1,
             Err(i) => i,
@@ -107,6 +130,7 @@ impl RefPanel {
 
         RefPanelSlice {
             blocks: block_slices,
+            //full_ref,
             transposed_blocks: transposed_block_slices,
             n_haps: self.n_haps,
             n_sites,
@@ -120,6 +144,7 @@ impl RefPanel {
 
 pub struct RefPanelSlice<'a> {
     pub blocks: Vec<BlockSlice<'a>>,
+    //pub full_ref: Array2<i8>,
     pub transposed_blocks: Vec<TransposedBlockSlice<'a>>,
     pub n_haps: usize,
     pub n_sites: usize,
@@ -129,6 +154,9 @@ impl<'a> RefPanelSlice<'a> {
     pub fn iter(&self) -> RowIterator<'a, Box<dyn Iterator<Item = BlockSlice<'a>> + 'a>> {
         RowIterator::from_blocks_iter(Box::new(self.blocks.clone().into_iter()))
     }
+    //pub fn iter(&self) -> Box<dyn Iterator<Item = Array1<i8>> + '_> {
+        //Box::new(self.full_ref.rows().into_iter().map(|r| r.to_owned()))
+    //}
 
     pub fn filter(&self, bitmask: &[bool]) -> Array2<Genotype> {
         let n_haps = bitmask.iter().filter(|b| **b).count();

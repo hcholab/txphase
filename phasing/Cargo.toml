@@ -24,8 +24,8 @@ tp-fixedpoint = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/tp-fix
 m3vcf = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/m3vcf" }
 #timing-shield = { version = "0.3", optional = true }
 rand_chacha = "0.3"
-log = "0.4"
-env_logger = "0.9"
+#log = "0.4"
+#env_logger = "0.9"
 anyhow = "1.0"
 statrs = "0.15"
 num-traits = "0.2"

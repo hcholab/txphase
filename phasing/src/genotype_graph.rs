@@ -187,167 +187,255 @@ impl GenotypeGraph {
         }
     }
 
-    // TODO: limit merges to maximum of MAX_AMBIGUOUS het sites within a block
-    pub fn prune(&mut self, tprob: ArrayView3<Real>) {
-        #[cfg(feature = "leak-resist")]
-        let m = tprob.shape()[0];
+    //// TODO: limit merges to maximum of MAX_AMBIGUOUS het sites within a block
+    //pub fn prune(&mut self, tprob: ArrayView3<Real>) {
+    //#[cfg(feature = "leak-resist")]
+    //let m = tprob.shape()[0];
 
-        #[cfg(not(feature = "leak-resist"))]
-        let m = tprob.shape()[0];
+    //#[cfg(not(feature = "leak-resist"))]
+    //let m = tprob.shape()[0];
 
-        // Backward pass to identify where to merge adjacent blocks and the new haps
-        let mut ind_cache = Array3::<U8>::zeros((m, P, 2));
-        let mut merge_head = vec![tp_value!(false, bool); m];
-        let mut merge_flag = tp_value!(false, bool);
-        let mut new_merge_flag;
+    //// Backward pass to identify where to merge adjacent blocks and the new haps
+    //let mut ind_cache = Array3::<U8>::zeros((m, P, 2));
+    //let mut merge_head = vec![tp_value!(false, bool); m];
+    //let mut merge_flag = tp_value!(false, bool);
+    //let mut new_merge_flag;
 
-        for i in (0..m - 1).rev() {
-            let (ind, prob, _) = select_top_p(tprob.slice(s![i, .., ..]));
-            // If merge flag set then carry over
-            for j in 0..P {
-                #[cfg(feature = "leak-resist")]
-                {
-                    ind1_cache[[i, j]] = merge_flag.select(ind1_cache[[i + 1, j]], ind1[j]);
-                    ind2_cache[[i, j]] = merge_flag.select(ind2_cache[[i + 1, j]], ind2[j]);
-                }
+    //for i in (0..m - 1).rev() {
+    //let (ind, prob, _) = select_top_p(tprob.slice(s![i, .., ..]));
+    //// If merge flag set then carry over
+    //for j in 0..P {
+    //#[cfg(feature = "leak-resist")]
+    //{
+    //ind1_cache[[i, j]] = merge_flag.select(ind1_cache[[i + 1, j]], ind1[j]);
+    //ind2_cache[[i, j]] = merge_flag.select(ind2_cache[[i + 1, j]], ind2[j]);
+    //}
 
-                #[cfg(not(feature = "leak-resist"))]
-                {
-                    ind_cache[[i, j, 0]] = if merge_flag {
-                        ind_cache[[i + 1, j, 0]]
-                    } else {
-                        ind[[j, 0]]
-                    };
-                    ind_cache[[i, j, 1]] = if merge_flag {
-                        ind_cache[[i + 1, j, 1]]
-                    } else {
-                        ind[[j, 1]]
-                    };
-                }
+    //#[cfg(not(feature = "leak-resist"))]
+    //{
+    //ind_cache[[i, j, 0]] = if merge_flag {
+    //ind_cache[[i + 1, j, 0]]
+    //} else {
+    //ind[[j, 0]]
+    //};
+    //ind_cache[[i, j, 1]] = if merge_flag {
+    //ind_cache[[i + 1, j, 1]]
+    //} else {
+    //ind[[j, 1]]
+    //};
+    //}
+    //}
+
+    //#[cfg(feature = "leak-resist")]
+    //{
+    //// If at head and merge is on, it is the merge head
+    //merge_head[i] = (self.block_head[i] | (i == 0)) & merge_flag;
+
+    //// If merge is not on, we're at a head and prob over threshold, start a new merge
+    //new_merge_flag = self.block_head[i]
+    //& prob.tp_gt(&Real::protect_f32(MCMC_PRUNE_PROB_THRES))
+    //& !merge_flag;
+
+    //// If at head then merge_flag is set to new_merge_flag, otherwise carry over
+    //merge_flag = self.block_head[i].select(new_merge_flag, merge_flag);
+    //}
+
+    //#[cfg(not(feature = "leak-resist"))]
+    //{
+    //let is_segment_marker = self.graph[i].is_segment_marker();
+    //// If at head and merge is on, it is the merge head
+    //merge_head[i] = (i == 0 || is_segment_marker) && merge_flag;
+
+    //// If merge is not on, we're at a head and prob over threshold, start a new merge
+    //new_merge_flag =
+    //is_segment_marker && prob > MCMC_PRUNE_PROB_THRES as Real && !merge_flag;
+
+    //// If at head then merge_flag is set to new_merge_flag, otherwise carry over
+    //if is_segment_marker {
+    //merge_flag = new_merge_flag;
+    //}
+    //}
+    //}
+
+    //// Forward pass to update the graph and block_head
+    //let mut ind = Array2::<U8>::zeros((P, 2));
+    //let mut ind_final = Array1::<U8>::zeros(P);
+    //let mut block_counter = tp_value!(0, i8);
+
+    //for i in 0..m {
+    //let mut new_geno = self.graph[i];
+    //#[cfg(feature = "leak-resist")]
+    //{
+    //block_counter = merge_head[i].select(tp_value!(2, i8), block_counter);
+    //block_counter = (!merge_head[i] & self.block_head[i]).select(
+    //(block_counter)
+    //.tp_gt(&1)
+    //.select(block_counter - 1, tp_value!(0, i8)),
+    //block_counter,
+    //);
+    //for j in 0..p {
+    //// If at merge head copy cache over
+    //ind1[j] = merge_head[i].select(ind1_cache[[i, j]], ind1[j]);
+    //ind2[j] = merge_head[i].select(ind2_cache[[i, j]], ind2[j]);
+
+    //// If block_counter hits zero change back to original indicies
+    //ind1[j] = block_counter
+    //.tp_eq(&0)
+    //.select(U8::protect(j as u8), ind1[j]);
+    //ind2[j] = block_counter
+    //.tp_eq(&0)
+    //.select(U8::protect(j as u8), ind2[j]);
+
+    //// Use ind1 for first block, ind2 for second block
+    //ind[j] = block_counter.tp_eq(&2).select(ind1[j], ind2[j]);
+    //}
+
+    //for j in 0..P {
+    //new_geno[j] = self.graph[i].obliv_read(ind[j].as_u32());
+    //}
+    //self.graph[i] = SmallLSOram::from_slice(new_geno.as_slice().unwrap());
+
+    //// Erase block_head flag between the two blocks being merged
+    //self.block_head[i] = (self.block_head[i] & block_counter.tp_eq(&1))
+    //.select(Bool::protect(false), self.block_head[i]);
+    //}
+
+    //#[cfg(not(feature = "leak-resist"))]
+    //{
+    //let is_segment_marker = self.graph[i].is_segment_marker();
+    //// At merge head set block counter to 2 (will update the next two blocks)
+    //if merge_head[i] {
+    //block_counter = 2;
+    //}
+    //// Every time we see a block head that is not a merge head, decrement block counter
+    //if !merge_head[i] && is_segment_marker {
+    //block_counter = 0.max((block_counter as i8) - 1);
+    //}
+
+    //for j in 0..P {
+    //// If at merge head copy cache over
+    //if merge_head[i] {
+    //ind[[j, 0]] = ind_cache[[i, j, 0]];
+    //ind[[j, 1]] = ind_cache[[i, j, 1]];
+    //}
+
+    //// If block_counter hits zero change back to original indicies
+    //if block_counter == 0 {
+    //ind[[j, 0]] = j as u8;
+    //ind[[j, 1]] = j as u8;
+    //}
+
+    //// Use ind1 for first block, ind2 for second block
+    //if block_counter == 2 {
+    //ind_final[j] = ind[[j, 0]];
+    //} else {
+    //ind_final[j] = ind[[j, 1]];
+    //}
+    //}
+
+    //for j in 0..P {
+    //new_geno.set_row(j, self.graph[i].get_row(ind_final[j] as usize));
+    //}
+
+    //// Erase block_head flag between the two blocks being merged
+    //if self.graph[i].is_segment_marker() && block_counter == 1 {
+    //new_geno.unset_segment_marker();
+    //}
+
+    //self.graph[i] = new_geno;
+    //}
+    //}
+    //}
+
+    pub fn prune_rank_new(&mut self, tprobs: ArrayView3<f64>) {
+        let mut trans_map = Vec::new();
+        let mut het_count = 0;
+        for (i, g) in self.graph.iter().enumerate() {
+            if g.is_segment_marker() {
+                trans_map.push(het_count);
+                het_count = 0;
             }
+            het_count += g.is_het() as usize;
+        }
+        trans_map.push(het_count);
 
-            #[cfg(feature = "leak-resist")]
-            {
-                // If at head and merge is on, it is the merge head
-                merge_head[i] = (self.block_head[i] | (i == 0)) & merge_flag;
-
-                // If merge is not on, we're at a head and prob over threshold, start a new merge
-                new_merge_flag = self.block_head[i]
-                    & prob.tp_gt(&Real::protect_f32(MCMC_PRUNE_PROB_THRES))
-                    & !merge_flag;
-
-                // If at head then merge_flag is set to new_merge_flag, otherwise carry over
-                merge_flag = self.block_head[i].select(new_merge_flag, merge_flag);
-            }
-
-            #[cfg(not(feature = "leak-resist"))]
-            {
-                let is_segment_marker = self.graph[i].is_segment_marker();
-                // If at head and merge is on, it is the merge head
-                merge_head[i] = (i == 0 || is_segment_marker) && merge_flag;
-
-                // If merge is not on, we're at a head and prob over threshold, start a new merge
-                new_merge_flag =
-                    is_segment_marker && prob > MCMC_PRUNE_PROB_THRES as Real && !merge_flag;
-
-                // If at head then merge_flag is set to new_merge_flag, otherwise carry over
-                if is_segment_marker {
-                    merge_flag = new_merge_flag;
+        let mut trans_stats = Vec::new();
+        for (i, (t1, t2)) in trans_map.iter().zip(trans_map.iter().skip(1)).enumerate() {
+            let het_count = t1 + t2;
+            if het_count < MAX_HETS {
+                let (ind, prob, entrophy) = select_top_p(tprobs.slice(s![i, .., ..]));
+                if prob > MCMC_PRUNE_PROB_THRES {
+                    trans_stats.push((entrophy, i, ind));
                 }
             }
         }
 
-        // Forward pass to update the graph and block_head
-        let mut ind = Array2::<U8>::zeros((P, 2));
-        let mut ind_final = Array1::<U8>::zeros(P);
-        let mut block_counter = tp_value!(0, i8);
+        trans_stats.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-        for i in 0..m {
-            let mut new_geno = self.graph[i];
-            #[cfg(feature = "leak-resist")]
-            {
-                block_counter = merge_head[i].select(tp_value!(2, i8), block_counter);
-                block_counter = (!merge_head[i] & self.block_head[i]).select(
-                    (block_counter)
-                        .tp_gt(&1)
-                        .select(block_counter - 1, tp_value!(0, i8)),
-                    block_counter,
-                );
-                for j in 0..p {
-                    // If at merge head copy cache over
-                    ind1[j] = merge_head[i].select(ind1_cache[[i, j]], ind1[j]);
-                    ind2[j] = merge_head[i].select(ind2_cache[[i, j]], ind2[j]);
+        let mut trans_ind = vec![None; trans_map.len() - 1];
 
-                    // If block_counter hits zero change back to original indicies
-                    ind1[j] = block_counter
-                        .tp_eq(&0)
-                        .select(U8::protect(j as u8), ind1[j]);
-                    ind2[j] = block_counter
-                        .tp_eq(&0)
-                        .select(U8::protect(j as u8), ind2[j]);
-
-                    // Use ind1 for first block, ind2 for second block
-                    ind[j] = block_counter.tp_eq(&2).select(ind1[j], ind2[j]);
+        for t in trans_stats {
+            let (_, i, ind) = t;
+            trans_ind[i] = if i == 0 && i == trans_ind.len() - 1 {
+                None
+            } else if i == 0 && i < trans_ind.len() - 1 {
+                if trans_ind[i + 1].is_none() {
+                    Some(ind)
+                } else {
+                    None
                 }
-
-                for j in 0..P {
-                    new_geno[j] = self.graph[i].obliv_read(ind[j].as_u32());
+            } else if i > 0 && i == trans_ind.len() - 1 {
+                if trans_ind[i - 1].is_none() {
+                    Some(ind)
+                } else {
+                    None
                 }
-                self.graph[i] = SmallLSOram::from_slice(new_geno.as_slice().unwrap());
-
-                // Erase block_head flag between the two blocks being merged
-                self.block_head[i] = (self.block_head[i] & block_counter.tp_eq(&1))
-                    .select(Bool::protect(false), self.block_head[i]);
+            } else {
+                if trans_ind[i - 1].is_none() && trans_ind[i + 1].is_none() {
+                    Some(ind)
+                } else {
+                    None
+                }
             }
+        }
 
-            #[cfg(not(feature = "leak-resist"))]
-            {
-                let is_segment_marker = self.graph[i].is_segment_marker();
-                // At merge head set block counter to 2 (will update the next two blocks)
-                if merge_head[i] {
-                    block_counter = 2;
+        let mut trans_ind_iter = trans_ind.iter();
+        let mut cur_trans_ind = &None;
+
+        // forward scan
+        for g in &mut self.graph.iter_mut() {
+            if g.is_segment_marker() {
+                cur_trans_ind = trans_ind_iter.next().unwrap();
+            }
+            if let Some(cur_trans_ind) = cur_trans_ind {
+                let mut new_g = *g;
+                Zip::indexed(cur_trans_ind.rows()).for_each(|i, ind| {
+                    new_g.set_row(i as usize, g.get_row(ind[1] as usize));
+                });
+                *g = new_g;
+            }
+        }
+        // backward scan
+        let mut trans_ind_iter = trans_ind.iter().rev();
+        let mut cur_trans_ind: &Option<Array2<U8>> = &None;
+        for g in &mut self.graph.iter_mut().rev() {
+            if let Some(cur_trans_ind) = cur_trans_ind {
+                let mut new_g = *g;
+                Zip::indexed(cur_trans_ind.rows()).for_each(|i, ind| {
+                    new_g.set_row(i as usize, g.get_row(ind[0] as usize));
+                });
+                *g = new_g;
+            }
+            if g.is_segment_marker() {
+                cur_trans_ind = trans_ind_iter.next().unwrap();
+                if cur_trans_ind.is_some() {
+                    g.unset_segment_marker();
                 }
-                // Every time we see a block head that is not a merge head, decrement block counter
-                if !merge_head[i] && is_segment_marker {
-                    block_counter = 0.max((block_counter as i8) - 1);
-                }
-
-                for j in 0..P {
-                    // If at merge head copy cache over
-                    if merge_head[i] {
-                        ind[[j, 0]] = ind_cache[[i, j, 0]];
-                        ind[[j, 1]] = ind_cache[[i, j, 1]];
-                    }
-
-                    // If block_counter hits zero change back to original indicies
-                    if block_counter == 0 {
-                        ind[[j, 0]] = j as u8;
-                        ind[[j, 1]] = j as u8;
-                    }
-
-                    // Use ind1 for first block, ind2 for second block
-                    if block_counter == 2 {
-                        ind_final[j] = ind[[j, 0]];
-                    } else {
-                        ind_final[j] = ind[[j, 1]];
-                    }
-                }
-
-                for j in 0..P {
-                    new_geno.set_row(j, self.graph[i].get_row(ind_final[j] as usize));
-                }
-
-                // Erase block_head flag between the two blocks being merged
-                if self.graph[i].is_segment_marker() && block_counter == 1 {
-                    new_geno.unset_segment_marker();
-                }
-
-                self.graph[i] = new_geno;
             }
         }
     }
 
-    pub fn prune_rank(&mut self, tprobs: ArrayView3<Real>) {
+    pub fn prune_rank(&mut self, tprobs: ArrayView3<f64>) {
         let mut trans_map = Vec::new();
         let mut het_count = 0;
         let mut segment_start_i = 0;
@@ -437,13 +525,25 @@ impl GenotypeGraph {
         }
     }
 
-    pub fn traverse_graph_pair(&self, ind: ArrayView2<u8>, mut haps: ArrayViewMut2<Genotype>) {
+    pub fn traverse_graph_dip(
+        &self,
+        first_ind: u8,
+        ind: ArrayView1<u8>,
+        mut haps: ArrayViewMut2<Genotype>,
+    ) {
+        let mut cur_ind_1 = first_ind as usize;
+        let mut cur_ind_2 = P - 1 - cur_ind_1;
+        let mut ind_iter = ind.iter().cloned();
+
         Zip::from(haps.rows_mut())
-            .and(ind.rows())
             .and(&self.graph)
-            .for_each(|mut h_row, ind_row, g| {
-                h_row[0] = g.get_row(ind_row[0] as usize);
-                h_row[1] = g.get_row(ind_row[1] as usize);
+            .for_each(|mut h_row, g| {
+                if g.is_segment_marker() {
+                    cur_ind_1 = ind_iter.next().unwrap() as usize;
+                    cur_ind_2 = P - 1 - cur_ind_1;
+                }
+                h_row[0] = g.get_row(cur_ind_1);
+                h_row[1] = g.get_row(cur_ind_2);
             });
     }
 }
@@ -452,7 +552,7 @@ pub struct GenotypeGraphSlice<'a> {
     pub graph: ArrayView1<'a, G>,
 }
 
-fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
+fn select_top_p(tab: ArrayView2<f64>) -> (Array2<u8>, f64, f64) {
     let n = P * P;
     let mut elems = Vec::with_capacity(n);
     let mut entrophy = 0.;
@@ -487,7 +587,7 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
         elems.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     }
 
-    let mut ind = Array2::<U8>::zeros((P, 2));
+    let mut ind = Array2::<u8>::zeros((P, 2));
 
     let mut taken = Array2::<bool>::from_elem((P, P), false);
 

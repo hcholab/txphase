@@ -1,15 +1,16 @@
 mod initialize;
 mod params;
-mod sampling;
+pub mod sampling;
 mod viterbi;
 mod windows_split;
 pub use params::*;
 
 use crate::genotype_graph::GenotypeGraph;
-use crate::hmm::Hmm;
+use crate::hmm::{Hmm, HmmNew};
 use crate::hmm::{COLL_T, COMBD_T, COMB_T, EMIS_T, TRAN_T};
 use crate::neighbors_finding;
-use crate::neighbors_finding::PBWT_T;
+use crate::neighbors_finding::{NEIGHBOR_T, PBWT_T};
+use crate::pbwt::EXPAND_T;
 use crate::ref_panel::RefPanelSlice;
 use crate::variants::{Rarity, Variant};
 use crate::{tp_value_new, BoolMcc, Genotype, Real};
@@ -40,8 +41,38 @@ pub enum IterOption {
 #[derive(PartialEq, Eq, Debug, Clone)]
 enum IterOptionInternal {
     Burnin,
-    Pruning,
-    Main(bool), // First main iteration?
+    Pruning(bool), // First pruning iteration?
+    Main(bool),    // First main iteration?
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+enum IterOptionInternalNew {
+    Burnin,
+    Pruning(bool),    // first?
+    Main(bool, bool), // (first, last)?
+}
+
+impl IterOptionInternalNew {
+    pub fn is_sample(self) -> bool {
+        match self {
+            Self::Burnin | Self::Pruning(_) | Self::Main(_, false) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_save(self) -> bool {
+        match self {
+            Self::Pruning(_) | Self::Main(_, _) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_first_save(self) -> bool {
+        match self {
+            Self::Pruning(true) | Self::Main(true, _) => true,
+            _ => false,
+        }
+    }
 }
 
 pub struct Mcmc<'a> {
@@ -50,13 +81,154 @@ pub struct Mcmc<'a> {
     genotype_graph: GenotypeGraph,
     ignored_sites: Array1<BoolMcc>,
     estimated_haps: Array2<Genotype>,
-    phased_ind: Array2<u8>,
+    first_ind: u8,
+    phased_ind: Array1<u8>,
     tprobs: Array3<Real>,
     #[cfg(feature = "leak-resist-new")]
     tprobs_e: Array2<TpI8>,
+    first_tprobs_dip: Array1<f64>,
+    tprobs_dip: Array3<f64>,
 }
 
 impl<'a> Mcmc<'a> {
+    pub fn run_new(
+        params: &'a McmcSharedParams,
+        genotypes: ArrayView1<Genotype>,
+        iterations: &[IterOption],
+        mut rng: impl Rng,
+    ) -> Array2<Genotype> {
+        match iterations.last().unwrap() {
+            IterOption::Main(_) => {}
+            _ => panic!("Last iterations must be main."),
+        }
+
+        let mut iterations_iternal = Vec::new();
+        for i in iterations {
+            match i {
+                IterOption::Burnin(r) => {
+                    assert!(*r > 0);
+                    for _ in 0..*r {
+                        iterations_iternal.push(IterOptionInternalNew::Burnin);
+                    }
+                }
+                IterOption::Pruning(r) => {
+                    let r = *r;
+                    assert!(r > 0);
+                    iterations_iternal.push(IterOptionInternalNew::Pruning(true));
+                    for _ in 1..r {
+                        iterations_iternal.push(IterOptionInternalNew::Pruning(false));
+                    }
+                }
+                IterOption::Main(r) => {
+                    let r = *r;
+                    assert!(r > 0);
+                    if r == 1 {
+                        iterations_iternal.push(IterOptionInternalNew::Main(true, true));
+                    } else {
+                        iterations_iternal.push(IterOptionInternalNew::Main(true, false));
+                        for _ in 1..(r - 1) {
+                            iterations_iternal.push(IterOptionInternalNew::Main(false, false));
+                        }
+                        iterations_iternal.push(IterOptionInternalNew::Main(false, true));
+                    }
+                }
+            }
+        }
+
+        //let mut ref_file = std::io::BufReader::new(
+        //std::fs::File::open(
+        //"/home/ndokmai/workspace/phasing-oram/phasing/tests/ref_tprobs_chr1.bin",
+        //)
+        //.unwrap(),
+        //);
+
+        //let mut ref_file = std::io::BufWriter::new(
+        //std::fs::File::create(
+        //"/home/ndokmai/workspace/phasing-oram/phasing/tests/ref_tprobs_chr1.bin",
+        //)
+        //.unwrap(),
+        //);
+
+        let mut mcmc = Self::initialize_new(&params, genotypes.view());
+
+        //mcmc.save_estimated_haps(&mut ref_file);
+        //mcmc.check_estimated_haps(&mut ref_file);
+
+        for i in iterations_iternal {
+            mcmc.iteration_new(i, &mut rng);
+            //mcmc.save_tprobs(&mut ref_file);
+            //mcmc.save_estimated_haps(&mut ref_file);
+            //mcmc.check_tprobs(&mut ref_file);
+            //mcmc.check_estimated_haps(&mut ref_file);
+            //println!("{:#?}", mcmc.tprobs.slice(s![..10, .., ..]));
+            //unimplemented!();
+        }
+
+        mcmc.phased_ind = viterbi::viterbi_new(
+            mcmc.first_tprobs_dip.view(),
+            mcmc.tprobs_dip.view(),
+            mcmc.genotype_graph.graph.view(),
+        );
+
+        let first_ind = mcmc.phased_ind[0];
+        let phased_ind = mcmc.phased_ind.slice(s![1..]).to_owned();
+
+        mcmc.genotype_graph.traverse_graph_dip(
+            first_ind,
+            phased_ind.view(),
+            mcmc.estimated_haps.view_mut(),
+        );
+
+        //mcmc.save_estimated_haps(&mut ref_file);
+        //mcmc.check_estimated_haps(&mut ref_file);
+
+        mcmc.estimated_haps
+    }
+    pub fn test_new(
+        params: &'a McmcSharedParams,
+        genotypes: ArrayView1<Genotype>,
+        mut rng: impl Rng,
+    ) -> (u8, Array1<u8>, Array2<i8>) {
+        let mut mcmc = Self::initialize_new(&params, genotypes.view());
+
+        mcmc.iteration_new(IterOptionInternalNew::Burnin, &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Burnin, &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Burnin, &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Burnin, &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Burnin, &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Burnin, &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Pruning(true), &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Burnin, &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Pruning(true), &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Burnin, &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Pruning(true), &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Main(true, false), &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Main(false, false), &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Main(false, false), &mut rng);
+        mcmc.iteration_new(IterOptionInternalNew::Main(false, false), &mut rng);
+        (mcmc.first_ind, mcmc.phased_ind, mcmc.estimated_haps)
+    }
+
+    pub fn test(
+        params: &'a McmcSharedParams,
+        genotypes: ArrayView1<Genotype>,
+        mut rng: impl Rng,
+    ) -> (u8, Array1<u8>, Array2<i8>) {
+        let mut mcmc = Self::initialize(&params, genotypes.view());
+        mcmc.iteration(IterOptionInternal::Burnin, &mut rng);
+        let first_ind = mcmc.phased_ind[0];
+
+        let phased_ind = Array1::from_vec(
+            mcmc.phased_ind
+                .iter()
+                .zip(mcmc.genotype_graph.graph.iter())
+                .filter_map(|(&i, g)| if g.is_segment_marker() { Some(i) } else { None })
+                .collect(),
+        );
+
+        (first_ind, phased_ind, mcmc.estimated_haps)
+    }
+
     pub fn run(
         params: &'a McmcSharedParams,
         genotypes: ArrayView1<Genotype>,
@@ -79,8 +251,9 @@ impl<'a> Mcmc<'a> {
                 }
                 IterOption::Pruning(r) => {
                     assert!(*r > 0);
-                    for _ in 0..*r {
-                        iterations_iternal.push(IterOptionInternal::Pruning);
+                    iterations_iternal.push(IterOptionInternal::Pruning(true));
+                    for _ in 1..*r {
+                        iterations_iternal.push(IterOptionInternal::Pruning(false));
                     }
                 }
                 IterOption::Main(r) => {
@@ -114,6 +287,8 @@ impl<'a> Mcmc<'a> {
 
         for i in iterations_iternal {
             mcmc.iteration(i, &mut rng);
+            return mcmc.estimated_haps;
+
             //mcmc.save_tprobs(&mut ref_file);
             //mcmc.save_estimated_haps(&mut ref_file);
             //mcmc.check_tprobs(&mut ref_file);
@@ -122,10 +297,23 @@ impl<'a> Mcmc<'a> {
             //unimplemented!();
         }
 
-        mcmc.phased_ind = viterbi::viterbi(mcmc.tprobs.view(), mcmc.genotype_graph.graph.view());
+        mcmc.phased_ind =
+            viterbi::viterbi(mcmc.tprobs_dip.view(), mcmc.genotype_graph.graph.view());
 
-        mcmc.genotype_graph
-            .traverse_graph_pair(mcmc.phased_ind.view(), mcmc.estimated_haps.view_mut());
+        let first_ind = mcmc.phased_ind[0];
+        let phased_ind_reduced = Array1::from_vec(
+            mcmc.phased_ind
+                .iter()
+                .zip(mcmc.genotype_graph.graph.iter())
+                .filter_map(|(&i, g)| if g.is_segment_marker() { Some(i) } else { None })
+                .collect(),
+        );
+
+        mcmc.genotype_graph.traverse_graph_dip(
+            first_ind,
+            phased_ind_reduced.view(),
+            mcmc.estimated_haps.view_mut(),
+        );
 
         //mcmc.save_estimated_haps(&mut ref_file);
         //mcmc.check_estimated_haps(&mut ref_file);
@@ -133,12 +321,54 @@ impl<'a> Mcmc<'a> {
         mcmc.estimated_haps
     }
 
+    fn initialize_new(params: &'a McmcSharedParams, genotypes: ArrayView1<Genotype>) -> Self {
+        println!("=== Initialization ===",);
+        let now = Instant::now();
+        let estimated_haps = initialize::initialize(&params.ref_panel, genotypes);
+        let genotype_graph = GenotypeGraph::build(genotypes);
+        let n_segments = genotype_graph
+            .graph
+            .iter()
+            .filter(|v| v.is_segment_marker())
+            .count();
+
+        let first_ind = 0;
+        let phased_ind = Array1::<u8>::zeros(n_segments);
+        let first_tprobs_dip = Array1::<f64>::zeros(P);
+        let tprobs_dip = Array3::<f64>::zeros((n_segments, P, P));
+        let tprobs = Array3::<Real>::zeros((0, 0, 0));
+
+        #[cfg(feature = "leak-resist-new")]
+        let tprobs_e = Array2::<TpI8>::from_elem((estimated_haps.nrows(), P), TpI8::protect(0));
+
+        let ignored_sites = Self::get_ignored_sites(params.variants.view(), genotypes);
+        println!("Initialization: {} ms", (Instant::now() - now).as_millis());
+        println!("",);
+        Self {
+            params,
+            cur_overlap_region_len: params.overlap_region_len,
+            genotype_graph,
+            estimated_haps,
+            first_ind,
+            phased_ind,
+            tprobs,
+            first_tprobs_dip,
+            tprobs_dip,
+            ignored_sites,
+            #[cfg(feature = "leak-resist-new")]
+            tprobs_e,
+        }
+    }
+
     fn initialize(params: &'a McmcSharedParams, genotypes: ArrayView1<Genotype>) -> Self {
         println!("=== Initialization ===",);
         let now = Instant::now();
         let estimated_haps = initialize::initialize(&params.ref_panel, genotypes);
-        let phased_ind = Array2::<u8>::zeros((estimated_haps.nrows(), 2));
+        let first_ind = 0;
+        let phased_ind = Array1::<u8>::zeros(estimated_haps.nrows());
+        let first_tprobs_dip = Array1::<f64>::zeros(0);
         let tprobs = Array3::<Real>::zeros((estimated_haps.nrows(), P, P));
+        let tprobs_dip = Array3::<f64>::zeros((estimated_haps.nrows(), P, P));
 
         #[cfg(feature = "leak-resist-new")]
         let tprobs_e = Array2::<TpI8>::from_elem((estimated_haps.nrows(), P), TpI8::protect(0));
@@ -152,8 +382,11 @@ impl<'a> Mcmc<'a> {
             cur_overlap_region_len: params.overlap_region_len,
             genotype_graph,
             estimated_haps,
+            first_ind,
             phased_ind,
             tprobs,
+            first_tprobs_dip,
+            tprobs_dip,
             ignored_sites,
             #[cfg(feature = "leak-resist-new")]
             tprobs_e,
@@ -184,6 +417,189 @@ impl<'a> Mcmc<'a> {
     //}
     //}
 
+    fn iteration_new(&mut self, iter_option: IterOptionInternalNew, mut rng: impl Rng) {
+        {
+            *EMIS_T.lock().unwrap() = Duration::from_millis(0);
+            *TRAN_T.lock().unwrap() = Duration::from_millis(0);
+            *COLL_T.lock().unwrap() = Duration::from_millis(0);
+            *COMB_T.lock().unwrap() = Duration::from_millis(0);
+            *COMBD_T.lock().unwrap() = Duration::from_millis(0);
+            *PBWT_T.lock().unwrap() = Duration::from_millis(0);
+            *EXPAND_T.lock().unwrap() = Duration::from_millis(0);
+            *NEIGHBOR_T.lock().unwrap() = Duration::from_millis(0);
+        }
+
+        println!("=== {:?} Iteration ===", iter_option);
+        let now = Instant::now();
+
+        let max_k = None;
+
+        if let Some(max_k) = max_k {
+            println!("Max K: {max_k}");
+        } else {
+            println!("Max K: no upper limit");
+        }
+        let pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
+        let windows = self.windows_full_segments(&mut rng);
+
+        let mut prev_ind = None;
+        let mut start_segment = 0;
+        let mut sum_window_size = 0;
+        let n_windows = windows.len();
+        let mut ks = Vec::new();
+
+        let mut is_first_window = true;
+
+        let rprobs = self.params.hmm_params.get_rprobs(
+            self.ignored_sites.view(),
+            &self.genotype_graph,
+            self.params.variants.view(),
+        );
+
+        let mut first_ind = None;
+
+        for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
+            sum_window_size +=
+                self.params.variants[end_w - 1].bp - self.params.variants[start_w].bp;
+
+            let estimated_haps_w = self.estimated_haps.slice(s![start_w..end_w, ..]).to_owned();
+            let params_w = self.params.slice(start_w, end_w);
+            let pbwt_evaluted_filter_w = &self.params.pbwt_evaluted[start_w..end_w];
+            let pbwt_group_filter_w = &pbwt_group_filter[start_w..end_w];
+            let (selected_ref_panel, k) = select_ref_panel(
+                &params_w.ref_panel,
+                estimated_haps_w.view(),
+                pbwt_evaluted_filter_w,
+                pbwt_group_filter_w,
+                self.params.s,
+                max_k,
+                Some(&mut rng),
+            );
+            ks.push(k as f64);
+
+            let ignored_sites_w = self.ignored_sites.slice(s![start_w..end_w]);
+            let rprobs_w = rprobs.slice(start_w, end_w);
+            let genotype_graph_w = self.genotype_graph.slice(start_w, end_w);
+            let n_segments_w = self
+                .genotype_graph
+                .slice(start_write_w, end_write_w)
+                .graph
+                .iter()
+                .filter(|v| v.is_segment_marker())
+                .count();
+
+            let sampling_args = if iter_option.is_sample() {
+                Some((
+                    prev_ind,
+                    &mut rng,
+                    self.phased_ind
+                        .slice_mut(s![start_segment..start_segment + n_segments_w]),
+                ))
+            } else {
+                None
+            };
+
+            let target_tprobs_dip_w = if iter_option.is_save() {
+                Some((
+                    if is_first_window {
+                        Some(self.first_tprobs_dip.view_mut())
+                    } else {
+                        None
+                    },
+                    self.tprobs_dip.slice_mut(s![
+                        start_segment..start_segment + n_segments_w,
+                        ..,
+                        ..
+                    ]),
+                ))
+            } else {
+                None
+            };
+
+            let is_first_prune_main = iter_option.is_first_save();
+
+            let first_ind_ = HmmNew::fwbw_sample(
+                selected_ref_panel.view(),
+                genotype_graph_w.graph,
+                self.params.hmm_params.eprob,
+                &rprobs_w,
+                ignored_sites_w,
+                is_first_window,
+                sampling_args,
+                target_tprobs_dip_w,
+                is_first_prune_main,
+            );
+
+            if is_first_window {
+                first_ind = first_ind_;
+                if iter_option.is_sample() {
+                    self.first_ind = first_ind_.unwrap();
+                }
+            }
+
+            if iter_option.is_sample() {
+                prev_ind = Some(self.phased_ind[start_segment + n_segments_w - 1]);
+            }
+            is_first_window = false;
+            start_segment += n_segments_w;
+        }
+
+        if iter_option.is_sample() {
+            self.genotype_graph.traverse_graph_dip(
+                first_ind.unwrap(),
+                self.phased_ind.view(),
+                self.estimated_haps.view_mut(),
+            );
+        }
+
+        //assert_eq!(start_segment, self.phased_ind.len());
+
+        if iter_option == IterOptionInternalNew::Pruning(true) {
+            self.genotype_graph.prune_rank_new(self.tprobs_dip.view());
+            //self.cur_overlap_region_len *= 2;
+        }
+
+        println!(
+            "#Segments: {}",
+            self.genotype_graph
+                .graph
+                .iter()
+                .filter(|g| g.is_segment_marker())
+                .count()
+        );
+        use statrs::statistics::Statistics;
+        println!(
+            "K: {:.3}+/-{:.3}",
+            Statistics::mean(&ks),
+            Statistics::std_dev(&ks)
+        );
+
+        println!(
+            "Window size: {:.2} Mb",
+            sum_window_size as f64 / n_windows as f64 / 1e6
+        );
+
+        println!("Elapsed time: {} ms", (Instant::now() - now).as_millis());
+        println!("PBWT: {} ms", PBWT_T.lock().unwrap().as_millis());
+        println!(
+            "PBWT (expansion only): {} ms",
+            EXPAND_T.lock().unwrap().as_millis()
+        );
+        println!(
+            "Neighbor finding: {} ms",
+            NEIGHBOR_T.lock().unwrap().as_millis()
+        );
+        println!("Emission: {} ms", EMIS_T.lock().unwrap().as_millis());
+        println!("Transition: {} ms", TRAN_T.lock().unwrap().as_millis());
+        println!("Collapse: {} ms", COLL_T.lock().unwrap().as_millis());
+        println!("Combine: {} ms", COMB_T.lock().unwrap().as_millis());
+        println!(
+            "Combine Diploid: {} ms",
+            COMBD_T.lock().unwrap().as_millis()
+        );
+        println!("",);
+    }
+
     fn iteration(&mut self, iter_option: IterOptionInternal, mut rng: impl Rng) {
         {
             *EMIS_T.lock().unwrap() = Duration::from_millis(0);
@@ -192,6 +608,8 @@ impl<'a> Mcmc<'a> {
             *COMB_T.lock().unwrap() = Duration::from_millis(0);
             *COMBD_T.lock().unwrap() = Duration::from_millis(0);
             *PBWT_T.lock().unwrap() = Duration::from_millis(0);
+            *EXPAND_T.lock().unwrap() = Duration::from_millis(0);
+            *NEIGHBOR_T.lock().unwrap() = Duration::from_millis(0);
         }
 
         println!("=== {:?} Iteration ===", iter_option);
@@ -213,11 +631,11 @@ impl<'a> Mcmc<'a> {
         let windows = self.windows_full_segments(&mut rng);
         //let windows = self.windows(&mut rng);
 
-        let mut prev_ind = (0, 0);
+        let mut prev_ind = 0;
         let mut sum_window_size = 0;
         let n_windows = windows.len();
         let mut ks = Vec::new();
-        let mut tprob_pairs = Array2::<Real>::zeros((P, P));
+        let mut tprob_pairs = Array2::<f64>::zeros((P, P));
 
         let mut i = 0;
         let mut is_first_window = true;
@@ -280,7 +698,7 @@ impl<'a> Mcmc<'a> {
             let genotype_graph = &self.genotype_graph;
 
             let mut tprobs_window_target =
-                self.tprobs
+                self.tprobs_dip
                     .slice_mut(s![start_write_w..end_write_w, .., ..]);
 
             #[cfg(feature = "leak-resist-new")]
@@ -301,7 +719,9 @@ impl<'a> Mcmc<'a> {
             //});
             //}
 
-            if iter_option == IterOptionInternal::Pruning {
+            if iter_option == IterOptionInternal::Pruning(true)
+                || iter_option == IterOptionInternal::Pruning(false)
+            {
                 Zip::from(tprobs_window_target.outer_iter_mut())
                     .and(tprobs_window_src.outer_iter())
                     .for_each(|a, b| {
@@ -380,22 +800,31 @@ impl<'a> Mcmc<'a> {
                 &mut rng,
             );
 
-            let mut tmp = self
-                .phased_ind
-                .slice_mut(s![start_write_w..end_write_w, ..]);
+            let mut tmp = self.phased_ind.slice_mut(s![start_write_w..end_write_w]);
             tmp.assign(&phased_ind_window);
-            prev_ind = (
-                phased_ind_window[[phased_ind_window.nrows() - 1, 0]],
-                phased_ind_window[[phased_ind_window.nrows() - 1, 1]],
-            );
+            prev_ind = phased_ind_window[phased_ind_window.len() - 1];
             is_first_window = false;
         }
 
-        self.genotype_graph
-            .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
+        let first_ind = self.phased_ind[0];
+        let phased_ind_reduced = Array1::from_vec(
+            self.phased_ind
+                .iter()
+                .zip(self.genotype_graph.graph.iter())
+                .filter_map(|(&i, g)| if g.is_segment_marker() { Some(i) } else { None })
+                .collect(),
+        );
 
-        if iter_option == IterOptionInternal::Pruning {
-            self.genotype_graph.prune_rank(self.tprobs.view());
+        self.genotype_graph.traverse_graph_dip(
+            first_ind,
+            phased_ind_reduced.view(),
+            self.estimated_haps.view_mut(),
+        );
+
+        if iter_option == IterOptionInternal::Pruning(true)
+            || iter_option == IterOptionInternal::Pruning(false)
+        {
+            self.genotype_graph.prune_rank(self.tprobs_dip.view());
             //self.genotype_graph.prune(self.tprobs.view());
             self.cur_overlap_region_len *= 2;
         }
@@ -422,6 +851,14 @@ impl<'a> Mcmc<'a> {
 
         println!("Elapsed time: {} ms", (Instant::now() - now).as_millis());
         println!("PBWT: {} ms", PBWT_T.lock().unwrap().as_millis());
+        println!(
+            "PBWT (expansion only): {} ms",
+            EXPAND_T.lock().unwrap().as_millis()
+        );
+        println!(
+            "Neighbor finding: {} ms",
+            NEIGHBOR_T.lock().unwrap().as_millis()
+        );
         println!("Emission: {} ms", EMIS_T.lock().unwrap().as_millis());
         println!("Transition: {} ms", TRAN_T.lock().unwrap().as_millis());
         println!("Collapse: {} ms", COLL_T.lock().unwrap().as_millis());
@@ -484,37 +921,37 @@ impl<'a> Mcmc<'a> {
     }
 
     fn save_tprobs(&self, mut writer: impl std::io::Write) {
-        Zip::from(&self.genotype_graph.graph)
-            .and(self.tprobs.outer_iter())
-            .for_each(|g, t| {
-                if g.is_segment_marker() {
-                    bincode::serialize_into(&mut writer, &t).unwrap();
-                }
-            });
+        //Zip::from(&self.genotype_graph.graph)
+        //.and(self.tprobs.outer_iter())
+        //.for_each(|g, t| {
+        //if g.is_segment_marker() {
+        //bincode::serialize_into(&mut writer, &t).unwrap();
+        //}
+        //});
     }
 
     fn check_tprobs(&self, mut reader: impl std::io::Read) {
-        Zip::indexed(&self.genotype_graph.graph)
-            .and(self.tprobs.outer_iter())
-            .for_each(|i, g, t| {
-                if g.is_segment_marker() {
-                    let ref_t: Array2<Real> = bincode::deserialize_from(&mut reader).unwrap();
-                    //if ref_t != t {
-                    //println!("{i}:");
-                    //assert_eq!(ref_t/t );
-                    //}
-                    const R: f64 = 0.1;
-                    for (a, b) in ref_t.iter().zip(t.iter()) {
-                        if a / b >= 1. + R || a / b < 1. - R {
-                            println!("{i}:");
-                            println!("{:#?}", ref_t);
-                            println!("{:#?}", t);
-                            println!("{a}, {b}, {}", a / b);
-                            panic!();
-                        }
-                    }
-                }
-            });
+        //Zip::indexed(&self.genotype_graph.graph)
+        //.and(self.tprobs.outer_iter())
+        //.for_each(|i, g, t| {
+        //if g.is_segment_marker() {
+        //let ref_t: Array2<Real> = bincode::deserialize_from(&mut reader).unwrap();
+        ////if ref_t != t {
+        ////println!("{i}:");
+        ////assert_eq!(ref_t/t );
+        ////}
+        //const R: f64 = 0.1;
+        //for (a, b) in ref_t.iter().zip(t.iter()) {
+        //if a / b >= 1. + R || a / b < 1. - R {
+        //println!("{i}:");
+        //println!("{:#?}", ref_t);
+        //println!("{:#?}", t);
+        //println!("{a}, {b}, {}", a / b);
+        //panic!();
+        //}
+        //}
+        //}
+        //});
     }
 
     fn save_estimated_haps(&self, writer: impl std::io::Write) {

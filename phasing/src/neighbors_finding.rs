@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 lazy_static::lazy_static! {
     pub static ref PBWT_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
+    pub static ref NEIGHBOR_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
 }
 
 pub fn find_neighbors(
@@ -21,7 +22,6 @@ pub fn find_neighbors(
     n_haps_target: usize,
     s: usize,
 ) -> Vec<bool> {
-    let t = Instant::now();
     let mut pbwt = PBWT::new(ref_panel, n_pos, n_haps_ref);
     let mut prev_col = pbwt.get_init_col().unwrap();
     let mut cur_pbwt_group_bit = pbwt_group_filter.next();
@@ -31,9 +31,16 @@ pub fn find_neighbors(
     let mut neighbors_bitmap = vec![false; n_haps_ref];
 
     for i in 0..n_pos {
+        let t = Instant::now();
+
         let (cur_col, cur_n_zeros, hap_row) = pbwt.next().unwrap();
+
+        let mut _t = PBWT_T.lock().unwrap();
+        *_t += Instant::now() - t;
+
         let cur_haps = estimated_haps.next().unwrap();
 
+        let t = Instant::now();
         for j in 0..n_haps_target {
             let cur_target = find_target_single_marker(
                 hap_row.view(),
@@ -56,11 +63,12 @@ pub fn find_neighbors(
             }
             prev_target[j] = cur_target;
         }
+        let mut _t = NEIGHBOR_T.lock().unwrap();
+        *_t += Instant::now() - t;
+
         cur_pbwt_group_bit = pbwt_group_filter.next();
         prev_col = cur_col;
     }
-    let mut _t = PBWT_T.lock().unwrap();
-    *_t += Instant::now() - t;
     neighbors_bitmap
 }
 
@@ -395,7 +403,7 @@ impl PBWTDepth {
         }
     }
 
-    pub fn score(&self, hap_pos: ArrayView1<Genotype>) -> Int {
+    pub fn score(&self, hap_pos: ArrayView1<Genotype>) -> i32 {
         self.saved_a
             .iter()
             .zip(self.is_saved.iter())
@@ -409,7 +417,7 @@ impl PBWTDepth {
             .sum()
     }
 
-    pub fn score_div(&self, hap_pos: ArrayView1<Genotype>) -> Real {
+    pub fn score_div(&self, hap_pos: ArrayView1<Genotype>) -> f64 {
         self.saved_a
             .iter()
             .zip(self.saved_d.iter())

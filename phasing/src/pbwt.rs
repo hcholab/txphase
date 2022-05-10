@@ -1,4 +1,10 @@
 use ndarray::Array1;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+lazy_static::lazy_static! {
+    pub static ref EXPAND_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
+}
 
 #[derive(Clone, Debug)]
 pub struct PBWTColumn {
@@ -55,7 +61,10 @@ where
                 d: Array1::<u32>::zeros(self.nhap),
             };
             let i = self.cur_i;
+            let t = Instant::now();
             let hap_row = self.x.next().unwrap();
+            let mut _t = EXPAND_T.lock().unwrap();
+            *_t += Instant::now() - t;
             self.cur_i += 1;
             let n_zeros = hap_row.iter().filter(|&&v| v == 0).count();
             // original PBWT
