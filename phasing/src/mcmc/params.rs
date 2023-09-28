@@ -1,5 +1,6 @@
 use crate::hmm::HmmParams;
-use crate::ref_panel::{RefPanel, RefPanelSlice};
+use common::ref_panel::{RefPanel, RefPanelSlice};
+//use crate::ref_panel::{RefPanel, RefPanelSlice};
 use crate::variants::{build_variants, Variant};
 use crate::Genotype;
 use ndarray::{s, Array1, ArrayView1};

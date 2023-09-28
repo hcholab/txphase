@@ -1,6 +1,7 @@
 use crate::neighbors_finding::{find_target_single_marker, PBWTDepth, Target};
 use crate::pbwt::PBWT;
-use crate::ref_panel::RefPanel;
+use common::ref_panel::RefPanel;
+//use crate::ref_panel::RefPanel;
 use crate::{tp_value, Genotype};
 use ndarray::{Array2, ArrayView1};
 

@@ -7,7 +7,6 @@ mod neighbors_finding;
 #[cfg(feature = "leak-resist")]
 mod oram;
 mod pbwt;
-mod ref_panel;
 //mod union_filter;
 mod utils;
 mod variants;
@@ -100,7 +99,8 @@ fn main() {
     let sites_bitmask: Vec<bool> = bincode::deserialize_from(&mut host_stream).unwrap();
 
     let (ref_panel_new, afreqs) =
-        ref_panel::m3vcf_scan(&ref_panel_meta, &ref_panel_blocks, &sites_bitmask);
+        common::ref_panel::m3vcf_scan(&ref_panel_meta, &ref_panel_blocks, &sites_bitmask);
+    //crate::ref_panel::m3vcf_scan(&ref_panel_meta, &ref_panel_blocks, &sites_bitmask);
 
     let cms = {
         let cms: Vec<f64> = bincode::deserialize_from(&mut host_stream).unwrap();

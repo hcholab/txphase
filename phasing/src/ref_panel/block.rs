@@ -1,8 +1,6 @@
-//use crate::oram::DynamicLSOram;
 use crate::Genotype;
 use bitvec::prelude::{BitSlice, Lsb0};
 use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
-//use oram_sgx::align::A64Bytes;
 
 pub struct Block {
     index_map: Array1<u16>,
@@ -36,10 +34,9 @@ impl Block {
         let ncols = (self.n_sites() + 7) / 8;
         let mut transposed_haplotypes = Array2::<u8>::zeros((self.n_unique(), ncols));
         Zip::indexed(self.haplotypes.rows()).for_each(|i, s| {
-            let s = BitSlice::<Lsb0, u8>::from_slice(s.as_slice().unwrap()).unwrap();
+            let s = BitSlice::<u8, Lsb0>::from_slice(s.as_slice().unwrap());
             for (b, mut hap) in s.iter().zip(transposed_haplotypes.rows_mut().into_iter()) {
-                let hap =
-                    BitSlice::<Lsb0, u8>::from_slice_mut(hap.as_slice_mut().unwrap()).unwrap();
+                let hap = BitSlice::<u8, Lsb0>::from_slice_mut(hap.as_slice_mut().unwrap());
                 hap.set(i, *b);
             }
         });
@@ -109,7 +106,7 @@ impl<'a> TransposedBlockSlice<'a> {
             if *b {
                 let hap_i = self.index_map[i] as usize;
                 let tmp = self.haplotypes.row(hap_i);
-                let hap = BitSlice::<Lsb0, u8>::from_slice(tmp.as_slice().unwrap()).unwrap();
+                let hap = BitSlice::<u8, Lsb0>::from_slice(tmp.as_slice().unwrap());
                 let hap = if let Some(&(start, end)) = self.range.as_ref() {
                     &hap[start..end]
                 } else {
@@ -138,8 +135,7 @@ impl ExpandedBlock {
         Zip::from(rhap.rows_mut())
             .and(block.haplotypes.rows())
             .for_each(|mut row, ref_row| {
-                let ref_row =
-                    BitSlice::<Lsb0, u8>::from_slice(ref_row.as_slice().unwrap()).unwrap();
+                let ref_row = BitSlice::<u8, Lsb0>::from_slice(ref_row.as_slice().unwrap());
                 Zip::from(&mut row)
                     .and(&block.index_map)
                     .for_each(|geno, &index| {
@@ -153,7 +149,7 @@ impl ExpandedBlock {
 //pub fn block_to_aligned_transposed(block: &Block, n_haps: usize) -> DynamicLSOram<i8> {
 //let mut transposed = Array2::<i8>::zeros((n_haps, block.n_sites()));
 //Zip::indexed(block.haplotypes.rows()).for_each(|i, row| {
-//let row = BitSlice::<Lsb0, u8>::from_slice(row.as_slice().unwrap()).unwrap();
+//let row = BitSlice::<u8, Lsb0>::from_slice(row.as_slice().unwrap()).unwrap();
 //for (mut t, &index) in transposed
 //.rows_mut()
 //.into_iter()
@@ -172,7 +168,7 @@ impl ExpandedBlock {
 //) -> Vec<A64Bytes<N>> {
 //let mut transposed = vec![A64Bytes::<N>::default(); nhap];
 //Zip::indexed(block.haplotypes.rows()).for_each(|i, row| {
-//let row = BitSlice::<Lsb0, u8>::from_slice(row.as_slice().unwrap()).unwrap();
+//let row = BitSlice::<u8, Lsb0>::from_slice(row.as_slice().unwrap()).unwrap();
 //for (t, &index) in transposed.iter_mut().zip(block.index_map.iter()) {
 //assert!((index as usize) < row.len());
 //t.as_mut_slice()[i] = row[index as usize] as u8;
@@ -217,7 +213,7 @@ pub fn m3vcf_block_scan(
     //.into_iter()
     //.zip(afreqs[afreqs.len() - n_filtered_sites..].iter())
     //{
-    //let pos = BitSlice::<Lsb0, u8>::from_slice(pos.as_slice().unwrap()).unwrap();
+    //let pos = BitSlice::<u8, Lsb0>::from_slice(pos.as_slice().unwrap()).unwrap();
     //let mut cref = 0;
     //let mut calt = 0;
 

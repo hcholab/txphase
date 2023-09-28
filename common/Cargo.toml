@@ -1,0 +1,15 @@
+[package]
+name = "common"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+obliv = []
+
+[dependencies]
+m3vcf = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/m3vcf" }
+ndarray = {version = "0.15", features = ["approx", "serde"]}
+bitvec = "1.0"
+#timing_shield = { /home/ndokmai/workspace/sgx-genotype-imputation/m3vcf }

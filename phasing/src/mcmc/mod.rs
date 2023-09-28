@@ -10,7 +10,8 @@ use crate::hmm::Hmm;
 use crate::hmm::{COLL_T, COMBD_T, COMB_T, EMIS_T, TRAN_T};
 use crate::neighbors_finding;
 use crate::neighbors_finding::PBWT_T;
-use crate::ref_panel::RefPanelSlice;
+use common::ref_panel::RefPanelSlice;
+//use crate::ref_panel::RefPanelSlice;
 use crate::variants::{Rarity, Variant};
 use crate::{tp_value_new, BoolMcc, Genotype, Real};
 use rand::Rng;
@@ -395,8 +396,8 @@ impl<'a> Mcmc<'a> {
             .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
 
         if iter_option == IterOptionInternal::Pruning {
-            self.genotype_graph.prune_rank(self.tprobs.view());
-            //self.genotype_graph.prune(self.tprobs.view());
+            //self.genotype_graph.prune_rank(self.tprobs.view());
+            self.genotype_graph.prune(self.tprobs.view());
             self.cur_overlap_region_len *= 2;
         }
 
