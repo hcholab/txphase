@@ -27,9 +27,10 @@ mod inner {
 
 #[cfg(feature = "leak-resist-new")]
 mod inner {
-    use tp_fixedpoint::timing_shield::TpBool;
+    use tp_fixedpoint::timing_shield::{TpBool, TpU64};
     pub type Genotype = i8;
     pub type UInt = u32;
+    pub type Usize = TpU64;
     pub type Int = i32;
     pub type U8 = u8;
     pub type Bool = bool;
@@ -43,6 +44,7 @@ mod inner {
 mod inner {
     pub type Genotype = i8;
     pub type UInt = u32;
+    pub type Usize = usize;
     pub type Int = i32;
     pub type U8 = u8;
     pub type Bool = bool;
@@ -100,7 +102,6 @@ fn main() {
 
     let (ref_panel_new, afreqs) =
         common::ref_panel::m3vcf_scan(&ref_panel_meta, &ref_panel_blocks, &sites_bitmask);
-    //crate::ref_panel::m3vcf_scan(&ref_panel_meta, &ref_panel_blocks, &sites_bitmask);
 
     let cms = {
         let cms: Vec<f64> = bincode::deserialize_from(&mut host_stream).unwrap();

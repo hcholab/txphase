@@ -1,8 +1,12 @@
 use crate::hmm::HmmParams;
-use common::ref_panel::{RefPanel, RefPanelSlice};
-//use crate::ref_panel::{RefPanel, RefPanelSlice};
 use crate::variants::{build_variants, Variant};
 use crate::Genotype;
+use common::ref_panel::{RefPanel, RefPanelSlice};
+#[cfg(feature = "leak-resist-new")]
+use compressed_pbwt_obliv::pbwt_trie::PbwtTrie;
+
+#[cfg(not(feature = "leak-resist-new"))]
+use compressed_pbwt::pbwt_trie::PbwtTrie;
 use ndarray::{s, Array1, ArrayView1};
 use rand::Rng;
 
@@ -14,6 +18,7 @@ pub struct McmcSharedParams {
     pub hmm_params: HmmParams,
     pub min_window_len_cm: f64,
     pub overlap_region_len: usize,
+    pub pbwt_tries: Vec<PbwtTrie>,
     pub pbwt_evaluted: Vec<bool>,
     pub pbwt_groups: Vec<Vec<usize>>,
     pub s: usize,
@@ -39,6 +44,42 @@ impl McmcSharedParams {
         let hmm_params = HmmParams::new(ref_panel.n_haps);
         let (pbwt_evaluted, pbwt_groups) = Self::get_pbwt_evaluted(&variants, pbwt_modulo);
 
+        let mut pbwt_tries = Vec::<PbwtTrie>::new();
+
+        ref_panel
+            .blocks
+            .iter()
+            .zip(std::iter::once(0).chain(ref_panel.block_map.iter().cloned()))
+            .for_each(|(block, start_site)| {
+                let block = block.as_slice();
+                let index_map = block
+                    .index_map
+                    .iter()
+                    .map(|&v| v as u16)
+                    .collect::<Vec<_>>();
+                let pbwt = if let Some(prev_pbwt) = pbwt_tries.last() {
+                    PbwtTrie::transform(
+                        start_site,
+                        block.iter(),
+                        &prev_pbwt.ppa,
+                        &index_map,
+                        block.n_unique(),
+                        block.n_sites(),
+                    )
+                } else {
+                    let ppa = vec![(0..ref_panel.n_haps).collect::<Vec<_>>()];
+                    PbwtTrie::transform(
+                        start_site,
+                        block.iter(),
+                        &ppa,
+                        &index_map,
+                        block.n_unique(),
+                        block.n_sites(),
+                    )
+                };
+                pbwt_tries.push(pbwt);
+            });
+
         println!("#pbwt_groups = {}", pbwt_groups.len());
         Self {
             ref_panel,
@@ -46,6 +87,7 @@ impl McmcSharedParams {
             min_window_len_cm,
             hmm_params,
             overlap_region_len,
+            pbwt_tries,
             pbwt_evaluted,
             pbwt_groups,
             s,

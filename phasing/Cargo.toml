@@ -6,10 +6,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = []
+default = ["compressed-pbwt"]
 leak-resist = ["tp-fixedpoint"] 
 leak-resist-fast = ["leak-resist"] 
-leak-resist-new = ["tp-fixedpoint"]
+leak-resist-new = ["tp-fixedpoint", "compressed-pbwt-obliv"]
 
 [dependencies]
 rand = "0.8"
@@ -20,6 +20,8 @@ maligned = "0.2"
 bincode = "1.3"
 bufstream = "0.1"
 common = { path = "/home/ndokmai/workspace/phasing-oram/common" }
+compressed-pbwt = { path = "/home/ndokmai/workspace/compressed-pbwt", default-features=false, optional = true }
+compressed-pbwt-obliv = { package = "compressed-pbwt", path = "/home/ndokmai/workspace/compressed-pbwt", optional = true }
 #oram-sgx = { path = "../oram-sgx" }
 tp-fixedpoint = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/tp-fixedpoint", optional = true }
 m3vcf = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/m3vcf" }
@@ -28,7 +30,7 @@ rand_chacha = "0.3"
 log = "0.4"
 env_logger = "0.9"
 anyhow = "1.0"
-statrs = "0.15"
+statrs = "0.16"
 num-traits = "0.2"
 lazy_static = "1.4"
 
