@@ -2,10 +2,10 @@ use crate::hmm::HmmParams;
 use crate::variants::{build_variants, Variant};
 use crate::Genotype;
 use common::ref_panel::{RefPanel, RefPanelSlice};
-#[cfg(feature = "leak-resist-new")]
+#[cfg(feature = "obliv")]
 use compressed_pbwt_obliv::pbwt_trie::PbwtTrie;
 
-#[cfg(not(feature = "leak-resist-new"))]
+#[cfg(not(feature = "obliv"))]
 use compressed_pbwt::pbwt_trie::PbwtTrie;
 use ndarray::{s, Array1, ArrayView1};
 use rand::Rng;

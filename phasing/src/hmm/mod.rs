@@ -4,10 +4,10 @@ pub use params::*;
 use crate::genotype_graph::{G, P};
 use crate::tp_value_real;
 use crate::{BoolMcc, Genotype, Real, RealHmm};
-#[cfg(feature = "leak-resist-new")]
+#[cfg(feature = "obliv")]
 use ndarray::{Array1, ArrayViewMut1};
-#[cfg(feature = "leak-resist-new")]
-use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpI16, TpI8, TpOrd};
+#[cfg(feature = "obliv")]
+use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpI16, TpOrd};
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -22,10 +22,10 @@ lazy_static::lazy_static! {
 
 use ndarray::{s, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
 
-#[cfg(not(feature = "leak-resist-new"))]
+#[cfg(not(feature = "obliv"))]
 pub struct Hmm {}
 
-#[cfg(feature = "leak-resist-new")]
+#[cfg(feature = "obliv")]
 pub struct Hmm {
     pub bprobs_e: Array2<TpI16>,
     cur_fprobs_e: Array1<TpI16>,
@@ -36,7 +36,7 @@ pub struct Hmm {
 }
 
 impl Hmm {
-    #[cfg(feature = "leak-resist-new")]
+    #[cfg(feature = "obliv")]
     pub fn new() -> Self {
         Self {
             bprobs_e: Array2::from_elem((0, 0), TpI16::protect(0)),
@@ -47,7 +47,7 @@ impl Hmm {
             is_backward: true,
         }
     }
-    #[cfg(feature = "leak-resist-new")]
+    #[cfg(feature = "obliv")]
     pub fn get_cur_probs_e(&mut self) -> ArrayViewMut1<TpI16> {
         if self.is_backward {
             self.bprobs_e.slice_mut(s![self.cur_i, ..])
@@ -56,7 +56,7 @@ impl Hmm {
         }
     }
 
-    #[cfg(feature = "leak-resist-new")]
+    #[cfg(feature = "obliv")]
     pub fn get_probs_e(&mut self) -> (ArrayViewMut1<TpI16>, ArrayViewMut1<TpI16>) {
         if self.is_backward {
             self.bprobs_e
@@ -66,7 +66,7 @@ impl Hmm {
         }
     }
 
-    #[cfg(not(feature = "leak-resist-new"))]
+    #[cfg(not(feature = "obliv"))]
     pub fn new() -> Self {
         Self {}
     }
@@ -86,14 +86,14 @@ impl Hmm {
 
         let bprobs = self.backward(ref_panel, genograph, hmm_params, rprobs, ignored_sites);
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         {
             self.is_backward = false;
         }
 
         let mut tprobs = Array3::<RealHmm>::zeros((m, P, P));
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         {
             self.tprobs_e = Array3::<TpI16>::from_elem((m, P, P), TpI16::protect(0));
         }
@@ -112,40 +112,40 @@ impl Hmm {
             prev_fprobs.view_mut(),
         );
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         self.prev_fprobs_e.assign(&self.cur_fprobs_e);
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let mut tprobs_3x = Array3::<RealHmm>::zeros(((m + 2) / 3, P, P));
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let mut tprobs_3x_e = Array3::<TpI16>::from_elem(((m + 2) / 3, P, P), TpI16::protect(0));
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let mut tprobs_3x_fwd = prev_fprobs.clone();
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let mut tprobs_3x_fwd_e = self.prev_fprobs_e.clone();
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let mut tprobs_3x_bwd = bprobs.slice(s![0, .., ..]).to_owned();
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let mut tprobs_3x_bwd_e = self.bprobs_e.row(0).to_owned();
 
         for i in 1..m {
             let rprobs = rprobs_iter.next().unwrap();
 
-            #[cfg(not(feature = "leak-resist-new"))]
+            #[cfg(not(feature = "obliv"))]
             if ignored_sites[i] {
                 continue;
             }
 
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             {
                 self.cur_i = i;
             }
 
             self.transition(rprobs, prev_fprobs.view(), cur_fprobs.view_mut());
 
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             {
-                let cond = TpBool::protect(genograph[i].is_segment_marker());
+                let cond = genograph[i].is_segment_marker();
 
                 let bprobs_e = self.bprobs_e.slice_mut(s![i, ..]);
                 let fprobs_e = self.cur_fprobs_e.view_mut();
@@ -190,7 +190,7 @@ impl Hmm {
                     .for_each(|t, c| *c = cond.select(*c, *t));
             }
 
-            #[cfg(not(feature = "leak-resist-new"))]
+            #[cfg(not(feature = "obliv"))]
             if genograph[i].is_segment_marker() {
                 Self::combine(
                     cur_fprobs.view(),
@@ -207,7 +207,7 @@ impl Hmm {
                 cur_fprobs.view_mut(),
             );
 
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             {
                 let cond = !ignored_sites[i];
                 Zip::from(&cur_fprobs)
@@ -219,11 +219,11 @@ impl Hmm {
                     .for_each(|c, p| *p = cond.select(*c, *p));
             }
 
-            #[cfg(not(feature = "leak-resist-new"))]
+            #[cfg(not(feature = "obliv"))]
             prev_fprobs.assign(&cur_fprobs);
         }
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         for i in 0..m {
             tprobs
                 .slice_mut(s![i, .., ..])
@@ -239,10 +239,10 @@ impl Hmm {
     pub fn combine_dips(&self, tprobs: ArrayView2<RealHmm>, tprobs_dips: ArrayViewMut2<Real>) {
         let t = Instant::now();
 
-        #[cfg(not(feature = "leak-resist-new"))]
+        #[cfg(not(feature = "obliv"))]
         let mut tprobs_dips = tprobs_dips;
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let tprobs_e = self.tprobs_e.slice(s![self.cur_i, .., ..]);
 
         //let tprobs = tprobs.to_owned();
@@ -260,29 +260,29 @@ impl Hmm {
         //(tprobs, tprobs_e_ext)
         //};
 
-        #[cfg(not(feature = "leak-resist-new"))]
+        #[cfg(not(feature = "obliv"))]
         let tprobs = &tprobs * (1. / tprobs.sum());
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let mut _tprobs_dips = tprobs_dips;
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let mut tprobs_dips = Array2::<RealHmm>::zeros((P, P));
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let mut tprobs_dips_e_ext = Array2::<TpI16>::from_elem((P, P), TpI16::protect(0));
 
         for i in 0..P {
             for j in 0..P {
                 tprobs_dips[[i, j]] = tprobs[[i, j]] * tprobs[[P - 1 - i, P - 1 - j]];
-                #[cfg(feature = "leak-resist-new")]
+                #[cfg(feature = "obliv")]
                 {
                     tprobs_dips_e_ext[[i, j]] = tprobs_e[[i, j]] + tprobs_e[[P - 1 - i, P - 1 - j]];
                 }
             }
         }
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let mut tprobs_dips_e = {
             let mut tprobs_dips_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
             renorm_equalize_scale(
@@ -293,22 +293,29 @@ impl Hmm {
             tprobs_dips_e
         };
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let (sum, sum_e) = sum_scale(tprobs_dips.view(), tprobs_dips_e.view());
 
-        #[cfg(not(feature = "leak-resist-new"))]
+        #[cfg(not(feature = "obliv"))]
         let sum = tprobs_dips.sum();
 
         tprobs_dips *= tp_value_real!(1, i64) / sum;
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         {
             tprobs_dips_e.iter_mut().for_each(|v| *v -= sum_e);
+
             renorm_scale(tprobs_dips.view_mut(), tprobs_dips_e.view_mut());
+
             _tprobs_dips.assign(&debug_expose_array(
-                tprobs_dips.view(),
-                tprobs_dips_e.view(),
+            tprobs_dips.view(),
+            tprobs_dips_e.view(),
             ));
+
+            //tprobs_dips
+                //.iter_mut()
+                //.zip(tprobs_dips_e.iter_mut())
+                //.for_each(|(t, e)| match_scale_single(TpI16::protect(0), t, e));
         }
 
         let mut _t = COMBD_T.lock().unwrap();
@@ -329,7 +336,7 @@ impl Hmm {
 
         let mut bprobs = Array3::<RealHmm>::zeros((m, P, n));
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         {
             self.bprobs_e = Array2::<TpI16>::from_elem((m, P), TpI16::protect(0));
             self.cur_i = m - 1;
@@ -347,22 +354,22 @@ impl Hmm {
             let (mut cur_bprob, prev_bprob) =
                 bprobs.multi_slice_mut((s![i, .., ..], s![i + 1, .., ..]));
 
-            #[cfg(not(feature = "leak-resist-new"))]
+            #[cfg(not(feature = "obliv"))]
             if ignored_sites[i] && !genograph[i + 1].is_segment_marker() {
                 cur_bprob.assign(&prev_bprob);
                 continue;
             }
 
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             {
                 self.cur_i = i;
             }
 
             self.transition(rprobs, prev_bprob.view(), cur_bprob.view_mut());
 
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             {
-                let cond = TpBool::protect(genograph[i + 1].is_segment_marker());
+                let cond = genograph[i + 1].is_segment_marker();
                 let tmp = cur_bprob.to_owned();
                 let tmp_e = self.get_cur_probs_e().to_owned();
                 self.collapse(cur_bprob.view_mut());
@@ -375,7 +382,7 @@ impl Hmm {
                     .for_each(|t, c| *c = cond.select(*c, *t));
             }
 
-            #[cfg(not(feature = "leak-resist-new"))]
+            #[cfg(not(feature = "obliv"))]
             if genograph[i + 1].is_segment_marker() {
                 self.collapse(cur_bprob.view_mut());
             }
@@ -387,10 +394,9 @@ impl Hmm {
                 cur_bprob.view_mut(),
             );
 
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             {
-                let cond =
-                    !ignored_sites[i] | TpBool::protect(genograph[i + 1].is_segment_marker());
+                let cond = !ignored_sites[i] | genograph[i + 1].is_segment_marker();
                 Zip::from(&mut cur_bprob)
                     .and(&prev_bprob)
                     .for_each(|c, p| *c = cond.select(*c, *p));
@@ -415,14 +421,13 @@ impl Hmm {
     ) {
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row).and(cond_haps).for_each(|p, &z| {
-                #[cfg(feature = "leak-resist-new")]
+                #[cfg(feature = "obliv")]
                 {
-                    let z = TpI8::protect(z);
-                    let g = TpI8::protect(graph_col.get_row(i));
+                    let g = graph_col.get_row(i);
                     *p = (z.tp_not_eq(&g)).select(hmm_params.eprob, RealHmm::protect_i64(1));
                 }
 
-                #[cfg(not(feature = "leak-resist-new"))]
+                #[cfg(not(feature = "obliv"))]
                 if z != graph_col.get_row(i) {
                     *p = hmm_params.eprob;
                 } else {
@@ -431,7 +436,7 @@ impl Hmm {
             });
         });
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         renorm_scale(probs, self.get_cur_probs_e());
     }
 
@@ -446,23 +451,22 @@ impl Hmm {
 
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row).and(cond_haps).for_each(|p, &z| {
-                #[cfg(feature = "leak-resist-new")]
+                #[cfg(feature = "obliv")]
                 {
-                    let z = TpI8::protect(z);
-                    let g = TpI8::protect(graph_col.get_row(i));
+                    let g = graph_col.get_row(i);
                     //*p = (z.tp_not_eq(&g)).select(*p * hmm_params.eprob, *p);
                     *p = (z.tp_not_eq(&g))
                         .select((*p >> 14) + (*p >> 15) + (*p >> 17) + (*p >> 20), *p);
                 }
 
-                #[cfg(not(feature = "leak-resist-new"))]
+                #[cfg(not(feature = "obliv"))]
                 if z != graph_col.get_row(i) {
                     *p *= hmm_params.eprob;
                 }
             });
         });
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         renorm_scale(probs, self.get_cur_probs_e());
 
         let mut _t = EMIS_T.lock().unwrap();
@@ -476,15 +480,15 @@ impl Hmm {
         mut cur_probs: ArrayViewMut2<RealHmm>,
     ) {
         let t = Instant::now();
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let (mut cur_probs_e, prev_probs_e) = self.get_probs_e();
 
-        //#[cfg(feature = "leak-resist-new")]
+        //#[cfg(feature = "obliv")]
         //debug_sum_by_row(prev_probs, prev_probs_e.view());
 
         let all_sum_h = Zip::from(prev_probs.rows()).map_collect(|r| r.sum());
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let all_sum_h_e = prev_probs_e.to_owned();
 
         let rprob = rprob.0 / rprob.1;
@@ -496,13 +500,13 @@ impl Hmm {
             .and(&_all_sum_h)
             .for_each(|mut cr, pr, &s| cr.assign(&(&pr + s)));
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         {
             cur_probs_e.assign(&all_sum_h_e);
             renorm_scale(cur_probs.view_mut(), cur_probs_e.view_mut());
         }
 
-        #[cfg(not(feature = "leak-resist-new"))]
+        #[cfg(not(feature = "obliv"))]
         {
             let sum: RealHmm = all_sum_h.sum();
             let scale = tp_value_real!(1, i64) / sum;
@@ -516,20 +520,20 @@ impl Hmm {
     fn collapse(&mut self, mut cur_probs: ArrayViewMut2<RealHmm>) {
         let t = Instant::now();
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let (sum_k, sum_k_e) = sum_scale_by_column(cur_probs.view(), self.get_cur_probs_e().view());
 
-        #[cfg(not(feature = "leak-resist-new"))]
+        #[cfg(not(feature = "obliv"))]
         let mut sum_k = Zip::from(cur_probs.columns()).map_collect(|c| c.sum());
 
-        #[cfg(not(feature = "leak-resist-new"))]
+        #[cfg(not(feature = "obliv"))]
         {
             let sum = sum_k.sum();
             let scale = tp_value_real!(1, i64) / sum;
             sum_k *= scale;
         }
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         self.get_cur_probs_e().fill(sum_k_e);
 
         Zip::from(cur_probs.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_k));
@@ -542,12 +546,12 @@ impl Hmm {
         first_bprobs: ArrayView2<RealHmm>,
         mut first_tprobs: ArrayViewMut2<RealHmm>,
     ) {
-        //#[cfg(feature = "leak-resist-new")]
+        //#[cfg(feature = "obliv")]
         //debug_sum_by_row(first_bprobs, self.bprobs_e.row(0));
 
         let init_probs = Zip::from(first_bprobs.rows()).map_collect(|r| r.sum());
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let init_probs = {
             let mut init_probs = init_probs;
             let mut first_bprobs_e = self.bprobs_e.row_mut(0);
@@ -562,7 +566,7 @@ impl Hmm {
         Zip::from(first_tprobs.rows_mut()).for_each(|mut r| r.assign(&init_probs));
     }
 
-    #[cfg(feature = "leak-resist-new")]
+    #[cfg(feature = "obliv")]
     fn combine(
         fprobs: ArrayView2<RealHmm>,
         fprobs_e: ArrayView1<TpI16>,
@@ -591,7 +595,7 @@ impl Hmm {
         *_t += Instant::now() - t;
     }
 
-    #[cfg(not(feature = "leak-resist-new"))]
+    #[cfg(not(feature = "obliv"))]
     fn combine(
         fprobs: ArrayView2<RealHmm>,
         bprobs: ArrayView2<RealHmm>,
@@ -604,10 +608,10 @@ impl Hmm {
     }
 }
 
-#[cfg(feature = "leak-resist-new")]
+#[cfg(feature = "obliv")]
 pub use inner::*;
 
-#[cfg(feature = "leak-resist-new")]
+#[cfg(feature = "obliv")]
 mod inner {
     use super::*;
     use tp_fixedpoint::TpFixed64;

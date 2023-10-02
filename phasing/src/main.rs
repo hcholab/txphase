@@ -3,7 +3,7 @@
 mod genotype_graph;
 mod hmm;
 mod mcmc;
-mod neighbors_finding;
+//mod neighbors_finding;
 #[cfg(feature = "leak-resist")]
 mod oram;
 mod pbwt;
@@ -25,22 +25,22 @@ mod inner {
     pub type Real = tp_fixedpoint::TpFixed64<30>;
 }
 
-#[cfg(feature = "leak-resist-new")]
+#[cfg(feature = "obliv")]
 mod inner {
-    use tp_fixedpoint::timing_shield::{TpBool, TpU64};
-    pub type Genotype = i8;
+    use tp_fixedpoint::timing_shield::{TpBool, TpI8, TpU64, TpU8};
+    pub type Genotype = TpI8;
     pub type UInt = u32;
     pub type Usize = TpU64;
     pub type Int = i32;
-    pub type U8 = u8;
-    pub type Bool = bool;
+    pub type U8 = TpU8;
+    pub type Bool = TpBool;
     pub type BoolMcc = TpBool;
     pub type Real = f64;
     pub const F: usize = 52;
     pub type RealHmm = tp_fixedpoint::TpFixed64<F>;
 }
 
-#[cfg(not(feature = "leak-resist-new"))]
+#[cfg(not(feature = "obliv"))]
 mod inner {
     pub type Genotype = i8;
     pub type UInt = u32;
@@ -126,6 +126,16 @@ fn main() {
     };
 
     let genotypes: Vec<i8> = bincode::deserialize_from(&mut host_stream).unwrap();
+
+    #[cfg(feature = "obliv")]
+    let genotypes = Array1::<Genotype>::from_vec(
+        genotypes
+            .into_iter()
+            .map(|v| Genotype::protect(v))
+            .collect(),
+    );
+
+    #[cfg(not(feature = "obliv"))]
     let genotypes = Array1::<Genotype>::from_vec(genotypes);
 
     let mcmc_params = mcmc::McmcSharedParams::new(
@@ -150,5 +160,9 @@ fn main() {
         IterOption::Main(5),
     ];
     let phased = mcmc::Mcmc::run(&mcmc_params, genotypes.view(), &iterations, rng);
+
+    #[cfg(feature = "obliv")]
+    let phased = phased.map(|v| v.expose());
+
     bincode::serialize_into(&mut host_stream, &phased).unwrap();
 }

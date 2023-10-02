@@ -2,7 +2,7 @@ use crate::genotype_graph::GenotypeGraph;
 use crate::variants::Variant;
 use crate::{tp_value_new, tp_value_real, BoolMcc, RealHmm};
 use ndarray::ArrayView1;
-#[cfg(feature = "leak-resist-new")]
+#[cfg(feature = "obliv")]
 use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpOrd, TpU32};
 
 const EPROB: f64 = 0.0001;
@@ -14,9 +14,9 @@ pub struct HmmParams {
     pub eprob: RealHmm,
     n_haps_ref_frac: f64,
     r_const: f64,
-    #[cfg(feature = "leak-resist-new")]
+    #[cfg(feature = "obliv")]
     n_haps_ref_frac_obliv: RealHmm,
-    #[cfg(feature = "leak-resist-new")]
+    #[cfg(feature = "obliv")]
     r_const_obliv: RealHmm,
 }
 
@@ -28,9 +28,9 @@ impl HmmParams {
             eprob: tp_value_real!(EPROB / (1. - EPROB), f32),
             n_haps_ref_frac,
             r_const,
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             n_haps_ref_frac_obliv: tp_value_real!(n_haps_ref_frac, f32),
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             r_const_obliv: tp_value_real!(r_const, f32),
         }
     }
@@ -49,7 +49,7 @@ impl HmmParams {
         let mut last_cm = tp_value_real!(variants[0].cm, f32);
 
         for i in 1..variants.len() {
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             let r = {
                 let cond = !ignored_sites[i];
                 let r0 = {
@@ -93,7 +93,7 @@ impl HmmParams {
                 r
             };
 
-            #[cfg(not(feature = "leak-resist-new"))]
+            #[cfg(not(feature = "obliv"))]
             let r = if !ignored_sites[i] {
                 let r = if n_skips == 0 {
                     let cm = variants[i].cm - variants[i - 1].cm;
@@ -122,10 +122,10 @@ impl HmmParams {
         last_cm = tp_value_real!(variants.last().unwrap().cm, f32);
 
         for i in (0..variants.len() - 1).rev() {
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             let r = {
                 let cond = !ignored_sites[i]
-                    | TpBool::protect(genotype_graph.graph[i + 1].is_segment_marker());
+                    | genotype_graph.graph[i + 1].is_segment_marker();
                 let r0 = {
                     let cm = variants[i + 1].cm - variants[i].cm;
                     compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
@@ -165,7 +165,7 @@ impl HmmParams {
                 r
             };
 
-            #[cfg(not(feature = "leak-resist-new"))]
+            #[cfg(not(feature = "obliv"))]
             let r = if !ignored_sites[i] || genotype_graph.graph[i + 1].is_segment_marker() {
                 let r = if n_skips == 0 {
                     let cm = variants[i + 1].cm - variants[i].cm;
@@ -238,7 +238,7 @@ fn compute_recomb_prob(dist_cm: f64, r_const: f64, n_haps_ref_frac: f64) -> (Rea
 }
 
 #[inline]
-#[cfg(feature = "leak-resist-new")]
+#[cfg(feature = "obliv")]
 fn compute_recomb_prob_obliv(
     dist_cm: RealHmm,
     r_const: RealHmm,

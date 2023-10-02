@@ -1,51 +1,61 @@
-use crate::{tp_value, Genotype, Real, U8};
+use crate::{Bool, Genotype, U8};
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut2, Zip};
 
-pub const HET_PER_SEGMENT: usize = 3;
+pub const HET_PER_SEGMENT: u8 = 3;
 pub const P: usize = 1 << HET_PER_SEGMENT;
 pub const MCMC_PRUNE_PROB_THRES: f64 = 0.999; // "mcmc-prune" parameter in ShapeIt4
 pub const MAX_HETS: usize = 22; // "MAX_AMB" constant in ShapeIt4 (utils/otools.h)
 
-#[cfg(feature = "leak-resist")]
-mod inner {
-    use super::*;
-    pub use crate::oram::SmallLSOram;
-    pub use tp_fixedpoint::timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd};
-    pub struct SortItem {
-        pub dip: Real,
-        pub i: U8,
-        pub j: U8,
-    }
+#[cfg(feature = "obliv")]
+use tp_fixedpoint::timing_shield::{TpCondSwap, TpEq, TpOrd};
 
-    impl TpOrd for SortItem {
-        fn tp_lt(&self, rhs: &Self) -> TpBool {
-            self.dip.tp_lt(&rhs.dip)
-        }
+type Real = f64;
+//#[cfg(feature = "obliv")]
+//type Real = crate::RealHmm;
 
-        fn tp_lt_eq(&self, rhs: &Self) -> TpBool {
-            self.dip.tp_lt_eq(&rhs.dip)
-        }
+//#[cfg(not(feature = "obliv"))]
+//type Real = crate::RealHmm;
 
-        fn tp_gt(&self, rhs: &Self) -> TpBool {
-            self.dip.tp_gt(&rhs.dip)
-        }
+//#[cfg(feature = "obliv")]
+//mod inner {
+//use super::*;
+//pub use crate::oram::SmallLSOram;
+//pub use tp_fixedpoint::timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd};
+//pub struct SortItem {
+//pub dip: Real,
+//pub i: U8,
+//pub j: U8,
+//}
 
-        fn tp_gt_eq(&self, rhs: &Self) -> TpBool {
-            self.dip.tp_gt_eq(&rhs.dip)
-        }
-    }
+//impl TpOrd for SortItem {
+//fn tp_lt(&self, rhs: &Self) -> TpBool {
+//self.dip.tp_lt(&rhs.dip)
+//}
 
-    impl TpCondSwap for SortItem {
-        fn tp_cond_swap(cond: TpBool, a: &mut Self, b: &mut Self) {
-            Real::tp_cond_swap(cond, &mut a.dip, &mut b.dip);
-            U8::tp_cond_swap(cond, &mut a.i, &mut b.i);
-            U8::tp_cond_swap(cond, &mut a.j, &mut b.j);
-        }
-    }
-}
+//fn tp_lt_eq(&self, rhs: &Self) -> TpBool {
+//self.dip.tp_lt_eq(&rhs.dip)
+//}
 
-#[cfg(feature = "leak-resist")]
-use inner::*;
+//fn tp_gt(&self, rhs: &Self) -> TpBool {
+//self.dip.tp_gt(&rhs.dip)
+//}
+
+//fn tp_gt_eq(&self, rhs: &Self) -> TpBool {
+//self.dip.tp_gt_eq(&rhs.dip)
+//}
+//}
+
+//impl TpCondSwap for SortItem {
+//fn tp_cond_swap(cond: TpBool, a: &mut Self, b: &mut Self) {
+//Real::tp_cond_swap(cond, &mut a.dip, &mut b.dip);
+//U8::tp_cond_swap(cond, &mut a.i, &mut b.i);
+//U8::tp_cond_swap(cond, &mut a.j, &mut b.j);
+//}
+//}
+//}
+
+//#[cfg(feature = "obliv")]
+//use inner::*;
 
 #[derive(Clone, Copy)]
 pub struct GMeta(U8);
@@ -53,27 +63,64 @@ pub struct GMeta(U8);
 const SEGMENT_MARKER_MASK: u8 = 0b11111110;
 
 impl GMeta {
-    fn new(is_segment_marker: bool, is_het: bool, is_alt_allele: bool) -> Self {
+    fn new(is_segment_marker: Bool, is_het: Bool, is_alt_allele: Bool) -> Self {
+        #[cfg(feature = "obliv")]
+        let mut inner = U8::protect(0);
+        #[cfg(feature = "obliv")]
+        {
+            inner |= is_segment_marker.as_u8();
+            inner |= (is_het.as_u8()) << 1;
+            inner |= (is_alt_allele.as_u8()) << 2;
+        }
+
+        #[cfg(not(feature = "obliv"))]
         let mut inner = 0u8;
-        inner |= is_segment_marker as u8;
-        inner |= (is_het as u8) << 1;
-        inner |= (is_alt_allele as u8) << 2;
+
+        #[cfg(not(feature = "obliv"))]
+        {
+            inner |= is_segment_marker as u8;
+            inner |= (is_het as u8) << 1;
+            inner |= (is_alt_allele as u8) << 2;
+        }
         Self(inner)
     }
 
     #[inline]
-    fn get_segment_marker(self) -> bool {
-        self.0 & 1 == 1
+    fn get_segment_marker(self) -> Bool {
+        #[cfg(feature = "obliv")]
+        return (self.0 & 1).tp_eq(&1);
+
+        #[cfg(not(feature = "obliv"))]
+        return self.0 & 1 == 1;
     }
 
     #[inline]
-    fn get_het(self) -> bool {
-        ((self.0 >> 1) & 1) == 1
+    fn get_het(self) -> Bool {
+        #[cfg(feature = "obliv")]
+        return ((self.0 >> 1) & 1).tp_eq(&1);
+
+        #[cfg(not(feature = "obliv"))]
+        return ((self.0 >> 1) & 1) == 1;
     }
 
     #[inline]
-    fn unset_segment_marker(&mut self) {
-        self.0 &= SEGMENT_MARKER_MASK
+    fn unset_segment_marker(&mut self, #[cfg(feature = "obliv")] cond: Bool) {
+        #[cfg(feature = "obliv")]
+        {
+            self.0 = cond.select(self.0 & SEGMENT_MARKER_MASK, self.0);
+        }
+
+        #[cfg(not(feature = "obliv"))]
+        {
+            self.0 &= SEGMENT_MARKER_MASK
+        }
+    }
+}
+
+#[cfg(feature = "obliv")]
+impl TpCondSwap for GMeta {
+    fn tp_cond_swap(cond: Bool, a: &mut Self, b: &mut Self) {
+        U8::tp_cond_swap(cond, &mut a.0, &mut b.0);
     }
 }
 
@@ -84,7 +131,19 @@ pub struct G {
 }
 
 impl G {
-    pub fn new_het(het_count: u32) -> Self {
+    pub fn new_het(het_count: U8) -> Self {
+        #[cfg(feature = "obliv")]
+        let graph = het_count.tp_eq(&0).select(
+            U8::protect(0b01010101),
+            het_count
+                .tp_eq(&1)
+                .select(U8::protect(0b00110011), U8::protect(0b00001111)),
+        );
+
+        #[cfg(feature = "obliv")]
+        let segment_marker = het_count.tp_eq(&0);
+
+        #[cfg(not(feature = "obliv"))]
         let (graph, segment_marker) = match het_count {
             0 => (0b01010101, true),
             1 => (0b00110011, false),
@@ -93,29 +152,59 @@ impl G {
         };
         Self {
             graph,
+            #[cfg(feature = "obliv")]
+            meta: GMeta::new(segment_marker, Bool::protect(true), Bool::protect(false)),
+            #[cfg(not(feature = "obliv"))]
             meta: GMeta::new(segment_marker, true, false),
         }
     }
 
     pub fn new_hom(hom: Genotype) -> Self {
-        let (graph, segment_marker) = match hom {
-            0 => (0b00000000, false),
-            2 => (0b11111111, false),
+        #[cfg(feature = "obliv")]
+        let graph = hom
+            .tp_eq(&0)
+            .select(U8::protect(0b00000000), U8::protect(0b11111111));
+
+        #[cfg(not(feature = "obliv"))]
+        let graph = match hom {
+            0 => 0b00000000,
+            2 => 0b11111111,
             _ => panic!("Invalid homozygote"),
         };
         Self {
             graph,
-            meta: GMeta::new(segment_marker, false, hom == 2),
+            #[cfg(feature = "obliv")]
+            meta: GMeta::new(Bool::protect(false), Bool::protect(false), hom.tp_eq(&2)),
+            #[cfg(not(feature = "obliv"))]
+            meta: GMeta::new(false, false, hom == 2),
         }
     }
 
     #[inline]
     pub fn get_row(&self, i: usize) -> Genotype {
-        (self.graph >> i & 1) as Genotype
+        #[cfg(feature = "obliv")]
+        return (self.graph >> i as u32 & 1).as_i8();
+
+        #[cfg(not(feature = "obliv"))]
+        return (self.graph >> i & 1) as Genotype;
     }
 
     #[inline]
-    pub fn set_row(&mut self, i: usize, genotype: i8) {
+    #[cfg(feature = "obliv")]
+    pub fn get_row_obliv(&self, i: U8) -> Genotype {
+        (self.graph >> i.as_u32().expose() & 1).as_i8()
+    }
+
+    #[inline]
+    pub fn set_row(&mut self, i: usize, genotype: Genotype) {
+        #[cfg(feature = "obliv")]
+        {
+            self.graph = genotype
+                .tp_eq(&0)
+                .select(self.graph & !(1 << i), self.graph | 1 << i);
+        }
+
+        #[cfg(not(feature = "obliv"))]
         match genotype {
             0 => self.graph &= !(1 << i),
             1 => self.graph |= 1 << i,
@@ -123,27 +212,51 @@ impl G {
         };
     }
     #[inline]
-    pub fn is_het(&self) -> bool {
+    pub fn is_het(&self) -> Bool {
         self.meta.get_segment_marker()
     }
 
     #[inline]
-    pub fn is_segment_marker(&self) -> bool {
+    pub fn is_segment_marker(&self) -> Bool {
         self.meta.get_segment_marker()
     }
 
     #[inline]
-    pub fn unset_segment_marker(&mut self) {
-        self.meta.unset_segment_marker()
+    fn unset_segment_marker(&mut self, #[cfg(feature = "obliv")] cond: Bool) {
+        #[cfg(feature = "obliv")]
+        {
+            self.meta.unset_segment_marker(cond);
+        }
+        #[cfg(not(feature = "obliv"))]
+        {
+            self.meta.unset_segment_marker();
+        }
     }
 
     #[inline]
     pub fn get_genotype(&self) -> Genotype {
+        #[cfg(feature = "obliv")]
+        return self.graph.tp_eq(&0b0000000).select(
+            Genotype::protect(0),
+            self.graph
+                .tp_eq(&0b1111111)
+                .select(Genotype::protect(2), Genotype::protect(1)),
+        );
+
+        #[cfg(not(feature = "obliv"))]
         match self.graph {
             0b0000000 => 0,
             0b1111111 => 2,
             _ => 1,
         }
+    }
+}
+
+#[cfg(feature = "obliv")]
+impl TpCondSwap for G {
+    fn tp_cond_swap(cond: Bool, a: &mut Self, b: &mut Self) {
+        U8::tp_cond_swap(cond, &mut a.graph, &mut b.graph);
+        GMeta::tp_cond_swap(cond, &mut a.meta, &mut b.meta);
     }
 }
 
@@ -157,13 +270,35 @@ impl GenotypeGraph {
 
         let mut graph = Vec::with_capacity(m);
 
-        let mut cur_het_count = tp_value!(HET_PER_SEGMENT - 1, u32);
+        #[cfg(feature = "obliv")]
+        let mut cur_het_count = U8::protect(HET_PER_SEGMENT - 1);
+        #[cfg(not(feature = "obliv"))]
+        let mut cur_het_count = HET_PER_SEGMENT - 1;
+
+        #[cfg(feature = "obliv")]
+        let mut first = Bool::protect(true);
+
+        #[cfg(not(feature = "obliv"))]
         let mut first = true;
 
         for &g in genotypes {
+            #[cfg(feature = "obliv")]
+            {
+                let cond = g.tp_eq(&1);
+                cur_het_count = cond.select(cur_het_count + 1, cur_het_count);
+                cur_het_count = cur_het_count
+                    .tp_eq(&HET_PER_SEGMENT)
+                    .select(U8::protect(0), cur_het_count);
+                let new_graph = cond.select(G::new_het(cur_het_count), G::new_hom(g));
+                graph.push(new_graph);
+                graph.last_mut().unwrap().unset_segment_marker(first);
+                first = cond.select(Bool::protect(false), first);
+            }
+
+            #[cfg(not(feature = "obliv"))]
             if g == 1 {
                 cur_het_count += 1;
-                if cur_het_count == HET_PER_SEGMENT as u32 {
+                if cur_het_count == HET_PER_SEGMENT {
                     cur_het_count = 0;
                 }
                 graph.push(G::new_het(cur_het_count));
@@ -189,29 +324,56 @@ impl GenotypeGraph {
 
     // TODO: limit merges to maximum of MAX_AMBIGUOUS het sites within a block
     pub fn prune(&mut self, tprob: ArrayView3<Real>) {
-        #[cfg(feature = "leak-resist")]
+        #[cfg(feature = "obliv")]
         let m = tprob.shape()[0];
 
-        #[cfg(not(feature = "leak-resist"))]
+        #[cfg(not(feature = "obliv"))]
         let m = tprob.shape()[0];
 
         // Backward pass to identify where to merge adjacent blocks and the new haps
-        let mut ind_cache = Array3::<U8>::zeros((m, P, 2));
-        let mut merge_head = vec![tp_value!(false, bool); m];
-        let mut merge_flag = tp_value!(false, bool);
+        #[cfg(feature = "obliv")]
+        let mut ind_cache = Array3::<U8>::from_elem((m, P, 2), U8::protect(0));
+
+        #[cfg(feature = "obliv")]
+        let mut merge_head = vec![Bool::protect(false); m];
+
+        #[cfg(feature = "obliv")]
+        let mut merge_flag = Bool::protect(false);
+
+        #[cfg(not(feature = "obliv"))]
+        let mut ind_cache = Array3::<u8>::zeros((m, P, 2));
+
+        #[cfg(not(feature = "obliv"))]
+        let mut merge_head = vec![false; m];
+
+        #[cfg(not(feature = "obliv"))]
+        let mut merge_flag = false;
+
         let mut new_merge_flag;
 
         for i in (0..m - 1).rev() {
+            #[cfg(feature = "obliv")]
+            let (ind, prob) = {
+                //let tprob = tprob
+                    //.slice(s![i, .., ..])
+                    //.map(|v| v.expose_into_f32() as f64);
+                //let (ind, prob, _) = select_top_p(tprob.view());
+                let (ind, prob, _) = select_top_p(tprob.slice(s![i, .., ..]));
+                (ind.map(|&v| U8::protect(v)), prob as f32)
+            };
+
+            #[cfg(not(feature = "obliv"))]
             let (ind, prob, _) = select_top_p(tprob.slice(s![i, .., ..]));
+
             // If merge flag set then carry over
             for j in 0..P {
-                #[cfg(feature = "leak-resist")]
+                #[cfg(feature = "obliv")]
                 {
-                    ind1_cache[[i, j]] = merge_flag.select(ind1_cache[[i + 1, j]], ind1[j]);
-                    ind2_cache[[i, j]] = merge_flag.select(ind2_cache[[i + 1, j]], ind2[j]);
+                    ind_cache[[i, j, 0]] = merge_flag.select(ind_cache[[i + 1, j, 0]], ind[[j, 0]]);
+                    ind_cache[[i, j, 1]] = merge_flag.select(ind_cache[[i + 1, j, 1]], ind[[j, 1]]);
                 }
 
-                #[cfg(not(feature = "leak-resist"))]
+                #[cfg(not(feature = "obliv"))]
                 {
                     ind_cache[[i, j, 0]] = if merge_flag {
                         ind_cache[[i + 1, j, 0]]
@@ -226,21 +388,23 @@ impl GenotypeGraph {
                 }
             }
 
-            #[cfg(feature = "leak-resist")]
+            #[cfg(feature = "obliv")]
             {
+                let is_segment_marker = self.graph[i].is_segment_marker();
                 // If at head and merge is on, it is the merge head
-                merge_head[i] = (self.block_head[i] | (i == 0)) & merge_flag;
+                merge_head[i] = (Bool::protect(i == 0) | is_segment_marker) & merge_flag;
 
                 // If merge is not on, we're at a head and prob over threshold, start a new merge
-                new_merge_flag = self.block_head[i]
-                    & prob.tp_gt(&Real::protect_f32(MCMC_PRUNE_PROB_THRES))
+                new_merge_flag = is_segment_marker
+                    //& (prob.tp_gt(&Real::protect_f32(MCMC_PRUNE_PROB_THRES as f32)))
+                    & (prob > MCMC_PRUNE_PROB_THRES as f32 )
                     & !merge_flag;
 
                 // If at head then merge_flag is set to new_merge_flag, otherwise carry over
-                merge_flag = self.block_head[i].select(new_merge_flag, merge_flag);
+                merge_flag = is_segment_marker.select(new_merge_flag, merge_flag);
             }
 
-            #[cfg(not(feature = "leak-resist"))]
+            #[cfg(not(feature = "obliv"))]
             {
                 let is_segment_marker = self.graph[i].is_segment_marker();
                 // If at head and merge is on, it is the merge head
@@ -258,49 +422,64 @@ impl GenotypeGraph {
         }
 
         // Forward pass to update the graph and block_head
+        #[cfg(feature = "obliv")]
+        let mut ind = Array2::<U8>::from_elem((P, 2), U8::protect(0));
+        #[cfg(feature = "obliv")]
+        let mut ind_final = Array1::<U8>::from_elem(P, U8::protect(0));
+        #[cfg(feature = "obliv")]
+        let mut block_counter = U8::protect(0);
+
+        #[cfg(not(feature = "obliv"))]
         let mut ind = Array2::<U8>::zeros((P, 2));
+        #[cfg(not(feature = "obliv"))]
         let mut ind_final = Array1::<U8>::zeros(P);
-        let mut block_counter = tp_value!(0, i8);
+
+        #[cfg(not(feature = "obliv"))]
+        let mut block_counter = 0u8;
 
         for i in 0..m {
             let mut new_geno = self.graph[i];
-            #[cfg(feature = "leak-resist")]
+            #[cfg(feature = "obliv")]
             {
-                block_counter = merge_head[i].select(tp_value!(2, i8), block_counter);
-                block_counter = (!merge_head[i] & self.block_head[i]).select(
-                    (block_counter)
-                        .tp_gt(&1)
-                        .select(block_counter - 1, tp_value!(0, i8)),
+                let is_segment_marker = self.graph[i].is_segment_marker();
+                // At merge head set block counter to 2 (will update the next two blocks)
+                block_counter = merge_head[i].select(U8::protect(2), block_counter);
+                // Every time we see a block head that is not a merge head, decrement block counter
+                block_counter = (!merge_head[i] & is_segment_marker).select(
+                    {
+                        let v = (block_counter.as_i8() - 1).as_u8();
+                        v.tp_gt(&0).select(v, U8::protect(0))
+                    },
                     block_counter,
                 );
-                for j in 0..p {
+
+                for j in 0..P {
                     // If at merge head copy cache over
-                    ind1[j] = merge_head[i].select(ind1_cache[[i, j]], ind1[j]);
-                    ind2[j] = merge_head[i].select(ind2_cache[[i, j]], ind2[j]);
+                    ind[[j, 0]] = merge_head[i].select(ind_cache[[i, j, 0]], ind[[j, 0]]);
+                    ind[[j, 1]] = merge_head[i].select(ind_cache[[i, j, 1]], ind[[j, 1]]);
 
                     // If block_counter hits zero change back to original indicies
-                    ind1[j] = block_counter
-                        .tp_eq(&0)
-                        .select(U8::protect(j as u8), ind1[j]);
-                    ind2[j] = block_counter
-                        .tp_eq(&0)
-                        .select(U8::protect(j as u8), ind2[j]);
+                    let cond = block_counter.tp_eq(&0);
+                    ind[[j, 0]] = cond.select(U8::protect(j as u8), ind[[j, 0]]);
+                    ind[[j, 1]] = cond.select(U8::protect(j as u8), ind[[j, 1]]);
 
                     // Use ind1 for first block, ind2 for second block
-                    ind[j] = block_counter.tp_eq(&2).select(ind1[j], ind2[j]);
+                    ind_final[j] = block_counter.tp_eq(&2).select(ind[[j, 0]], ind[[j, 1]]);
                 }
 
                 for j in 0..P {
-                    new_geno[j] = self.graph[i].obliv_read(ind[j].as_u32());
+                    new_geno.set_row(j, self.graph[i].get_row_obliv(ind_final[j]));
                 }
-                self.graph[i] = SmallLSOram::from_slice(new_geno.as_slice().unwrap());
 
                 // Erase block_head flag between the two blocks being merged
-                self.block_head[i] = (self.block_head[i] & block_counter.tp_eq(&1))
-                    .select(Bool::protect(false), self.block_head[i]);
+                new_geno.unset_segment_marker(
+                    self.graph[i].is_segment_marker() & block_counter.tp_eq(&1),
+                );
+
+                self.graph[i] = new_geno;
             }
 
-            #[cfg(not(feature = "leak-resist"))]
+            #[cfg(not(feature = "obliv"))]
             {
                 let is_segment_marker = self.graph[i].is_segment_marker();
                 // At merge head set block counter to 2 (will update the next two blocks)
@@ -309,7 +488,7 @@ impl GenotypeGraph {
                 }
                 // Every time we see a block head that is not a merge head, decrement block counter
                 if !merge_head[i] && is_segment_marker {
-                    block_counter = 0.max((block_counter as i8) - 1);
+                    block_counter = 0.max((block_counter as i8) - 1) as u8;
                 }
 
                 for j in 0..P {
@@ -347,6 +526,7 @@ impl GenotypeGraph {
         }
     }
 
+    #[cfg(not(feature = "obliv"))]
     pub fn prune_rank(&mut self, tprobs: ArrayView3<Real>) {
         let mut trans_map = Vec::new();
         let mut het_count = 0;
@@ -437,13 +617,21 @@ impl GenotypeGraph {
         }
     }
 
-    pub fn traverse_graph_pair(&self, ind: ArrayView2<u8>, mut haps: ArrayViewMut2<Genotype>) {
+    pub fn traverse_graph_pair(&self, ind: ArrayView2<U8>, mut haps: ArrayViewMut2<Genotype>) {
         Zip::from(haps.rows_mut())
             .and(ind.rows())
             .and(&self.graph)
             .for_each(|mut h_row, ind_row, g| {
-                h_row[0] = g.get_row(ind_row[0] as usize);
-                h_row[1] = g.get_row(ind_row[1] as usize);
+                #[cfg(feature = "obliv")]
+                {
+                    h_row[0] = g.get_row_obliv(ind_row[0]);
+                    h_row[1] = g.get_row_obliv(ind_row[1]);
+                }
+                #[cfg(not(feature = "obliv"))]
+                {
+                    h_row[0] = g.get_row(ind_row[0] as usize);
+                    h_row[1] = g.get_row(ind_row[1] as usize);
+                }
             });
     }
 }
@@ -451,8 +639,7 @@ impl GenotypeGraph {
 pub struct GenotypeGraphSlice<'a> {
     pub graph: ArrayView1<'a, G>,
 }
-
-fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
+fn select_top_p(tab: ArrayView2<f64>) -> (Array2<u8>, f64, f64) {
     let n = P * P;
     let mut elems = Vec::with_capacity(n);
     let mut entrophy = 0.;
@@ -460,34 +647,13 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
         for j in 0..P {
             let prob = tab[[i, j]];
             entrophy += if prob == 0. { 0. } else { -prob * prob.log10() };
-            #[cfg(feature = "leak-resist")]
-            {
-                elems.push(SortItem {
-                    prob,
-                    i: U8::protect(i as u8),
-                    j: U8::protect(j as u8),
-                });
-            }
-
-            #[cfg(not(feature = "leak-resist"))]
-            {
-                elems.push((prob, i as u8, j as u8));
-            }
+            elems.push((prob, i as u8, j as u8));
         }
     }
 
-    // Descending sort
-    #[cfg(feature = "leak-resist")]
-    {
-        oram_sgx::BiotonicSort::sort(&mut elems[..], false);
-    }
+    elems.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
 
-    #[cfg(not(feature = "leak-resist"))]
-    {
-        elems.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
-    }
-
-    let mut ind = Array2::<U8>::zeros((P, 2));
+    let mut ind = Array2::<u8>::zeros((P, 2));
 
     let mut taken = Array2::<bool>::from_elem((P, P), false);
 
@@ -513,3 +679,65 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
     }
     (ind, sum, entrophy)
 }
+
+//fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
+//let n = P * P;
+//let mut elems = Vec::with_capacity(n);
+//let mut entrophy = 0.;
+//for i in 0..P {
+//for j in 0..P {
+//let prob = tab[[i, j]];
+//entrophy += if prob == 0. { 0. } else { -prob * prob.log10() };
+//#[cfg(feature = "obliv")]
+//{
+//elems.push(SortItem {
+//prob,
+//i: U8::protect(i as u8),
+//j: U8::protect(j as u8),
+//});
+//}
+
+//#[cfg(not(feature = "obliv"))]
+//{
+//elems.push((prob, i as u8, j as u8));
+//}
+//}
+//}
+
+//// Descending sort
+//#[cfg(feature = "obliv")]
+//{
+//oram_sgx::BiotonicSort::sort(&mut elems[..], false);
+//}
+
+//#[cfg(not(feature = "obliv"))]
+//{
+//elems.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+//}
+
+//let mut ind = Array2::<U8>::zeros((P, 2));
+
+//let mut taken = Array2::<bool>::from_elem((P, P), false);
+
+//let mut sum = 0.;
+//let mut count = 0;
+
+//for e in elems.clone() {
+//sum += e.0;
+//let (i, j) = (e.1 as usize, e.2 as usize);
+//if !taken[[i, j]] && !taken[[P - 1 - i, P - 1 - j]] {
+//ind[[count, 0]] = i as u8;
+//ind[[count, 1]] = j as u8;
+//ind[[P - 1 - count, 0]] = (P - 1 - i) as u8;
+//ind[[P - 1 - count, 1]] = (P - 1 - j) as u8;
+//count += 1;
+//taken[[i, j]] = true;
+//taken[[P - 1 - i, P - 1 - j]] = true;
+//}
+
+//if count == P / 2 {
+//break;
+//}
+//}
+//(ind, sum, entrophy)
+//}

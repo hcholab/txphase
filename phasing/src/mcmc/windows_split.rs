@@ -74,6 +74,13 @@ pub fn split_by_segment(
     let mut segments = Vec::new();
     let mut start_segment_i = 0;
     for (i, g) in genotype_graph.graph.iter().enumerate() {
+        #[cfg(feature = "obliv")]
+        if g.is_segment_marker().expose() {
+            segments.push(start_segment_i);
+            start_segment_i = i;
+        }
+
+        #[cfg(not(feature = "obliv"))]
         if g.is_segment_marker() {
             segments.push(start_segment_i);
             start_segment_i = i;

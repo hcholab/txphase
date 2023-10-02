@@ -1,32 +1,64 @@
 use crate::genotype_graph::G;
-use crate::{Real, U8};
+use crate::{BoolMcc, U8};
 use ndarray::{Array1, Array2, ArrayView1, ArrayView3};
 
-#[cfg(feature = "leak-resist")]
-mod inner {
-    pub use tp_fixedpoint::timing_shield::{TpEq, TpOrd};
-}
+#[cfg(feature = "obliv")]
+type Real = crate::RealHmm;
 
-#[cfg(feature = "leak-resist")]
-use inner::*;
+#[cfg(not(feature = "obliv"))]
+type Real = f64;
 
-pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> Array2<U8> {
+#[cfg(feature = "obliv")]
+pub use tp_fixedpoint::timing_shield::{TpEq, TpOrd};
+
+pub fn viterbi(tprob_dips: ArrayView3<f64>, genotype_graph: ArrayView1<G>) -> Array2<U8> {
+    //#[cfg(feature = "obliv")]
+    //let tprob_dips = tprob_dips.map(|v| v.expose_into_f32() as f64);
+
     let m = tprob_dips.shape()[0];
     let p = tprob_dips.shape()[1];
 
+    #[cfg(feature = "obliv")]
+    let mut backtrace = Array2::<U8>::from_elem((m, p), U8::protect(0));
+
+    #[cfg(not(feature = "obliv"))]
     let mut backtrace = Array2::<U8>::zeros((m, p));
-    let mut maxprob = Array1::<Real>::zeros(p);
-    let mut maxprob_next = Array1::<Real>::zeros(p);
+
+    let mut maxprob = Array1::<f64>::zeros(p);
+    let mut maxprob_next = Array1::<f64>::zeros(p);
+
     for h1 in 0..p {
         maxprob[h1] = tprob_dips[[0, 0, h1]]; // p(x1), diploid prob
     }
 
-    let mut max_val: Real = 0.;
-    let mut max_ind: U8 = 0;
+    //#[cfg(feature = "obliv")]
+    //let mut max_val = Real::protect_i64(0);
+
+    //#[cfg(not(feature = "obliv"))]
+    let mut max_val = 0.;
+
+    #[cfg(feature = "obliv")]
+    let mut max_ind: U8 = U8::protect(0);
+
+    #[cfg(not(feature = "obliv"))]
+    let mut max_ind: u8 = 0;
 
     for i in 1..m {
         for h2 in 0..p {
             for h1 in 0..p {
+                #[cfg(feature = "obliv")]
+                let val = if genotype_graph[i].is_segment_marker().expose() {
+                    maxprob[h1] * tprob_dips[[i, h1, h2]]
+                } else {
+                    if h1 == h2 {
+                        maxprob[h1]
+                    } else {
+                        //Real::protect_i64(0)
+                        0.
+                    }
+                };
+
+                #[cfg(not(feature = "obliv"))]
                 let val = if genotype_graph[i].is_segment_marker() {
                     maxprob[h1] * tprob_dips[[i, h1, h2]]
                 } else {
@@ -36,29 +68,33 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
                         0.
                     }
                 };
+
                 if h1 == 0 {
                     max_val = val;
-                    #[cfg(feature = "leak-resist")]
+                    #[cfg(feature = "obliv")]
                     {
                         max_ind = U8::protect(h1 as u8);
                     }
-                    #[cfg(not(feature = "leak-resist"))]
+                    #[cfg(not(feature = "obliv"))]
                     {
                         max_ind = h1 as u8;
                     }
                 } else {
-                    #[cfg(feature = "leak-resist")]
+                    #[cfg(feature = "obliv")]
                     {
-                        let update = val.tp_gt(&max_val);
-                        max_val = update.select(val, max_val);
-                        max_ind = update.select(U8::protect(h1 as u8), max_ind);
+                        //let cond = val.tp_gt(&max_val);
+                        //max_val = cond.select(val, max_val);
+                        //max_ind = cond.select(U8::protect(h1 as u8), max_ind);
+
+                        let cond = BoolMcc::protect(val > max_val);
+                        max_val = max_val.max(val);
+                        max_ind = cond.select(U8::protect(h1 as u8), max_ind);
                     }
-                    #[cfg(not(feature = "leak-resist"))]
-                    {
-                        if val > max_val {
-                            max_val = val;
-                            max_ind = h1 as u8;
-                        }
+
+                    #[cfg(not(feature = "obliv"))]
+                    if val > max_val {
+                        max_val = val;
+                        max_ind = h1 as u8;
                     }
                 }
             }
@@ -74,41 +110,46 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
         let val = maxprob[h1];
         if h1 == 0 {
             max_val = val;
-            #[cfg(feature = "leak-resist")]
+            #[cfg(feature = "obliv")]
             {
                 max_ind = U8::protect(h1 as u8);
             }
-            #[cfg(not(feature = "leak-resist"))]
+            #[cfg(not(feature = "obliv"))]
             {
                 max_ind = h1 as u8;
             }
         } else {
-            #[cfg(feature = "leak-resist")]
+            #[cfg(feature = "obliv")]
             {
-                let update = val.tp_gt(&max_val);
-                max_val = update.select(val, max_val);
-                max_ind = update.select(U8::protect(h1 as u8), max_ind);
+                //let cond = val.tp_gt(&max_val);
+                //max_val = cond.select(val, max_val);
+                //max_ind = cond.select(U8::protect(h1 as u8), max_ind);
+                let cond = BoolMcc::protect(val > max_val);
+                max_val = max_val.max(val);
+                max_ind = cond.select(U8::protect(h1 as u8), max_ind);
             }
-            #[cfg(not(feature = "leak-resist"))]
-            {
-                if val > max_val {
-                    max_val = val;
-                    max_ind = h1 as u8;
-                }
+
+            #[cfg(not(feature = "obliv"))]
+            if val > max_val {
+                max_val = val;
+                max_ind = h1 as u8;
             }
         }
     }
 
     // Follow backtrace pointers to recover optimal sequence
+    #[cfg(feature = "obliv")]
+    let mut map_ind = Array2::<U8>::from_elem((m, 2), U8::protect(0));
+    #[cfg(not(feature = "obliv"))]
     let mut map_ind = Array2::<U8>::zeros((m, 2));
     map_ind[[m - 1, 0]] = max_ind;
     map_ind[[m - 1, 1]] = (p as u8) - 1 - max_ind;
     for i in (1..m).rev() {
-        #[cfg(feature = "leak-resist")]
+        #[cfg(feature = "obliv")]
         {
             max_ind = backtrace[[i, max_ind.expose() as usize]]; // TODO: Use linear ORAM!
         }
-        #[cfg(not(feature = "leak-resist"))]
+        #[cfg(not(feature = "obliv"))]
         {
             max_ind = backtrace[[i, max_ind as usize]]; // TODO: Use linear ORAM!
         }

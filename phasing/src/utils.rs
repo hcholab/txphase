@@ -26,7 +26,7 @@ mod inner {
     }
 }
 
-#[cfg(feature = "leak-resist-new")]
+#[cfg(feature = "obliv")]
 mod inner {
     #[macro_export]
     macro_rules! tp_value {
@@ -75,7 +75,7 @@ mod inner {
     }
 }
 
-#[cfg(not(feature = "leak-resist-new"))]
+#[cfg(not(feature = "obliv"))]
 mod inner {
     #[macro_export]
     macro_rules! tp_value {

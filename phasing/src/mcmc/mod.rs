@@ -1,4 +1,3 @@
-mod initialize;
 mod params;
 mod sampling;
 mod viterbi;
@@ -8,17 +7,22 @@ pub use params::*;
 use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::Hmm;
 use crate::hmm::{COLL_T, COMBD_T, COMB_T, EMIS_T, TRAN_T};
-use crate::neighbors_finding;
-use crate::neighbors_finding::PBWT_T;
+//use crate::neighbors_finding;
 use crate::variants::{Rarity, Variant};
-use crate::{tp_value_new, BoolMcc, Genotype, Real, Usize};
+use crate::{tp_value_new, BoolMcc, Genotype, Usize, U8};
 use common::ref_panel::RefPanelSlice;
 use rand::Rng;
 
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "leak-resist-new")]
-use tp_fixedpoint::timing_shield::TpI8;
+#[cfg(feature = "obliv")]
+use tp_fixedpoint::timing_shield::{TpEq, TpI8};
+
+//#[cfg(feature = "obliv")]
+//type Real = crate::RealHmm;
+
+//#[cfg(not(feature = "obliv"))]
+type Real = f64;
 
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, Zip};
 
@@ -45,9 +49,9 @@ pub struct Mcmc<'a> {
     genotype_graph: GenotypeGraph,
     ignored_sites: Array1<BoolMcc>,
     estimated_haps: Array2<Genotype>,
-    phased_ind: Array2<u8>,
+    phased_ind: Array2<U8>,
     tprobs: Array3<Real>,
-    #[cfg(feature = "leak-resist-new")]
+    #[cfg(feature = "obliv")]
     tprobs_e: Array2<TpI8>,
 }
 
@@ -58,10 +62,10 @@ impl<'a> Mcmc<'a> {
         iterations: &[IterOption],
         mut rng: impl Rng,
     ) -> Array2<Genotype> {
-        match iterations.last().unwrap() {
-            IterOption::Main(_) => {}
-            _ => panic!("Last iterations must be main."),
-        }
+        //match iterations.last().unwrap() {
+            //IterOption::Main(_) => {}
+            //_ => panic!("Last iterations must be main."),
+        //}
 
         let mut iterations_iternal = Vec::new();
         for i in iterations {
@@ -131,44 +135,39 @@ impl<'a> Mcmc<'a> {
     fn initialize(params: &'a McmcSharedParams, genotypes: ArrayView1<Genotype>) -> Self {
         println!("=== Initialization ===",);
         let now = Instant::now();
-        #[cfg(feature = "leak-resist-new")]
-        let (h_0, h_1) = {
-            let genotypes = genotypes
-                .iter()
-                .map(|&v| TpI8::protect(v))
-                .collect::<Vec<_>>();
-            compressed_pbwt_obliv::mcmc_init::mcmc_init(
-                genotypes.as_slice(),
-                &params.pbwt_tries,
-                params.ref_panel.n_haps,
-            )
-        };
+        #[cfg(feature = "obliv")]
+        use compressed_pbwt_obliv::mcmc_init::mcmc_init;
 
-        #[cfg(not(feature = "leak-resist-new"))]
-        let (h_0, h_1) = compressed_pbwt::mcmc_init::mcmc_init(
+        #[cfg(not(feature = "obliv"))]
+        use compressed_pbwt::mcmc_init::mcmc_init;
+
+        let (h_0, h_1) = mcmc_init(
             genotypes.as_slice().unwrap(),
             &params.pbwt_tries,
             params.ref_panel.n_haps,
         );
 
-        #[cfg(feature = "leak-resist-new")]
-        let estimated_haps = Array2::<i8>::from_shape_fn((genotypes.len(), 2), |(i, j)| match j {
-            0 => h_0[i].as_i8().expose(),
-            1 => h_1[i].as_i8().expose(),
+        #[cfg(feature = "obliv")]
+        let estimated_haps = Array2::from_shape_fn((genotypes.len(), 2), |(i, j)| match j {
+            0 => h_0[i].as_i8(),
+            1 => h_1[i].as_i8(),
             _ => panic!(),
         });
-        #[cfg(not(feature = "leak-resist-new"))]
-        let estimated_haps = Array2::<i8>::from_shape_fn((genotypes.len(), 2), |(i, j)| match j {
+        #[cfg(not(feature = "obliv"))]
+        let estimated_haps = Array2::from_shape_fn((genotypes.len(), 2), |(i, j)| match j {
             0 => h_0[i] as i8,
             1 => h_1[i] as i8,
             _ => panic!(),
         });
 
-        //let estimated_haps = initialize::initialize(&params.ref_panel, genotypes);
-        let phased_ind = Array2::<u8>::zeros((estimated_haps.nrows(), 2));
+        #[cfg(feature = "obliv")]
+        let phased_ind = Array2::<U8>::from_elem((estimated_haps.nrows(), 2), U8::protect(0));
+
+        #[cfg(not(feature = "obliv"))]
+        let phased_ind = Array2::<U8>::zeros((estimated_haps.nrows(), 2));
         let tprobs = Array3::<Real>::zeros((estimated_haps.nrows(), P, P));
 
-        #[cfg(feature = "leak-resist-new")]
+        #[cfg(feature = "obliv")]
         let tprobs_e = Array2::<TpI8>::from_elem((estimated_haps.nrows(), P), TpI8::protect(0));
 
         let genotype_graph = GenotypeGraph::build(genotypes);
@@ -183,7 +182,7 @@ impl<'a> Mcmc<'a> {
             phased_ind,
             tprobs,
             ignored_sites,
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             tprobs_e,
         }
     }
@@ -219,7 +218,6 @@ impl<'a> Mcmc<'a> {
             *COLL_T.lock().unwrap() = Duration::from_millis(0);
             *COMB_T.lock().unwrap() = Duration::from_millis(0);
             *COMBD_T.lock().unwrap() = Duration::from_millis(0);
-            *PBWT_T.lock().unwrap() = Duration::from_millis(0);
         }
 
         println!("=== {:?} Iteration ===", iter_option);
@@ -228,15 +226,15 @@ impl<'a> Mcmc<'a> {
         let pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
 
         let neighbors = {
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             let (h_0, h_1): (Vec<_>, Vec<_>) = self
                 .estimated_haps
                 .rows()
                 .into_iter()
-                .map(|v| (BoolMcc::protect(v[0] == 1), BoolMcc::protect(v[1] == 1)))
+                .map(|v| (v[0].tp_eq(&1), v[1].tp_eq(&1)))
                 .unzip();
 
-            #[cfg(not(feature = "leak-resist-new"))]
+            #[cfg(not(feature = "obliv"))]
             let (h_0, h_1): (Vec<_>, Vec<_>) = self
                 .estimated_haps
                 .rows()
@@ -244,10 +242,10 @@ impl<'a> Mcmc<'a> {
                 .map(|v| (v[0] == 1, v[1] == 1))
                 .unzip();
 
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             use compressed_pbwt_obliv::nn::find_top_neighbors;
 
-            #[cfg(not(feature = "leak-resist-new"))]
+            #[cfg(not(feature = "obliv"))]
             use compressed_pbwt::nn::find_top_neighbors;
 
             let mut nn_0 = find_top_neighbors(
@@ -275,6 +273,9 @@ impl<'a> Mcmc<'a> {
         let windows = self.windows_full_segments(&mut rng);
         //let windows = self.windows(&mut rng);
 
+        #[cfg(feature = "obliv")]
+        let mut prev_ind = (U8::protect(0), U8::protect(0));
+        #[cfg(not(feature = "obliv"))]
         let mut prev_ind = (0, 0);
         let mut sum_window_size = 0;
         let n_windows = windows.len();
@@ -321,7 +322,7 @@ impl<'a> Mcmc<'a> {
                 is_first_window,
             );
 
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             let tprobs_e_window_src = hmm
                 .tprobs_e
                 .slice(s![start_write_w - start_w..end_write_w - start_w, .., ..])
@@ -330,14 +331,14 @@ impl<'a> Mcmc<'a> {
             let tprobs_window_src =
                 tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
 
-            #[cfg(not(feature = "leak-resist-new"))]
+            #[cfg(not(feature = "obliv"))]
             let genotype_graph = &self.genotype_graph;
 
             let mut tprobs_window_target =
                 self.tprobs
                     .slice_mut(s![start_write_w..end_write_w, .., ..]);
 
-            #[cfg(feature = "leak-resist-new")]
+            #[cfg(feature = "obliv")]
             let mut j = start_write_w - start_w;
 
             //// TODO: for debugging. Delete this
@@ -345,12 +346,12 @@ impl<'a> Mcmc<'a> {
             //Zip::from(tprobs_window_target.outer_iter_mut())
             //.and(tprobs_window_src.outer_iter())
             //.for_each(|mut a, b| {
-            //#[cfg(feature = "leak-resist-new")]
+            //#[cfg(feature = "obliv")]
             //{
             //a.assign(&crate::hmm::debug_expose_array(b, hmm.bprobs_e.row(j)));
             //j += 1;
             //}
-            //#[cfg(not(feature = "leak-resist-new"))]
+            //#[cfg(not(feature = "obliv"))]
             //a.assign(&b);
             //});
             //}
@@ -359,14 +360,14 @@ impl<'a> Mcmc<'a> {
                 Zip::from(tprobs_window_target.outer_iter_mut())
                     .and(tprobs_window_src.outer_iter())
                     .for_each(|a, b| {
-                        #[cfg(feature = "leak-resist-new")]
+                        #[cfg(feature = "obliv")]
                         {
                             hmm.cur_i = j;
                             j += 1;
                             hmm.combine_dips(b, a);
                         }
 
-                        #[cfg(not(feature = "leak-resist-new"))]
+                        #[cfg(not(feature = "obliv"))]
                         if i == 0 || genotype_graph.graph[i].is_segment_marker() {
                             hmm.combine_dips(b, a);
                         } else {
@@ -382,14 +383,14 @@ impl<'a> Mcmc<'a> {
                     Zip::from(tprobs_window_target.outer_iter_mut())
                         .and(tprobs_window_src.outer_iter())
                         .for_each(|a, b| {
-                            #[cfg(feature = "leak-resist-new")]
+                            #[cfg(feature = "obliv")]
                             {
                                 hmm.cur_i = j;
                                 j += 1;
                                 hmm.combine_dips(b, a);
                             }
 
-                            #[cfg(not(feature = "leak-resist-new"))]
+                            #[cfg(not(feature = "obliv"))]
                             if i == 0 || genotype_graph.graph[i].is_segment_marker() {
                                 hmm.combine_dips(b, a);
                             } else {
@@ -402,7 +403,7 @@ impl<'a> Mcmc<'a> {
                     Zip::from(tprobs_window_target.outer_iter_mut())
                         .and(tprobs_window_src.outer_iter())
                         .for_each(|mut a, b| {
-                            #[cfg(feature = "leak-resist-new")]
+                            #[cfg(feature = "obliv")]
                             {
                                 hmm.cur_i = j;
                                 j += 1;
@@ -410,7 +411,7 @@ impl<'a> Mcmc<'a> {
                                 a += &tprob_pairs;
                             }
 
-                            #[cfg(not(feature = "leak-resist-new"))]
+                            #[cfg(not(feature = "obliv"))]
                             if i == 0 || genotype_graph.graph[i].is_segment_marker() {
                                 hmm.combine_dips(b, tprob_pairs.view_mut());
                                 a += &tprob_pairs;
@@ -425,7 +426,7 @@ impl<'a> Mcmc<'a> {
             let phased_ind_window = sampling::forward_sampling(
                 prev_ind,
                 tprobs_window_src.view(),
-                #[cfg(feature = "leak-resist-new")]
+                #[cfg(feature = "obliv")]
                 tprobs_e_window_src.view(),
                 genotype_graph_w
                     .graph
@@ -449,11 +450,12 @@ impl<'a> Mcmc<'a> {
             .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
 
         if iter_option == IterOptionInternal::Pruning {
-            self.genotype_graph.prune_rank(self.tprobs.view());
-            //self.genotype_graph.prune(self.tprobs.view());
+            //self.genotype_graph.prune_rank(self.tprobs.view());
+            self.genotype_graph.prune(self.tprobs.view());
             self.cur_overlap_region_len *= 2;
         }
 
+        #[cfg(not(feature = "obliv"))]
         println!(
             "#Segments: {}",
             self.genotype_graph
@@ -475,7 +477,6 @@ impl<'a> Mcmc<'a> {
         );
 
         println!("Elapsed time: {} ms", (Instant::now() - now).as_millis());
-        println!("PBWT: {} ms", PBWT_T.lock().unwrap().as_millis());
         println!("Emission: {} ms", EMIS_T.lock().unwrap().as_millis());
         println!("Transition: {} ms", TRAN_T.lock().unwrap().as_millis());
         println!("Collapse: {} ms", COLL_T.lock().unwrap().as_millis());
@@ -505,6 +506,17 @@ impl<'a> Mcmc<'a> {
                 if split_point + i >= self.genotype_graph.graph.len() {
                     break;
                 }
+
+                #[cfg(feature = "obliv")]
+                if self.genotype_graph.graph[split_point + i]
+                    .is_segment_marker()
+                    .expose()
+                {
+                    end_write_boundary = Some(split_point + i);
+                    break;
+                }
+
+                #[cfg(not(feature = "obliv"))]
                 if self.genotype_graph.graph[split_point + i].is_segment_marker() {
                     end_write_boundary = Some(split_point + i);
                     break;
@@ -537,48 +549,48 @@ impl<'a> Mcmc<'a> {
         hmm_windows
     }
 
-    fn save_tprobs(&self, mut writer: impl std::io::Write) {
-        Zip::from(&self.genotype_graph.graph)
-            .and(self.tprobs.outer_iter())
-            .for_each(|g, t| {
-                if g.is_segment_marker() {
-                    bincode::serialize_into(&mut writer, &t).unwrap();
-                }
-            });
-    }
+    //fn save_tprobs(&self, mut writer: impl std::io::Write) {
+    //Zip::from(&self.genotype_graph.graph)
+    //.and(self.tprobs.outer_iter())
+    //.for_each(|g, t| {
+    //if g.is_segment_marker() {
+    //bincode::serialize_into(&mut writer, &t).unwrap();
+    //}
+    //});
+    //}
 
-    fn check_tprobs(&self, mut reader: impl std::io::Read) {
-        Zip::indexed(&self.genotype_graph.graph)
-            .and(self.tprobs.outer_iter())
-            .for_each(|i, g, t| {
-                if g.is_segment_marker() {
-                    let ref_t: Array2<Real> = bincode::deserialize_from(&mut reader).unwrap();
-                    //if ref_t != t {
-                    //println!("{i}:");
-                    //assert_eq!(ref_t/t );
-                    //}
-                    const R: f64 = 0.1;
-                    for (a, b) in ref_t.iter().zip(t.iter()) {
-                        if a / b >= 1. + R || a / b < 1. - R {
-                            println!("{i}:");
-                            println!("{:#?}", ref_t);
-                            println!("{:#?}", t);
-                            println!("{a}, {b}, {}", a / b);
-                            panic!();
-                        }
-                    }
-                }
-            });
-    }
+    //fn check_tprobs(&self, mut reader: impl std::io::Read) {
+    //Zip::indexed(&self.genotype_graph.graph)
+    //.and(self.tprobs.outer_iter())
+    //.for_each(|i, g, t| {
+    //if g.is_segment_marker() {
+    //let ref_t: Array2<Real> = bincode::deserialize_from(&mut reader).unwrap();
+    ////if ref_t != t {
+    ////println!("{i}:");
+    ////assert_eq!(ref_t/t );
+    ////}
+    //const R: f64 = 0.1;
+    //for (a, b) in ref_t.iter().zip(t.iter()) {
+    //if a / b >= 1. + R || a / b < 1. - R {
+    //println!("{i}:");
+    //println!("{:#?}", ref_t);
+    //println!("{:#?}", t);
+    //println!("{a}, {b}, {}", a / b);
+    //panic!();
+    //}
+    //}
+    //}
+    //});
+    //}
 
-    fn save_estimated_haps(&self, writer: impl std::io::Write) {
-        bincode::serialize_into(writer, &self.estimated_haps).unwrap();
-    }
+    //fn save_estimated_haps(&self, writer: impl std::io::Write) {
+    //bincode::serialize_into(writer, &self.estimated_haps).unwrap();
+    //}
 
-    fn check_estimated_haps(&self, reader: impl std::io::Read) {
-        let ref_haps: Array2<i8> = bincode::deserialize_from(reader).unwrap();
-        assert_eq!(self.estimated_haps, ref_haps);
-    }
+    //fn check_estimated_haps(&self, reader: impl std::io::Read) {
+    //let ref_haps: Array2<i8> = bincode::deserialize_from(reader).unwrap();
+    //assert_eq!(self.estimated_haps, ref_haps);
+    //}
 
     fn windows_full_segments(&self, mut rng: impl Rng) -> Vec<((usize, usize), (usize, usize))> {
         let windows = windows_split::split_by_segment(
@@ -607,6 +619,15 @@ impl<'a> Mcmc<'a> {
                 if split_point + j >= self.genotype_graph.graph.len() {
                     break;
                 }
+                #[cfg(feature = "obliv")]
+                if self.genotype_graph.graph[split_point + j]
+                    .is_segment_marker()
+                    .expose()
+                {
+                    end_write_boundary = Some(split_point + j);
+                    break;
+                }
+                #[cfg(not(feature = "obliv"))]
                 if self.genotype_graph.graph[split_point + j].is_segment_marker() {
                     end_write_boundary = Some(split_point + j);
                     break;
@@ -619,6 +640,15 @@ impl<'a> Mcmc<'a> {
                 if split_point < j + 1 {
                     break;
                 }
+                #[cfg(feature = "obliv")]
+                if self.genotype_graph.graph[split_point - j - 1]
+                    .is_segment_marker()
+                    .expose()
+                {
+                    next_start_boundary = Some(split_point - j - 1);
+                    break;
+                }
+                #[cfg(not(feature = "obliv"))]
                 if self.genotype_graph.graph[split_point - j - 1].is_segment_marker() {
                     next_start_boundary = Some(split_point - j - 1);
                     break;
@@ -666,13 +696,20 @@ impl<'a> Mcmc<'a> {
             .and(&genotypes)
             .for_each(|s, v, &g| {
                 let rarity = v.rarity();
-                *s = tp_value_new!(
-                    (g == 0 || g == 2)
+                #[cfg(feature = "obliv")]
+                {
+                    *s = (g.tp_eq(&0) | g.tp_eq(&2))
+                        & !((rarity == Rarity::NotRare)
+                            | ((rarity == Rarity::Rare(true)) & g.tp_eq(&2))
+                            | ((rarity == Rarity::Rare(false)) & g.tp_eq(&0)));
+                }
+                #[cfg(not(feature = "obliv"))]
+                {
+                    *s = (g == 0 || g == 2)
                         && !(rarity == Rarity::NotRare
                             || (rarity == Rarity::Rare(true) && g == 2)
-                            || (rarity == Rarity::Rare(false) && g == 0)),
-                    bool
-                );
+                            || (rarity == Rarity::Rare(false) && g == 0));
+                }
             });
         ignored_sites
     }
@@ -682,7 +719,7 @@ fn select_ref_panel_new(
     ref_panel: &RefPanelSlice,
     neighbors: &[Option<Vec<Usize>>],
 ) -> (Array2<Genotype>, usize) {
-    #[cfg(feature = "leak-resist-new")]
+    #[cfg(feature = "obliv")]
     let neighbors_bitmap = {
         let mut bitmap = compressed_pbwt_obliv::obliv::bitmap::OblivBitmap::new(ref_panel.n_haps);
         bitmap.map_from_iter(
@@ -695,7 +732,7 @@ fn select_ref_panel_new(
         bitmap
     };
 
-    #[cfg(not(feature = "leak-resist-new"))]
+    #[cfg(not(feature = "obliv"))]
     let neighbors_bitmap = {
         let mut bitmap = vec![false; ref_panel.n_haps];
         for &i in neighbors
@@ -709,59 +746,61 @@ fn select_ref_panel_new(
         bitmap
     };
 
-    #[cfg(feature = "leak-resist-new")]
+    #[cfg(feature = "obliv")]
     let k = neighbors_bitmap.iter().filter(|b| b.expose()).count();
 
-    #[cfg(not(feature = "leak-resist-new"))]
+    #[cfg(not(feature = "obliv"))]
     let k = neighbors_bitmap.iter().filter(|&&b| b).count();
 
-    #[cfg(feature = "leak-resist-new")]
+    #[cfg(feature = "obliv")]
     return (
-        ref_panel.filter(
-            &neighbors_bitmap
-                .iter()
-                .map(|v| v.expose())
-                .collect::<Vec<_>>(),
-        ),
+        ref_panel
+            .filter(
+                &neighbors_bitmap
+                    .iter()
+                    .map(|v| v.expose())
+                    .collect::<Vec<_>>(),
+            )
+            .map(|&v| Genotype::protect(v)),
         k,
     );
 
-    #[cfg(not(feature = "leak-resist-new"))]
+    #[cfg(not(feature = "obliv"))]
     (ref_panel.filter(&neighbors_bitmap), k)
 }
 
-fn select_ref_panel(
-    ref_panel: &RefPanelSlice,
-    estimated_haps: ArrayView2<Genotype>,
-    pbwt_evaluted_filter: &[bool],
-    pbwt_group_filter: &[bool],
-    s: usize,
-) -> (Array2<Genotype>, usize) {
-    let n_pbwt_pos = pbwt_evaluted_filter.iter().filter(|b| **b).count();
-    let neighbors_bitmap = neighbors_finding::find_neighbors(
-        ref_panel
-            .iter()
-            .zip(pbwt_evaluted_filter.iter())
-            .filter_map(|(v, &b)| if b { Some(v) } else { None }),
-        estimated_haps
-            .rows()
-            .into_iter()
-            .map(|r| r.to_owned())
-            .zip(pbwt_evaluted_filter.iter())
-            .filter_map(|(v, &b)| if b { Some(v) } else { None }),
-        pbwt_group_filter
-            .iter()
-            .zip(pbwt_evaluted_filter.iter())
-            .filter_map(|(&b1, &b2)| if b2 { Some(b1) } else { None }),
-        n_pbwt_pos,
-        ref_panel.n_haps,
-        estimated_haps.ncols(),
-        s,
-    );
+//fn select_ref_panel(
+    //ref_panel: &RefPanelSlice,
+    //estimated_haps: ArrayView2<Genotype>,
+    //pbwt_evaluted_filter: &[bool],
+    //pbwt_group_filter: &[bool],
+    //s: usize,
+//) -> (Array2<Genotype>, usize) {
+    //let n_pbwt_pos = pbwt_evaluted_filter.iter().filter(|b| **b).count();
+    //let neighbors_bitmap = neighbors_finding::find_neighbors(
+        //ref_panel
+            //.iter()
+            //.zip(pbwt_evaluted_filter.iter())
+            //.filter_map(|(v, &b)| if b { Some(v) } else { None }),
+        //estimated_haps
+            //.rows()
+            //.into_iter()
+            //.map(|r| r.to_owned())
+            //.zip(pbwt_evaluted_filter.iter())
+            //.filter_map(|(v, &b)| if b { Some(v) } else { None }),
+        //pbwt_group_filter
+            //.iter()
+            //.zip(pbwt_evaluted_filter.iter())
+            //.filter_map(|(&b1, &b2)| if b2 { Some(b1) } else { None }),
+        //n_pbwt_pos,
+        //ref_panel.n_haps,
+        //estimated_haps.ncols(),
+        //s,
+    //);
 
-    let k = neighbors_bitmap.iter().filter(|&&b| b).count();
-    (ref_panel.filter(&neighbors_bitmap), k)
-}
+    //let k = neighbors_bitmap.iter().filter(|&&b| b).count();
+    //(ref_panel.filter(&neighbors_bitmap), k)
+//}
 
 #[cfg(test)]
 mod test {}

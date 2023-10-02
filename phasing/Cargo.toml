@@ -6,10 +6,10 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["compressed-pbwt"]
+default = ["obliv"]
 leak-resist = ["tp-fixedpoint"] 
 leak-resist-fast = ["leak-resist"] 
-leak-resist-new = ["tp-fixedpoint", "compressed-pbwt-obliv"]
+obliv = ["tp-fixedpoint", "compressed-pbwt-obliv"]
 
 [dependencies]
 rand = "0.8"

@@ -72,7 +72,24 @@ pub fn build_variants(
         .zip(afreqs.iter())
         .zip(cms.iter())
         .map(|(((&g, &bp), &afreq), &cm)| {
-            Variant::new(if g != -1 { g as usize } else { 0 }, bp, cm, afreq, n_haps)
+            #[cfg(feature = "obliv")]
+            {
+                Variant::new(
+                    if g.expose() != -1 {
+                        g.expose() as usize
+                    } else {
+                        0
+                    },
+                    bp,
+                    cm,
+                    afreq,
+                    n_haps,
+                )
+            }
+            #[cfg(not(feature = "obliv"))]
+            {
+                Variant::new(if g != -1 { g as usize } else { 0 }, bp, cm, afreq, n_haps)
+            }
         })
         .collect()
 }
