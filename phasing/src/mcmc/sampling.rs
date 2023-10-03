@@ -42,16 +42,11 @@ pub fn forward_sampling(
             let cond = genotype_graph[i].is_segment_marker() | (is_first_window && i == 0);
             (cond.select(ind1, prev_ind1), cond.select(ind2, prev_ind2))
         };
-
         #[cfg(not(feature = "obliv"))]
         let (ind1, ind2) = if genotype_graph[i].is_segment_marker() || (is_first_window && i == 0) {
             constrained_paired_sample(
                 tprobs.slice(s![i, prev_ind1 as usize, ..]),
-                #[cfg(feature = "obliv")]
-                tprobs_e.slice(s![i, prev_ind1 as usize, ..]),
                 tprobs.slice(s![i, prev_ind2 as usize, ..]),
-                #[cfg(feature = "obliv")]
-                tprobs_e.slice(s![i, prev_ind2 as usize, ..]),
                 &mut rng,
             )
         } else {
@@ -75,10 +70,8 @@ fn constrained_paired_sample(
 ) -> (U8, U8) {
     #[cfg(not(feature = "obliv"))]
     let (weights1, weights2) = {
-        let scale_1 = tp_value_real!(1, i64) / weights1.sum();
-        let weights1 = &weights1 * scale_1;
-        let scale_2 = tp_value_real!(1, i64) / weights2.sum();
-        let weights2 = &weights2 * scale_2;
+        let weights1 = &weights1 / weights1.sum();
+        let weights2 = &weights2 / weights2.sum();
         (weights1, weights2)
     };
 
@@ -93,8 +86,34 @@ fn constrained_paired_sample(
         }
     }
 
+    //#[cfg(feature = "obliv")]
+    //{
+    //println!("before:");
+    //println!("{:?}", combined.map(|v| v.expose_into_f32()));
+    //println!("{:?}", combined_e.map(|v| v.expose()));
+    //}
+
+    //#[cfg(feature = "obliv")]
+    //crate::hmm::renorm_equalize_scale_arr1(combined.view_mut(), combined_e.view_mut());
+
+    //#[cfg(feature = "obliv")]
+    //{
+    //println!("after:");
+    //println!("{:?}", combined.map(|v| v.expose_into_f32()));
+    //println!("{:?}", combined_e.map(|v| v.expose()));
+    //}
+
     #[cfg(feature = "obliv")]
-    crate::hmm::renorm_equalize_scale_arr1(combined.view_mut(), combined_e.view_mut());
+    //let combined = combined.map(|v| v.expose_into_f32() as f64);
+    let combined = ndarray::Zip::from(&combined)
+        .and(&combined_e)
+        .map_collect(|&p, &e| crate::hmm::debug_expose(p, e));
+
+    #[cfg(feature = "obliv")]
+    let combined = &combined / combined.sum();
+
+    #[cfg(feature = "obliv")]
+    let combined = combined.map(|&v| RealHmm::protect_f32(v as f32));
 
     let ind1 = weighted_sample(combined.view(), rng);
 
@@ -105,6 +124,35 @@ fn constrained_paired_sample(
     #[cfg(not(feature = "obliv"))]
     (ind1 as u8, P as u8 - 1 - ind1 as u8)
 }
+
+//fn weighted_sample(weights: ArrayView1<f64>, mut rng: impl Rng) -> u8 {
+////println!("{:?}", weights);
+//let mut total_weight = weights[0];
+//let mut cumulative_weights: Vec<f64> = Vec::with_capacity(weights.len());
+//cumulative_weights.push(total_weight);
+//for &w in weights.iter().skip(1) {
+//total_weight += w;
+//cumulative_weights.push(total_weight);
+//}
+
+//let chosen_weight = rng.gen_range(0.0..1.0) * total_weight;
+//#[cfg(feature = "obliv")]
+//{
+//println!("cumu: {:?}", cumulative_weights);
+//println!("chosen: {}", chosen_weight);
+//}
+
+//use std::cmp::Ordering;
+//cumulative_weights
+//.binary_search_by(|w| {
+//if *w <= chosen_weight {
+//Ordering::Less
+//} else {
+//Ordering::Greater
+//}
+//})
+//.unwrap_err() as u8
+//}
 
 fn weighted_sample(weights: ArrayView1<RealHmm>, mut rng: impl Rng) -> U8 {
     let mut total_weight = weights[0];

@@ -2,16 +2,16 @@ use crate::genotype_graph::G;
 use crate::{BoolMcc, U8};
 use ndarray::{Array1, Array2, ArrayView1, ArrayView3};
 
-#[cfg(feature = "obliv")]
-type Real = crate::RealHmm;
+//#[cfg(feature = "obliv")]
+//type Real = crate::RealHmm;
 
-#[cfg(not(feature = "obliv"))]
+//#[cfg(not(feature = "obliv"))]
 type Real = f64;
 
 #[cfg(feature = "obliv")]
 pub use tp_fixedpoint::timing_shield::{TpEq, TpOrd};
 
-pub fn viterbi(tprob_dips: ArrayView3<f64>, genotype_graph: ArrayView1<G>) -> Array2<U8> {
+pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> Array2<U8> {
     //#[cfg(feature = "obliv")]
     //let tprob_dips = tprob_dips.map(|v| v.expose_into_f32() as f64);
 

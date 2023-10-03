@@ -116,9 +116,9 @@ impl Hmm {
         self.prev_fprobs_e.assign(&self.cur_fprobs_e);
 
         #[cfg(feature = "obliv")]
-        let mut tprobs_3x = Array3::<RealHmm>::zeros(((m + 2) / 3, P, P));
+        let mut tprobs_3x = Array3::<RealHmm>::zeros((m.div_ceil(3), P, P));
         #[cfg(feature = "obliv")]
-        let mut tprobs_3x_e = Array3::<TpI16>::from_elem(((m + 2) / 3, P, P), TpI16::protect(0));
+        let mut tprobs_3x_e = Array3::<TpI16>::from_elem((m.div_ceil(3), P, P), TpI16::protect(0));
         #[cfg(feature = "obliv")]
         let mut tprobs_3x_fwd = prev_fprobs.clone();
         #[cfg(feature = "obliv")]
@@ -166,7 +166,7 @@ impl Hmm {
                     .and(&bprobs_e)
                     .for_each(|t, &b| *t = cond.select(b, *t));
 
-                if i % 3 == 2 {
+                if i % 3 == 2 || i == m - 1 {
                     Self::combine(
                         tprobs_3x_fwd.view(),
                         tprobs_3x_fwd_e.view(),
@@ -305,17 +305,17 @@ impl Hmm {
         {
             tprobs_dips_e.iter_mut().for_each(|v| *v -= sum_e);
 
-            renorm_scale(tprobs_dips.view_mut(), tprobs_dips_e.view_mut());
+            //renorm_scale(tprobs_dips.view_mut(), tprobs_dips_e.view_mut());
 
             _tprobs_dips.assign(&debug_expose_array(
             tprobs_dips.view(),
             tprobs_dips_e.view(),
             ));
 
-            //tprobs_dips
-                //.iter_mut()
-                //.zip(tprobs_dips_e.iter_mut())
-                //.for_each(|(t, e)| match_scale_single(TpI16::protect(0), t, e));
+            //Zip::from(tprobs_dips.rows_mut())
+                //.and(&mut tprobs_dips_e)
+                //.for_each(|t, e| match_scale_row(TpI16::protect(0), t, e));
+            //_tprobs_dips.assign(&tprobs_dips);
         }
 
         let mut _t = COMBD_T.lock().unwrap();

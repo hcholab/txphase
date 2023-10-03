@@ -9,12 +9,11 @@ pub const MAX_HETS: usize = 22; // "MAX_AMB" constant in ShapeIt4 (utils/otools.
 #[cfg(feature = "obliv")]
 use tp_fixedpoint::timing_shield::{TpCondSwap, TpEq, TpOrd};
 
-type Real = f64;
 //#[cfg(feature = "obliv")]
 //type Real = crate::RealHmm;
 
 //#[cfg(not(feature = "obliv"))]
-//type Real = crate::RealHmm;
+type Real = f64;
 
 //#[cfg(feature = "obliv")]
 //mod inner {
@@ -358,12 +357,12 @@ impl GenotypeGraph {
                     //.slice(s![i, .., ..])
                     //.map(|v| v.expose_into_f32() as f64);
                 //let (ind, prob, _) = select_top_p(tprob.view());
-                let (ind, prob, _) = select_top_p(tprob.slice(s![i, .., ..]));
+                let (ind, prob) = select_top_p(tprob.slice(s![i, .., ..]));
                 (ind.map(|&v| U8::protect(v)), prob as f32)
             };
 
             #[cfg(not(feature = "obliv"))]
-            let (ind, prob, _) = select_top_p(tprob.slice(s![i, .., ..]));
+            let (ind, prob) = select_top_p(tprob.slice(s![i, .., ..]));
 
             // If merge flag set then carry over
             for j in 0..P {
@@ -392,7 +391,7 @@ impl GenotypeGraph {
             {
                 let is_segment_marker = self.graph[i].is_segment_marker();
                 // If at head and merge is on, it is the merge head
-                merge_head[i] = (Bool::protect(i == 0) | is_segment_marker) & merge_flag;
+                merge_head[i] = ((i == 0) | is_segment_marker) & merge_flag;
 
                 // If merge is not on, we're at a head and prob over threshold, start a new merge
                 new_merge_flag = is_segment_marker
@@ -545,7 +544,7 @@ impl GenotypeGraph {
         for (i, (t1, t2)) in trans_map.iter().zip(trans_map.iter().skip(1)).enumerate() {
             let het_count = t1.1 + t2.1;
             if het_count < MAX_HETS {
-                let (ind, prob, entrophy) = select_top_p(tprobs.slice(s![t2.0, .., ..]));
+                let (ind, prob, entrophy) = select_top_p_with_entropy(tprobs.slice(s![t2.0, .., ..]));
                 if prob > MCMC_PRUNE_PROB_THRES {
                     trans_stats.push((entrophy, i, ind));
                 }
@@ -639,7 +638,52 @@ impl GenotypeGraph {
 pub struct GenotypeGraphSlice<'a> {
     pub graph: ArrayView1<'a, G>,
 }
-fn select_top_p(tab: ArrayView2<f64>) -> (Array2<u8>, f64, f64) {
+
+fn select_top_p(tab: ArrayView2<Real>) -> (Array2<u8>, f64) {
+    //#[cfg(feature = "obliv")]
+    //let tab = tab.map(|v| v.expose_into_f32() as f64);
+
+    let n = P * P;
+    let mut elems = Vec::with_capacity(n);
+    for i in 0..P {
+        for j in 0..P {
+            elems.push((tab[[i, j]], i as u8, j as u8));
+        }
+    }
+
+    elems.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+
+    let mut ind = Array2::<u8>::zeros((P, 2));
+
+    let mut taken = Array2::<bool>::from_elem((P, P), false);
+
+    let mut sum = 0.;
+    let mut count = 0;
+
+    for e in elems.clone() {
+        sum += e.0;
+        let (i, j) = (e.1 as usize, e.2 as usize);
+        if !taken[[i, j]] && !taken[[P - 1 - i, P - 1 - j]] {
+            ind[[count, 0]] = i as u8;
+            ind[[count, 1]] = j as u8;
+            ind[[P - 1 - count, 0]] = (P - 1 - i) as u8;
+            ind[[P - 1 - count, 1]] = (P - 1 - j) as u8;
+            count += 1;
+            taken[[i, j]] = true;
+            taken[[P - 1 - i, P - 1 - j]] = true;
+        }
+
+        if count == P / 2 {
+            break;
+        }
+    }
+    (ind, sum)
+}
+
+fn select_top_p_with_entropy(tab: ArrayView2<Real>) -> (Array2<u8>, f64, f64) {
+    //#[cfg(feature = "obliv")]
+    //let tab = tab.map(|v| v.expose_into_f32() as f64);
+
     let n = P * P;
     let mut elems = Vec::with_capacity(n);
     let mut entrophy = 0.;
