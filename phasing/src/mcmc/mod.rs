@@ -270,8 +270,8 @@ impl<'a> Mcmc<'a> {
             nn_0
         };
 
-        let windows = self.windows_full_segments(&mut rng);
-        //let windows = self.windows(&mut rng);
+        //let windows = self.windows_full_segments(&mut rng);
+        let windows = self.windows(&mut rng);
 
         #[cfg(feature = "obliv")]
         let mut prev_ind = (U8::protect(0), U8::protect(0));

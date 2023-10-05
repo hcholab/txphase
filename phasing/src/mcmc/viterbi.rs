@@ -12,9 +12,6 @@ type Real = f64;
 pub use tp_fixedpoint::timing_shield::{TpEq, TpOrd};
 
 pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> Array2<U8> {
-    //#[cfg(feature = "obliv")]
-    //let tprob_dips = tprob_dips.map(|v| v.expose_into_f32() as f64);
-
     let m = tprob_dips.shape()[0];
     let p = tprob_dips.shape()[1];
 
@@ -54,7 +51,6 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
                         maxprob[h1]
                     } else {
                         Real::protect_i64(0)
-                        //0.
                     }
                 };
 
@@ -102,7 +98,15 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
             maxprob_next[h2] = max_val;
             backtrace[[i, h2]] = max_ind;
         }
-        maxprob = &maxprob_next / maxprob_next.sum();
+        #[cfg(feature = "obliv")]
+        {
+            maxprob = &maxprob_next * (Real::protect_i64(1)/maxprob_next.sum());
+        }
+
+        #[cfg(not(feature = "obliv"))]
+        {
+            maxprob = &maxprob_next / maxprob_next.sum();
+        }
     }
 
     // Find max value in the final vector

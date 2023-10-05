@@ -304,14 +304,6 @@ impl Hmm {
         #[cfg(feature = "obliv")]
         {
             tprobs_dips_e.map_mut(|v| *v -= sum_e);
-
-            //renorm_scale(tprobs_dips.view_mut(), tprobs_dips_e.view_mut());
-
-            //_tprobs_dips.assign(&debug_expose_array(
-            //tprobs_dips.view(),
-            //tprobs_dips_e.view(),
-            //));
-
             Zip::from(tprobs_dips.rows_mut())
                 .and(&mut tprobs_dips_e)
                 .for_each(|t, e| match_scale_row(TpI16::protect(0), t, e));
