@@ -223,7 +223,11 @@ impl<'a> Mcmc<'a> {
         println!("=== {:?} Iteration ===", iter_option);
         let now = Instant::now();
 
-        let pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
+        let mut pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
+        pbwt_group_filter
+            .iter_mut()
+            .zip(&self.params.pbwt_evaluted)
+            .for_each(|(a, &b)| *a = *a && b);
 
         let neighbors = {
             #[cfg(feature = "obliv")]
@@ -488,8 +492,8 @@ impl<'a> Mcmc<'a> {
         //println!("Collapse: {} ms", COLL_T.lock().unwrap().as_millis());
         //println!("Combine: {} ms", COMB_T.lock().unwrap().as_millis());
         //println!(
-            //"Combine Diploid: {} ms",
-            //COMBD_T.lock().unwrap().as_millis()
+        //"Combine Diploid: {} ms",
+        //COMBD_T.lock().unwrap().as_millis()
         //);
         println!("",);
     }

@@ -140,7 +140,6 @@ fn main() {
 
     let mcmc_params = mcmc::McmcSharedParams::new(
         ref_panel_new,
-        genotypes.view(),
         bps,
         cms,
         afreqs,

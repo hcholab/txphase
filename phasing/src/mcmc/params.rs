@@ -27,7 +27,6 @@ pub struct McmcSharedParams {
 impl McmcSharedParams {
     pub fn new(
         ref_panel: RefPanel,
-        genotypes: ArrayView1<Genotype>,
         bps: Vec<u32>,
         cms: Vec<f64>,
         afreqs: Vec<f64>,
@@ -36,7 +35,7 @@ impl McmcSharedParams {
         pbwt_modulo: f64,
         s: usize,
     ) -> Self {
-        let variants = build_variants(genotypes, &bps, &cms, &afreqs, ref_panel.n_haps);
+        let variants = build_variants(&bps, &cms, &afreqs, ref_panel.n_haps);
         println!(
             "#rare = {}",
             variants.iter().filter(|v| v.rarity().is_rare()).count()
