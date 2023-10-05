@@ -203,6 +203,7 @@ impl Hmm {
             self.emission(
                 ref_panel.slice(s![i, ..]),
                 genograph[i],
+                #[cfg(not(feature = "obliv"))]
                 hmm_params,
                 cur_fprobs.view_mut(),
             );
@@ -245,21 +246,6 @@ impl Hmm {
         #[cfg(feature = "obliv")]
         let tprobs_e = self.tprobs_e.slice(s![self.cur_i, .., ..]);
 
-        //let tprobs = tprobs.to_owned();
-        //let (tprobs, tprobs_e_ext) = {
-        //let mut tprobs = tprobs.to_owned();
-        //let tprobs_e = self.bprobs_e.row(self.cur_i);
-        //let mut tprobs_e_ext = Array2::<TpI16>::from_elem((P, P), TpI16::protect(0));
-        //Zip::from(tprobs_e_ext.rows_mut())
-        //.and(&tprobs_e)
-        //.for_each(|mut r, &e| r.fill(e));
-
-        //Zip::from(&mut tprobs)
-        //.and(&mut tprobs_e_ext)
-        //.for_each(|t, e| renorm_scale_single(t, e));
-        //(tprobs, tprobs_e_ext)
-        //};
-
         #[cfg(not(feature = "obliv"))]
         let tprobs = &tprobs * (1. / tprobs.sum());
 
@@ -283,31 +269,14 @@ impl Hmm {
         }
 
         #[cfg(feature = "obliv")]
-        let mut tprobs_dips_e = {
-            let mut tprobs_dips_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
-            renorm_equalize_scale(
-                tprobs_dips.view_mut(),
-                tprobs_dips_e_ext.view_mut(),
-                tprobs_dips_e.view_mut(),
-            );
-            tprobs_dips_e
-        };
-
-        #[cfg(feature = "obliv")]
-        let (sum, sum_e) = sum_scale(tprobs_dips.view(), tprobs_dips_e.view());
-
-        #[cfg(not(feature = "obliv"))]
-        let sum = tprobs_dips.sum();
-
-        tprobs_dips *= tp_value_real!(1, i64) / sum;
+        {
+            crate::hmm::renorm_equalize_scale_all(tprobs_dips.view_mut(), tprobs_dips_e_ext.view_mut());
+            _tprobs_dips.assign(&tprobs_dips);
+        }
 
         #[cfg(feature = "obliv")]
         {
-            tprobs_dips_e.map_mut(|v| *v -= sum_e);
-            Zip::from(tprobs_dips.rows_mut())
-                .and(&mut tprobs_dips_e)
-                .for_each(|t, e| match_scale_row(TpI16::protect(0), t, e));
-            _tprobs_dips.assign(&tprobs_dips);
+            tprobs_dips /= tprobs_dips.sum();
         }
 
         let mut _t = COMBD_T.lock().unwrap();
@@ -382,6 +351,7 @@ impl Hmm {
             self.emission(
                 ref_panel.row(i),
                 genograph[i],
+                #[cfg(not(feature = "obliv"))]
                 hmm_params,
                 cur_bprob.view_mut(),
             );
@@ -436,7 +406,7 @@ impl Hmm {
         &mut self,
         cond_haps: ArrayView1<Genotype>,
         graph_col: G,
-        hmm_params: &HmmParams,
+        #[cfg(not(feature = "obliv"))] hmm_params: &HmmParams,
         mut probs: ArrayViewMut2<RealHmm>,
     ) {
         let t = Instant::now();
@@ -799,6 +769,26 @@ mod inner {
             .for_each(|p_row, p_row_e, tar_e| {
                 *tar_e = renorm_equalize_scale_arr1(p_row, p_row_e);
             });
+    }
+
+    pub fn renorm_equalize_scale_all<const F: usize>(
+        mut probs: ArrayViewMut2<TpFixed64<F>>,
+        mut probs_e: ArrayViewMut2<TpI16>,
+    ) -> TpI16 {
+        let e_to_match =
+            Zip::from(&probs)
+                .and(&probs_e)
+                .fold(TpI16::protect(i16::MIN), |accu, p, &e| {
+                    let new_e =
+                        TpI16::protect(64) - p.leading_zeros().as_i16() - TpI16::protect(F as i16)
+                            + e;
+                    accu.tp_gt(&new_e).select(accu, new_e)
+                });
+
+        Zip::from(&mut probs)
+            .and(&mut probs_e)
+            .for_each(|p, e| match_scale_single(e_to_match, p, e));
+        e_to_match
     }
 
     pub fn renorm_equalize_scale_arr1<const F: usize>(
