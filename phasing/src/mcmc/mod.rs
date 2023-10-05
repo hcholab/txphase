@@ -18,10 +18,10 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "obliv")]
 use tp_fixedpoint::timing_shield::{TpEq, TpI8};
 
-//#[cfg(feature = "obliv")]
-//type Real = crate::RealHmm;
+#[cfg(feature = "obliv")]
+type Real = crate::RealHmm;
 
-//#[cfg(not(feature = "obliv"))]
+#[cfg(not(feature = "obliv"))]
 type Real = f64;
 
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, Zip};
@@ -63,8 +63,8 @@ impl<'a> Mcmc<'a> {
         mut rng: impl Rng,
     ) -> Array2<Genotype> {
         //match iterations.last().unwrap() {
-            //IterOption::Main(_) => {}
-            //_ => panic!("Last iterations must be main."),
+        //IterOption::Main(_) => {}
+        //_ => panic!("Last iterations must be main."),
         //}
 
         let mut iterations_iternal = Vec::new();
@@ -450,8 +450,14 @@ impl<'a> Mcmc<'a> {
             .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
 
         if iter_option == IterOptionInternal::Pruning {
-            //self.genotype_graph.prune_rank(self.tprobs.view());
-            self.genotype_graph.prune(self.tprobs.view());
+            #[cfg(feature = "obliv")]
+            {
+                self.genotype_graph.prune(self.tprobs.view());
+            }
+            #[cfg(not(feature = "obliv"))]
+            {
+                self.genotype_graph.prune_rank(self.tprobs.view());
+            }
             self.cur_overlap_region_len *= 2;
         }
 
@@ -476,15 +482,15 @@ impl<'a> Mcmc<'a> {
             sum_window_size as f64 / n_windows as f64 / 1e6
         );
 
-        println!("Elapsed time: {} ms", (Instant::now() - now).as_millis());
-        println!("Emission: {} ms", EMIS_T.lock().unwrap().as_millis());
-        println!("Transition: {} ms", TRAN_T.lock().unwrap().as_millis());
-        println!("Collapse: {} ms", COLL_T.lock().unwrap().as_millis());
-        println!("Combine: {} ms", COMB_T.lock().unwrap().as_millis());
-        println!(
-            "Combine Diploid: {} ms",
-            COMBD_T.lock().unwrap().as_millis()
-        );
+        //println!("Elapsed time: {} ms", (Instant::now() - now).as_millis());
+        //println!("Emission: {} ms", EMIS_T.lock().unwrap().as_millis());
+        //println!("Transition: {} ms", TRAN_T.lock().unwrap().as_millis());
+        //println!("Collapse: {} ms", COLL_T.lock().unwrap().as_millis());
+        //println!("Combine: {} ms", COMB_T.lock().unwrap().as_millis());
+        //println!(
+            //"Combine Diploid: {} ms",
+            //COMBD_T.lock().unwrap().as_millis()
+        //);
         println!("",);
     }
 
@@ -770,36 +776,36 @@ fn select_ref_panel_new(
 }
 
 //fn select_ref_panel(
-    //ref_panel: &RefPanelSlice,
-    //estimated_haps: ArrayView2<Genotype>,
-    //pbwt_evaluted_filter: &[bool],
-    //pbwt_group_filter: &[bool],
-    //s: usize,
+//ref_panel: &RefPanelSlice,
+//estimated_haps: ArrayView2<Genotype>,
+//pbwt_evaluted_filter: &[bool],
+//pbwt_group_filter: &[bool],
+//s: usize,
 //) -> (Array2<Genotype>, usize) {
-    //let n_pbwt_pos = pbwt_evaluted_filter.iter().filter(|b| **b).count();
-    //let neighbors_bitmap = neighbors_finding::find_neighbors(
-        //ref_panel
-            //.iter()
-            //.zip(pbwt_evaluted_filter.iter())
-            //.filter_map(|(v, &b)| if b { Some(v) } else { None }),
-        //estimated_haps
-            //.rows()
-            //.into_iter()
-            //.map(|r| r.to_owned())
-            //.zip(pbwt_evaluted_filter.iter())
-            //.filter_map(|(v, &b)| if b { Some(v) } else { None }),
-        //pbwt_group_filter
-            //.iter()
-            //.zip(pbwt_evaluted_filter.iter())
-            //.filter_map(|(&b1, &b2)| if b2 { Some(b1) } else { None }),
-        //n_pbwt_pos,
-        //ref_panel.n_haps,
-        //estimated_haps.ncols(),
-        //s,
-    //);
+//let n_pbwt_pos = pbwt_evaluted_filter.iter().filter(|b| **b).count();
+//let neighbors_bitmap = neighbors_finding::find_neighbors(
+//ref_panel
+//.iter()
+//.zip(pbwt_evaluted_filter.iter())
+//.filter_map(|(v, &b)| if b { Some(v) } else { None }),
+//estimated_haps
+//.rows()
+//.into_iter()
+//.map(|r| r.to_owned())
+//.zip(pbwt_evaluted_filter.iter())
+//.filter_map(|(v, &b)| if b { Some(v) } else { None }),
+//pbwt_group_filter
+//.iter()
+//.zip(pbwt_evaluted_filter.iter())
+//.filter_map(|(&b1, &b2)| if b2 { Some(b1) } else { None }),
+//n_pbwt_pos,
+//ref_panel.n_haps,
+//estimated_haps.ncols(),
+//s,
+//);
 
-    //let k = neighbors_bitmap.iter().filter(|&&b| b).count();
-    //(ref_panel.filter(&neighbors_bitmap), k)
+//let k = neighbors_bitmap.iter().filter(|&&b| b).count();
+//(ref_panel.filter(&neighbors_bitmap), k)
 //}
 
 #[cfg(test)]

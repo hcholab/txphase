@@ -9,10 +9,10 @@ pub const MAX_HETS: usize = 22; // "MAX_AMB" constant in ShapeIt4 (utils/otools.
 #[cfg(feature = "obliv")]
 use tp_fixedpoint::timing_shield::{TpCondSwap, TpEq, TpOrd};
 
-//#[cfg(feature = "obliv")]
-//type Real = crate::RealHmm;
+#[cfg(feature = "obliv")]
+type Real = crate::RealHmm;
 
-//#[cfg(not(feature = "obliv"))]
+#[cfg(not(feature = "obliv"))]
 type Real = f64;
 
 //#[cfg(feature = "obliv")]
@@ -640,8 +640,8 @@ pub struct GenotypeGraphSlice<'a> {
 }
 
 fn select_top_p(tab: ArrayView2<Real>) -> (Array2<u8>, f64) {
-    //#[cfg(feature = "obliv")]
-    //let tab = tab.map(|v| v.expose_into_f32() as f64);
+    #[cfg(feature = "obliv")]
+    let tab = tab.map(|v| v.expose_into_f32() as f64);
 
     let n = P * P;
     let mut elems = Vec::with_capacity(n);
@@ -680,6 +680,7 @@ fn select_top_p(tab: ArrayView2<Real>) -> (Array2<u8>, f64) {
     (ind, sum)
 }
 
+#[cfg(not(feature = "obliv"))]
 fn select_top_p_with_entropy(tab: ArrayView2<Real>) -> (Array2<u8>, f64, f64) {
     //#[cfg(feature = "obliv")]
     //let tab = tab.map(|v| v.expose_into_f32() as f64);

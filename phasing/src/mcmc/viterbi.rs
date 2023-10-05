@@ -2,10 +2,10 @@ use crate::genotype_graph::G;
 use crate::{BoolMcc, U8};
 use ndarray::{Array1, Array2, ArrayView1, ArrayView3};
 
-//#[cfg(feature = "obliv")]
-//type Real = crate::RealHmm;
+#[cfg(feature = "obliv")]
+type Real = crate::RealHmm;
 
-//#[cfg(not(feature = "obliv"))]
+#[cfg(not(feature = "obliv"))]
 type Real = f64;
 
 #[cfg(feature = "obliv")]
@@ -24,17 +24,17 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
     #[cfg(not(feature = "obliv"))]
     let mut backtrace = Array2::<U8>::zeros((m, p));
 
-    let mut maxprob = Array1::<f64>::zeros(p);
-    let mut maxprob_next = Array1::<f64>::zeros(p);
+    let mut maxprob = Array1::<Real>::zeros(p);
+    let mut maxprob_next = Array1::<Real>::zeros(p);
 
     for h1 in 0..p {
         maxprob[h1] = tprob_dips[[0, 0, h1]]; // p(x1), diploid prob
     }
 
-    //#[cfg(feature = "obliv")]
-    //let mut max_val = Real::protect_i64(0);
+    #[cfg(feature = "obliv")]
+    let mut max_val = Real::protect_i64(0);
 
-    //#[cfg(not(feature = "obliv"))]
+    #[cfg(not(feature = "obliv"))]
     let mut max_val = 0.;
 
     #[cfg(feature = "obliv")]
@@ -53,8 +53,8 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
                     if h1 == h2 {
                         maxprob[h1]
                     } else {
-                        //Real::protect_i64(0)
-                        0.
+                        Real::protect_i64(0)
+                        //0.
                     }
                 };
 
@@ -82,13 +82,13 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
                 } else {
                     #[cfg(feature = "obliv")]
                     {
-                        //let cond = val.tp_gt(&max_val);
-                        //max_val = cond.select(val, max_val);
-                        //max_ind = cond.select(U8::protect(h1 as u8), max_ind);
-
-                        let cond = BoolMcc::protect(val > max_val);
-                        max_val = max_val.max(val);
+                        let cond = val.tp_gt(&max_val);
+                        max_val = cond.select(val, max_val);
                         max_ind = cond.select(U8::protect(h1 as u8), max_ind);
+
+                        //let cond = BoolMcc::protect(val > max_val);
+                        //max_val = max_val.max(val);
+                        //max_ind = cond.select(U8::protect(h1 as u8), max_ind);
                     }
 
                     #[cfg(not(feature = "obliv"))]
@@ -121,12 +121,12 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
         } else {
             #[cfg(feature = "obliv")]
             {
-                //let cond = val.tp_gt(&max_val);
-                //max_val = cond.select(val, max_val);
-                //max_ind = cond.select(U8::protect(h1 as u8), max_ind);
-                let cond = BoolMcc::protect(val > max_val);
-                max_val = max_val.max(val);
+                let cond = val.tp_gt(&max_val);
+                max_val = cond.select(val, max_val);
                 max_ind = cond.select(U8::protect(h1 as u8), max_ind);
+                //let cond = BoolMcc::protect(val > max_val);
+                //max_val = max_val.max(val);
+                //max_ind = cond.select(U8::protect(h1 as u8), max_ind);
             }
 
             #[cfg(not(feature = "obliv"))]

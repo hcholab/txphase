@@ -236,7 +236,7 @@ impl Hmm {
         tprobs
     }
 
-    pub fn combine_dips(&self, tprobs: ArrayView2<RealHmm>, tprobs_dips: ArrayViewMut2<Real>) {
+    pub fn combine_dips(&self, tprobs: ArrayView2<RealHmm>, tprobs_dips: ArrayViewMut2<RealHmm>) {
         let t = Instant::now();
 
         #[cfg(not(feature = "obliv"))]
@@ -303,19 +303,19 @@ impl Hmm {
 
         #[cfg(feature = "obliv")]
         {
-            tprobs_dips_e.iter_mut().for_each(|v| *v -= sum_e);
+            tprobs_dips_e.map_mut(|v| *v -= sum_e);
 
             //renorm_scale(tprobs_dips.view_mut(), tprobs_dips_e.view_mut());
 
-            _tprobs_dips.assign(&debug_expose_array(
-            tprobs_dips.view(),
-            tprobs_dips_e.view(),
-            ));
+            //_tprobs_dips.assign(&debug_expose_array(
+            //tprobs_dips.view(),
+            //tprobs_dips_e.view(),
+            //));
 
-            //Zip::from(tprobs_dips.rows_mut())
-                //.and(&mut tprobs_dips_e)
-                //.for_each(|t, e| match_scale_row(TpI16::protect(0), t, e));
-            //_tprobs_dips.assign(&tprobs_dips);
+            Zip::from(tprobs_dips.rows_mut())
+                .and(&mut tprobs_dips_e)
+                .for_each(|t, e| match_scale_row(TpI16::protect(0), t, e));
+            _tprobs_dips.assign(&tprobs_dips);
         }
 
         let mut _t = COMBD_T.lock().unwrap();
@@ -641,7 +641,14 @@ mod inner {
 
     #[inline]
     fn _adjust_scale<const F: usize>(e: TpI16, do_scale_up: TpBool, prob: &mut TpFixed64<F>) {
-        *prob = do_scale_up.select(*prob >> e.expose() as u32, *prob << ((-e).expose()) as u32)
+        let e = e.tp_gt_eq(&64).select(TpI16::protect(64), e);
+
+        *prob = do_scale_up.select(
+            e.tp_gt_eq(&64)
+                .select(TpFixed64::<F>::ZERO, *prob >> e.expose() as u32),
+            e.tp_lt_eq(&-64)
+                .select(TpFixed64::<F>::NAN, *prob << ((-e).expose()) as u32),
+        )
     }
 
     pub fn match_scale_single<const F: usize>(
