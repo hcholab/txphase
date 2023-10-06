@@ -15,47 +15,6 @@ type Real = crate::RealHmm;
 #[cfg(not(feature = "obliv"))]
 type Real = f64;
 
-//#[cfg(feature = "obliv")]
-//mod inner {
-//use super::*;
-//pub use crate::oram::SmallLSOram;
-//pub use tp_fixedpoint::timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd};
-//pub struct SortItem {
-//pub dip: Real,
-//pub i: U8,
-//pub j: U8,
-//}
-
-//impl TpOrd for SortItem {
-//fn tp_lt(&self, rhs: &Self) -> TpBool {
-//self.dip.tp_lt(&rhs.dip)
-//}
-
-//fn tp_lt_eq(&self, rhs: &Self) -> TpBool {
-//self.dip.tp_lt_eq(&rhs.dip)
-//}
-
-//fn tp_gt(&self, rhs: &Self) -> TpBool {
-//self.dip.tp_gt(&rhs.dip)
-//}
-
-//fn tp_gt_eq(&self, rhs: &Self) -> TpBool {
-//self.dip.tp_gt_eq(&rhs.dip)
-//}
-//}
-
-//impl TpCondSwap for SortItem {
-//fn tp_cond_swap(cond: TpBool, a: &mut Self, b: &mut Self) {
-//Real::tp_cond_swap(cond, &mut a.dip, &mut b.dip);
-//U8::tp_cond_swap(cond, &mut a.i, &mut b.i);
-//U8::tp_cond_swap(cond, &mut a.j, &mut b.j);
-//}
-//}
-//}
-
-//#[cfg(feature = "obliv")]
-//use inner::*;
-
 #[derive(Clone, Copy)]
 pub struct GMeta(U8);
 
@@ -351,17 +310,6 @@ impl GenotypeGraph {
         let mut new_merge_flag;
 
         for i in (0..m - 1).rev() {
-            #[cfg(feature = "obliv")]
-            let (ind, prob) = {
-                //let tprob = tprob
-                    //.slice(s![i, .., ..])
-                    //.map(|v| v.expose_into_f32() as f64);
-                //let (ind, prob, _) = select_top_p(tprob.view());
-                let (ind, prob) = select_top_p(tprob.slice(s![i, .., ..]));
-                (ind.map(|&v| U8::protect(v)), prob as f32)
-            };
-
-            #[cfg(not(feature = "obliv"))]
             let (ind, prob) = select_top_p(tprob.slice(s![i, .., ..]));
 
             // If merge flag set then carry over
@@ -396,7 +344,7 @@ impl GenotypeGraph {
                 // If merge is not on, we're at a head and prob over threshold, start a new merge
                 new_merge_flag = is_segment_marker
                     //& (prob.tp_gt(&Real::protect_f32(MCMC_PRUNE_PROB_THRES as f32)))
-                    & (prob > MCMC_PRUNE_PROB_THRES as f32 )
+                    & (prob.tp_gt(&(tprob.slice(s![i, .., ..]).sum()*Real::protect_f32(MCMC_PRUNE_PROB_THRES as f32 ))))
                     & !merge_flag;
 
                 // If at head then merge_flag is set to new_merge_flag, otherwise carry over
@@ -544,7 +492,8 @@ impl GenotypeGraph {
         for (i, (t1, t2)) in trans_map.iter().zip(trans_map.iter().skip(1)).enumerate() {
             let het_count = t1.1 + t2.1;
             if het_count < MAX_HETS {
-                let (ind, prob, entrophy) = select_top_p_with_entropy(tprobs.slice(s![t2.0, .., ..]));
+                let (ind, prob, entrophy) =
+                    select_top_p_with_entropy(tprobs.slice(s![t2.0, .., ..]));
                 if prob > MCMC_PRUNE_PROB_THRES {
                     trans_stats.push((entrophy, i, ind));
                 }
@@ -639,52 +588,131 @@ pub struct GenotypeGraphSlice<'a> {
     pub graph: ArrayView1<'a, G>,
 }
 
-fn select_top_p(tab: ArrayView2<Real>) -> (Array2<u8>, f64) {
-    #[cfg(feature = "obliv")]
-    let tab = tab.map(|v| v.expose_into_f32() as f64);
-
+fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real) {
     let n = P * P;
     let mut elems = Vec::with_capacity(n);
     for i in 0..P {
         for j in 0..P {
-            elems.push((tab[[i, j]], i as u8, j as u8));
+            #[cfg(feature = "obliv")]
+            {
+                elems.push(SortItem {
+                    dip: tab[[i, j]],
+                    i: U8::protect(i as u8),
+                    j: U8::protect(j as u8),
+                });
+            }
+            #[cfg(not(feature = "obliv"))]
+            {
+                elems.push((tab[[i, j]], i as u8, j as u8));
+            }
         }
     }
+    #[cfg(feature = "obliv")]
+    {
+        obliv_utils::bitonic_sort::bitonic_sort(&mut elems, false);
+    }
 
-    elems.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+    #[cfg(not(feature = "obliv"))]
+    {
+        elems.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+    }
+    #[cfg(feature = "obliv")]
+    let mut ind = [
+        obliv_utils::vec::OblivVec::<U8>::with_elem(P, U8::protect(0)),
+        obliv_utils::vec::OblivVec::<U8>::with_elem(P, U8::protect(0)),
+    ];
 
-    let mut ind = Array2::<u8>::zeros((P, 2));
+    #[cfg(feature = "obliv")]
+    let mut taken = obliv_utils::bitmap::OblivBitmap::new(P * P);
 
+    #[cfg(feature = "obliv")]
+    let mut sum = Real::ZERO;
+
+    #[cfg(feature = "obliv")]
+    let mut count = U8::protect(0);
+
+    #[cfg(not(feature = "obliv"))]
+    let mut ind = Array2::<U8>::zeros((P, 2));
+
+    #[cfg(not(feature = "obliv"))]
     let mut taken = Array2::<bool>::from_elem((P, P), false);
 
+    #[cfg(not(feature = "obliv"))]
     let mut sum = 0.;
+
+    #[cfg(not(feature = "obliv"))]
     let mut count = 0;
 
-    for e in elems.clone() {
-        sum += e.0;
-        let (i, j) = (e.1 as usize, e.2 as usize);
-        if !taken[[i, j]] && !taken[[P - 1 - i, P - 1 - j]] {
-            ind[[count, 0]] = i as u8;
-            ind[[count, 1]] = j as u8;
-            ind[[P - 1 - count, 0]] = (P - 1 - i) as u8;
-            ind[[P - 1 - count, 1]] = (P - 1 - j) as u8;
-            count += 1;
-            taken[[i, j]] = true;
-            taken[[P - 1 - i, P - 1 - j]] = true;
-        }
+    #[cfg(feature = "obliv")]
+    let mut done = Bool::protect(false);
 
-        if count == P / 2 {
-            break;
+    for e in elems {
+        #[cfg(feature = "obliv")]
+        {
+            sum = done.select(sum, sum + e.dip);
+            let (i, j) = (e.i, e.j);
+
+            let taken_ind_1 = ((i << 3) | j).as_u32();
+            let taken_ind_2 = (((P as u8 - 1 - i) << 3) | (P as u8 - 1 - j)).as_u32();
+
+            let cond = (!taken.get(taken_ind_1)) & (!taken.get(taken_ind_2)) & (!done);
+
+            ind[0].apply(count.as_u32(), |t| *t = cond.select(i, *t));
+            ind[1].apply(count.as_u32(), |t| *t = cond.select(j, *t));
+            ind[0].apply((P as u8 - 1 - count).as_u32(), |t| {
+                *t = cond.select(P as u8 - 1 - i, *t)
+            });
+            ind[1].apply((P as u8 - 1 - count).as_u32(), |t| {
+                *t = cond.select(P as u8 - 1 - j, *t)
+            });
+
+            count = cond.select(count + 1, count);
+            taken.cond_set(taken_ind_1, cond);
+            taken.cond_set(taken_ind_2, cond);
+
+            done = count
+                .tp_eq(&(P as u8 / 2))
+                .select(Bool::protect(true), done);
+        }
+        #[cfg(not(feature = "obliv"))]
+        {
+            sum += e.0;
+            let (i, j) = (e.1 as usize, e.2 as usize);
+            if !taken[[i, j]] && !taken[[P - 1 - i, P - 1 - j]] {
+                ind[[count, 0]] = i as u8;
+                ind[[count, 1]] = j as u8;
+                ind[[P - 1 - count, 0]] = (P - 1 - i) as u8;
+                ind[[P - 1 - count, 1]] = (P - 1 - j) as u8;
+                count += 1;
+                taken[[i, j]] = true;
+                taken[[P - 1 - i, P - 1 - j]] = true;
+            }
+
+            if count == P / 2 {
+                break;
+            }
         }
     }
+
+    #[cfg(feature = "obliv")]
+    let ind = {
+        let mut ind_ = Array2::<U8>::from_elem((P, 2), U8::protect(0));
+        ind_.rows_mut()
+            .into_iter()
+            .zip(ind[0].iter())
+            .zip(ind[1].iter())
+            .for_each(|((mut r, &i1), &i2)| {
+                r[0] = i1;
+                r[1] = i2;
+            });
+
+        ind_
+    };
     (ind, sum)
 }
 
 #[cfg(not(feature = "obliv"))]
 fn select_top_p_with_entropy(tab: ArrayView2<Real>) -> (Array2<u8>, f64, f64) {
-    //#[cfg(feature = "obliv")]
-    //let tab = tab.map(|v| v.expose_into_f32() as f64);
-
     let n = P * P;
     let mut elems = Vec::with_capacity(n);
     let mut entrophy = 0.;
@@ -724,6 +752,47 @@ fn select_top_p_with_entropy(tab: ArrayView2<Real>) -> (Array2<u8>, f64, f64) {
     }
     (ind, sum, entrophy)
 }
+
+#[cfg(feature = "obliv")]
+mod inner {
+    use super::*;
+    pub use tp_fixedpoint::timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd};
+    #[derive(Clone)]
+    pub struct SortItem {
+        pub dip: Real,
+        pub i: U8,
+        pub j: U8,
+    }
+
+    impl TpOrd for SortItem {
+        fn tp_lt(&self, rhs: &Self) -> TpBool {
+            self.dip.tp_lt(&rhs.dip)
+        }
+
+        fn tp_lt_eq(&self, rhs: &Self) -> TpBool {
+            self.dip.tp_lt_eq(&rhs.dip)
+        }
+
+        fn tp_gt(&self, rhs: &Self) -> TpBool {
+            self.dip.tp_gt(&rhs.dip)
+        }
+
+        fn tp_gt_eq(&self, rhs: &Self) -> TpBool {
+            self.dip.tp_gt_eq(&rhs.dip)
+        }
+    }
+
+    impl TpCondSwap for SortItem {
+        fn tp_cond_swap(cond: TpBool, a: &mut Self, b: &mut Self) {
+            Real::tp_cond_swap(cond, &mut a.dip, &mut b.dip);
+            U8::tp_cond_swap(cond, &mut a.i, &mut b.i);
+            U8::tp_cond_swap(cond, &mut a.j, &mut b.j);
+        }
+    }
+}
+
+#[cfg(feature = "obliv")]
+use inner::*;
 
 //fn select_top_p(tab: ArrayView2<Real>) -> (Array2<U8>, Real, Real) {
 //let n = P * P;

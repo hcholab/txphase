@@ -274,8 +274,11 @@ impl<'a> Mcmc<'a> {
             nn_0
         };
 
-        //let windows = self.windows_full_segments(&mut rng);
+        //#[cfg(feature = "obliv")]
         let windows = self.windows(&mut rng);
+
+        //#[cfg(not(feature = "obliv"))]
+        //let windows = self.windows_full_segments(&mut rng);
 
         #[cfg(feature = "obliv")]
         let mut prev_ind = (U8::protect(0), U8::protect(0));
@@ -454,14 +457,14 @@ impl<'a> Mcmc<'a> {
             .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
 
         if iter_option == IterOptionInternal::Pruning {
-            #[cfg(feature = "obliv")]
-            {
-                self.genotype_graph.prune(self.tprobs.view());
-            }
-            #[cfg(not(feature = "obliv"))]
-            {
-                self.genotype_graph.prune_rank(self.tprobs.view());
-            }
+            //#[cfg(feature = "obliv")]
+            //{
+            self.genotype_graph.prune(self.tprobs.view());
+            //}
+            //#[cfg(not(feature = "obliv"))]
+            //{
+            //self.genotype_graph.prune_rank(self.tprobs.view());
+            //}
             self.cur_overlap_region_len *= 2;
         }
 

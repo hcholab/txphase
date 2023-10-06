@@ -124,8 +124,7 @@ impl HmmParams {
         for i in (0..variants.len() - 1).rev() {
             #[cfg(feature = "obliv")]
             let r = {
-                let cond = !ignored_sites[i]
-                    | genotype_graph.graph[i + 1].is_segment_marker();
+                let cond = !ignored_sites[i] | genotype_graph.graph[i + 1].is_segment_marker();
                 let r0 = {
                     let cm = variants[i + 1].cm - variants[i].cm;
                     compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)

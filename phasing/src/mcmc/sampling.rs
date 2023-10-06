@@ -31,11 +31,36 @@ pub fn forward_sampling(
 
         #[cfg(feature = "obliv")]
         let (ind1, ind2) = {
+            let mut weights1 = [RealHmm::ZERO; P];
+            let mut weights1_e = [TpI16::protect(0); P];
+            let mut weights2 = [RealHmm::ZERO; P];
+            let mut weights2_e = [TpI16::protect(0); P];
+
+            for j in 0..P {
+                let cond1 = prev_ind1.tp_eq(&(j as u8));
+                weights1
+                    .iter_mut()
+                    .zip(&tprobs.slice(s![i, j, ..]))
+                    .for_each(|(w, &p)| *w = cond1.select(p, *w));
+                weights1_e
+                    .iter_mut()
+                    .zip(&tprobs_e.slice(s![i, j, ..]))
+                    .for_each(|(w, &p)| *w = cond1.select(p, *w));
+                let cond2 = prev_ind2.tp_eq(&(j as u8));
+                weights2
+                    .iter_mut()
+                    .zip(&tprobs.slice(s![i, j, ..]))
+                    .for_each(|(w, &p)| *w = cond2.select(p, *w));
+                weights2_e
+                    .iter_mut()
+                    .zip(&tprobs_e.slice(s![i, j, ..]))
+                    .for_each(|(w, &p)| *w = cond2.select(p, *w));
+            }
             let (ind1, ind2) = constrained_paired_sample(
-                tprobs.slice(s![i, prev_ind1.expose() as usize, ..]),
-                tprobs_e.slice(s![i, prev_ind1.expose() as usize, ..]),
-                tprobs.slice(s![i, prev_ind2.expose() as usize, ..]),
-                tprobs_e.slice(s![i, prev_ind2.expose() as usize, ..]),
+                ArrayView1::from(&weights1),
+                ArrayView1::from(&weights1_e),
+                ArrayView1::from(&weights2),
+                ArrayView1::from(&weights2_e),
                 &mut rng,
             );
 
@@ -88,7 +113,7 @@ fn constrained_paired_sample(
 
     #[cfg(feature = "obliv")]
     crate::hmm::renorm_equalize_scale_arr1(combined.view_mut(), combined_e.view_mut());
-    
+
     let ind1 = weighted_sample(combined.view(), rng);
 
     #[cfg(feature = "obliv")]

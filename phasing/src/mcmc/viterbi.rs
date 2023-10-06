@@ -44,15 +44,14 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
         for h2 in 0..p {
             for h1 in 0..p {
                 #[cfg(feature = "obliv")]
-                let val = if genotype_graph[i].is_segment_marker().expose() {
-                    maxprob[h1] * tprob_dips[[i, h1, h2]]
-                } else {
+                let val = genotype_graph[i].is_segment_marker().select(
+                    maxprob[h1] * tprob_dips[[i, h1, h2]],
                     if h1 == h2 {
                         maxprob[h1]
                     } else {
                         Real::protect_i64(0)
-                    }
-                };
+                    },
+                );
 
                 #[cfg(not(feature = "obliv"))]
                 let val = if genotype_graph[i].is_segment_marker() {
@@ -81,10 +80,6 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
                         let cond = val.tp_gt(&max_val);
                         max_val = cond.select(val, max_val);
                         max_ind = cond.select(U8::protect(h1 as u8), max_ind);
-
-                        //let cond = BoolMcc::protect(val > max_val);
-                        //max_val = max_val.max(val);
-                        //max_ind = cond.select(U8::protect(h1 as u8), max_ind);
                     }
 
                     #[cfg(not(feature = "obliv"))]
@@ -100,7 +95,7 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
         }
         #[cfg(feature = "obliv")]
         {
-            maxprob = &maxprob_next * (Real::protect_i64(1)/maxprob_next.sum());
+            maxprob = &maxprob_next * (Real::protect_i64(1) / maxprob_next.sum());
         }
 
         #[cfg(not(feature = "obliv"))]
@@ -128,9 +123,6 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
                 let cond = val.tp_gt(&max_val);
                 max_val = cond.select(val, max_val);
                 max_ind = cond.select(U8::protect(h1 as u8), max_ind);
-                //let cond = BoolMcc::protect(val > max_val);
-                //max_val = max_val.max(val);
-                //max_ind = cond.select(U8::protect(h1 as u8), max_ind);
             }
 
             #[cfg(not(feature = "obliv"))]

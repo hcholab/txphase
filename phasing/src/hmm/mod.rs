@@ -270,11 +270,14 @@ impl Hmm {
 
         #[cfg(feature = "obliv")]
         {
-            crate::hmm::renorm_equalize_scale_all(tprobs_dips.view_mut(), tprobs_dips_e_ext.view_mut());
+            crate::hmm::renorm_equalize_scale_all(
+                tprobs_dips.view_mut(),
+                tprobs_dips_e_ext.view_mut(),
+            );
             _tprobs_dips.assign(&tprobs_dips);
         }
 
-        #[cfg(feature = "obliv")]
+        #[cfg(not(feature = "obliv"))]
         {
             tprobs_dips /= tprobs_dips.sum();
         }

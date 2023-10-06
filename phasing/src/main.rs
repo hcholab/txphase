@@ -7,7 +7,6 @@ mod mcmc;
 #[cfg(feature = "leak-resist")]
 mod oram;
 mod pbwt;
-//mod union_filter;
 mod utils;
 mod variants;
 

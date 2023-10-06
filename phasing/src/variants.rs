@@ -56,22 +56,10 @@ impl Variant {
     }
 }
 
-pub fn build_variants(
-    bps: &[u32],
-    cms: &[f64],
-    afreqs: &[f64],
-    n_haps: usize,
-) -> Vec<Variant> {
-        bps.iter()
+pub fn build_variants(bps: &[u32], cms: &[f64], afreqs: &[f64], n_haps: usize) -> Vec<Variant> {
+    bps.iter()
         .zip(afreqs.iter())
         .zip(cms.iter())
-        .map(|((&bp, &afreq), &cm)| 
-            Variant::new(
-                bp,
-                cm,
-                afreq,
-                n_haps,
-            )
-        )
+        .map(|((&bp, &afreq), &cm)| Variant::new(bp, cm, afreq, n_haps))
         .collect()
 }
