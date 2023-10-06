@@ -1,5 +1,5 @@
 use crate::genotype_graph::G;
-use crate::{BoolMcc, U8};
+use crate::U8;
 use ndarray::{Array1, Array2, ArrayView1, ArrayView3};
 
 #[cfg(feature = "obliv")]
@@ -16,7 +16,9 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
     let p = tprob_dips.shape()[1];
 
     #[cfg(feature = "obliv")]
-    let mut backtrace = Array2::<U8>::from_elem((m, p), U8::protect(0));
+    let mut backtrace = (0..m)
+        .map(|_| obliv_utils::vec::OblivVec::with_capacity(p))
+        .collect::<Vec<_>>();
 
     #[cfg(not(feature = "obliv"))]
     let mut backtrace = Array2::<U8>::zeros((m, p));
@@ -91,7 +93,14 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
             }
 
             maxprob_next[h2] = max_val;
-            backtrace[[i, h2]] = max_ind;
+            #[cfg(feature = "obliv")]
+            {
+                backtrace[i].push(max_ind);
+            }
+            #[cfg(not(feature = "obliv"))]
+            {
+                backtrace[[i, h2]] = max_ind;
+            }
         }
         #[cfg(feature = "obliv")]
         {
@@ -143,7 +152,7 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
     for i in (1..m).rev() {
         #[cfg(feature = "obliv")]
         {
-            max_ind = backtrace[[i, max_ind.expose() as usize]]; // TODO: Use linear ORAM!
+            max_ind = backtrace[i].get(max_ind.as_u32()); // TODO: Use linear ORAM!
         }
         #[cfg(not(feature = "obliv"))]
         {
