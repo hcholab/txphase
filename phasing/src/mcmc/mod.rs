@@ -265,6 +265,9 @@ impl<'a> Mcmc<'a> {
             let tprobs_window_src = tprobs_window.view();
 
             #[cfg(feature = "obliv")]
+            let tprobs_window_src_e = hmm.tprobs_e.view();
+
+            #[cfg(feature = "obliv")]
             let mut tprobs_window_target = self.tprobs.slice_mut(s![start_w..end_w, .., ..]);
 
             #[cfg(not(feature = "obliv"))]
@@ -280,79 +283,55 @@ impl<'a> Mcmc<'a> {
                     .slice_mut(s![start_write_w..end_write_w, .., ..]);
 
             #[cfg(feature = "obliv")]
-            let mut j = 0;
+            let mut j = 0u64;
 
-            if iter_option == IterOptionInternal::Pruning {
+            if iter_option == IterOptionInternal::Pruning
+                || iter_option == IterOptionInternal::Main(true)
+            {
                 Zip::from(tprobs_window_target.outer_iter_mut())
                     .and(tprobs_window_src.outer_iter())
-                    .for_each(|a, b| {
+                    .for_each(|t, s| {
                         #[cfg(feature = "obliv")]
                         {
-                            hmm.cur_i = j;
-                            let cond = (start_write_w - start_w as u64).tp_lt_eq(&(j as u64))
-                                & (end_write_w - start_w as u64).tp_gt(&(j as u64));
-                            hmm.combine_dips(b, a, cond);
+                            let cond = (start_write_w - start_w as u64).tp_lt_eq(&j)
+                                & (end_write_w - start_w as u64).tp_gt(&j);
+                            let s_e = tprobs_window_src_e.slice(s![j as usize, .., ..]);
+                            hmm.combine_dips(s, s_e, t, cond);
                             j += 1;
                         }
 
                         #[cfg(not(feature = "obliv"))]
                         if i == 0 || genotype_graph.graph[i].is_segment_marker() {
-                            hmm.combine_dips(b, a);
+                            hmm.combine_dips(s, t);
                         } else {
-                            let mut a = a;
-                            a.fill(0.);
+                            let mut t = t;
+                            t.fill(0.);
                         }
                         i += 1;
                     });
-            }
+            } else if iter_option == IterOptionInternal::Main(false) {
+                Zip::from(tprobs_window_target.outer_iter_mut())
+                    .and(tprobs_window_src.outer_iter())
+                    .for_each(|mut t, s| {
+                        #[cfg(feature = "obliv")]
+                        {
+                            let cond = (start_write_w - start_w as u64).tp_lt_eq(&j)
+                                & (end_write_w - start_w as u64).tp_gt(&j);
+                            tprob_pairs.fill(Real::ZERO);
+                            let s_e = tprobs_window_src_e.slice(s![j as usize, .., ..]);
+                            hmm.combine_dips(s, s_e, tprob_pairs.view_mut(), cond);
+                            t += &tprob_pairs;
+                            j += 1;
+                        }
 
-            if let IterOptionInternal::Main(first_main) = iter_option {
-                if first_main {
-                    Zip::from(tprobs_window_target.outer_iter_mut())
-                        .and(tprobs_window_src.outer_iter())
-                        .for_each(|a, b| {
-                            #[cfg(feature = "obliv")]
-                            {
-                                hmm.cur_i = j;
-                                let cond = (start_write_w - start_w as u64).tp_lt_eq(&(j as u64))
-                                    & (end_write_w - start_w as u64).tp_gt(&(j as u64));
-                                hmm.combine_dips(b, a, cond);
-                                j += 1;
-                            }
+                        #[cfg(not(feature = "obliv"))]
+                        if i == 0 || genotype_graph.graph[i].is_segment_marker() {
+                            hmm.combine_dips(s, tprob_pairs.view_mut());
+                            t += &tprob_pairs;
+                        }
 
-                            #[cfg(not(feature = "obliv"))]
-                            if i == 0 || genotype_graph.graph[i].is_segment_marker() {
-                                hmm.combine_dips(b, a);
-                            } else {
-                                let mut a = a;
-                                a.fill(0.);
-                            }
-                            i += 1;
-                        });
-                } else {
-                    Zip::from(tprobs_window_target.outer_iter_mut())
-                        .and(tprobs_window_src.outer_iter())
-                        .for_each(|mut a, b| {
-                            #[cfg(feature = "obliv")]
-                            {
-                                hmm.cur_i = j;
-                                let cond = (start_write_w - start_w as u64).tp_lt_eq(&(j as u64))
-                                    & (end_write_w - start_w as u64).tp_gt(&(j as u64));
-                                tprob_pairs.fill(Real::ZERO);
-                                hmm.combine_dips(b, tprob_pairs.view_mut(), cond);
-                                a += &tprob_pairs;
-                                j += 1;
-                            }
-
-                            #[cfg(not(feature = "obliv"))]
-                            if i == 0 || genotype_graph.graph[i].is_segment_marker() {
-                                hmm.combine_dips(b, tprob_pairs.view_mut());
-                                a += &tprob_pairs;
-                            }
-
-                            i += 1;
-                        });
-                }
+                        i += 1;
+                    });
             }
 
             #[cfg(not(feature = "obliv"))]

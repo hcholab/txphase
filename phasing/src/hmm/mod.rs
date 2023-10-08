@@ -239,6 +239,8 @@ impl Hmm {
     pub fn combine_dips(
         &self,
         tprobs: ArrayView2<Real>,
+        #[cfg(feature = "obliv")]
+        tprobs_e: ArrayView2<TpI16>,
         tprobs_dips: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] cond: Bool,
     ) {
@@ -246,9 +248,6 @@ impl Hmm {
 
         #[cfg(not(feature = "obliv"))]
         let mut tprobs_dips = tprobs_dips;
-
-        #[cfg(feature = "obliv")]
-        let tprobs_e = self.tprobs_e.slice(s![self.cur_i, .., ..]);
 
         #[cfg(not(feature = "obliv"))]
         let tprobs = &tprobs * (1. / tprobs.sum());

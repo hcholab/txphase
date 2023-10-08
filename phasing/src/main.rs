@@ -55,8 +55,8 @@ fn main() {
     let n_pos_window_overlap = (3. / min_het_rate).ceil() as usize;
     let s = 4;
 
-    //let seed = rand::thread_rng().next_u64();
-    let seed = 1098614457002977507;
+    let seed = rand::thread_rng().next_u64();
+    //let seed = 1098614457002977507;
     let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
     println!("Parameters:");
