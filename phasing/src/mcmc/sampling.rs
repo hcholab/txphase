@@ -1,5 +1,5 @@
 use crate::genotype_graph::{G, P};
-use crate::{tp_value_real, RealHmm, U8};
+use crate::{tp_value_real, RealHmm, Usize, U8};
 use ndarray::{s, Array1, Array2, ArrayView1, ArrayView3};
 use rand::Rng;
 
@@ -12,6 +12,7 @@ pub fn forward_sampling(
     #[cfg(feature = "obliv")] tprobs_e: ArrayView3<TpI16>,
     genotype_graph: ArrayView1<G>,
     is_first_window: bool,
+    #[cfg(feature = "obliv")] start_i: Usize,
     mut rng: impl Rng,
 ) -> Array2<U8> {
     let m = tprobs.shape()[0];
@@ -23,6 +24,17 @@ pub fn forward_sampling(
     let mut phase_ind = Array2::<U8>::zeros((m, 2));
 
     for i in 0..m {
+        #[cfg(feature = "obliv")]
+        let (prev_ind1, prev_ind2) = {
+            let cond = (i == 0) | start_i.tp_eq(&(i as u64));
+            let i = if i == 0 { 1 } else { i };
+            (
+                cond.select(prev_ind.0, phase_ind[[i - 1, 0]]),
+                cond.select(prev_ind.1, phase_ind[[i - 1, 1]]),
+            )
+        };
+
+        #[cfg(not(feature = "obliv"))]
         let (prev_ind1, prev_ind2) = if i == 0 {
             (prev_ind.0, prev_ind.1)
         } else {
@@ -64,7 +76,8 @@ pub fn forward_sampling(
                 &mut rng,
             );
 
-            let cond = genotype_graph[i].is_segment_marker() | (is_first_window && i == 0);
+            let cond = genotype_graph[i].is_segment_marker()
+                | (is_first_window & start_i.tp_eq(&(i as u64)));
             (cond.select(ind1, prev_ind1), cond.select(ind2, prev_ind2))
         };
         #[cfg(not(feature = "obliv"))]

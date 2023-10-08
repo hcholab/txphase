@@ -237,7 +237,12 @@ impl Hmm {
         tprobs
     }
 
-    pub fn combine_dips(&self, tprobs: ArrayView2<RealHmm>, tprobs_dips: ArrayViewMut2<RealHmm>) {
+    pub fn combine_dips(
+        &self,
+        tprobs: ArrayView2<RealHmm>,
+        tprobs_dips: ArrayViewMut2<RealHmm>,
+        #[cfg(feature = "obliv")] cond: BoolMcc,
+    ) {
         let t = Instant::now();
 
         #[cfg(not(feature = "obliv"))]
@@ -274,7 +279,9 @@ impl Hmm {
                 tprobs_dips.view_mut(),
                 tprobs_dips_e_ext.view_mut(),
             );
-            _tprobs_dips.assign(&tprobs_dips);
+            ndarray::Zip::from(&mut _tprobs_dips)
+                .and(&tprobs_dips)
+                .for_each(|t, &s| *t = cond.select(s, *t));
         }
 
         #[cfg(not(feature = "obliv"))]

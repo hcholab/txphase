@@ -16,7 +16,7 @@ use rand::Rng;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "obliv")]
-use tp_fixedpoint::timing_shield::{TpEq, TpI8};
+use tp_fixedpoint::timing_shield::{TpEq, TpI8, TpOrd};
 
 #[cfg(feature = "obliv")]
 type Real = crate::RealHmm;
@@ -274,11 +274,7 @@ impl<'a> Mcmc<'a> {
             nn_0
         };
 
-        //#[cfg(feature = "obliv")]
         let windows = self.windows(&mut rng);
-
-        //#[cfg(not(feature = "obliv"))]
-        //let windows = self.windows_full_segments(&mut rng);
 
         #[cfg(feature = "obliv")]
         let mut prev_ind = (U8::protect(0), U8::protect(0));
@@ -301,22 +297,12 @@ impl<'a> Mcmc<'a> {
         for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
             sum_window_size +=
                 self.params.variants[end_w - 1].bp - self.params.variants[start_w].bp;
-            //let estimated_haps_w = self.estimated_haps.slice(s![start_w..end_w, ..]).to_owned();
             let genotype_graph_w = self.genotype_graph.slice(start_w, end_w);
             let params_w = self.params.slice(start_w, end_w);
             let rprobs_w = rprobs.slice(start_w, end_w);
             let neighbors_w = &neighbors[start_w..end_w];
-            //let pbwt_evaluted_filter_w = &self.params.pbwt_evaluted[start_w..end_w];
-            //let pbwt_group_filter_w = &pbwt_group_filter[start_w..end_w];
             let ignored_sites_w = self.ignored_sites.slice(s![start_w..end_w]);
-            //let (selected_ref_panel, k) = select_ref_panel(
-            //&params_w.ref_panel,
-            //estimated_haps_w.view(),
-            //pbwt_evaluted_filter_w,
-            //pbwt_group_filter_w,
-            //self.params.s
-            //);
-            let (selected_ref_panel, k) = select_ref_panel_new(&params_w.ref_panel, neighbors_w);
+            let (selected_ref_panel, k) = select_ref_panel(&params_w.ref_panel, neighbors_w);
             ks.push(k as f64);
 
             let mut hmm = Hmm::new();
@@ -330,38 +316,25 @@ impl<'a> Mcmc<'a> {
             );
 
             #[cfg(feature = "obliv")]
-            let tprobs_e_window_src = hmm
-                .tprobs_e
-                .slice(s![start_write_w - start_w..end_write_w - start_w, .., ..])
-                .to_owned();
+            let tprobs_window_src = tprobs_window.view();
 
+            #[cfg(feature = "obliv")]
+            let mut tprobs_window_target = self.tprobs.slice_mut(s![start_w..end_w, .., ..]);
+
+            #[cfg(not(feature = "obliv"))]
             let tprobs_window_src =
                 tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
 
             #[cfg(not(feature = "obliv"))]
             let genotype_graph = &self.genotype_graph;
 
+            #[cfg(not(feature = "obliv"))]
             let mut tprobs_window_target =
                 self.tprobs
                     .slice_mut(s![start_write_w..end_write_w, .., ..]);
 
             #[cfg(feature = "obliv")]
-            let mut j = start_write_w - start_w;
-
-            //// TODO: for debugging. Delete this
-            //if iter_option == IterOptionInternal::Burnin {
-            //Zip::from(tprobs_window_target.outer_iter_mut())
-            //.and(tprobs_window_src.outer_iter())
-            //.for_each(|mut a, b| {
-            //#[cfg(feature = "obliv")]
-            //{
-            //a.assign(&crate::hmm::debug_expose_array(b, hmm.bprobs_e.row(j)));
-            //j += 1;
-            //}
-            //#[cfg(not(feature = "obliv"))]
-            //a.assign(&b);
-            //});
-            //}
+            let mut j = 0;
 
             if iter_option == IterOptionInternal::Pruning {
                 Zip::from(tprobs_window_target.outer_iter_mut())
@@ -370,8 +343,10 @@ impl<'a> Mcmc<'a> {
                         #[cfg(feature = "obliv")]
                         {
                             hmm.cur_i = j;
+                            let cond = (start_write_w - start_w as u64).tp_lt_eq(&(j as u64))
+                                & (end_write_w - start_w as u64).tp_gt(&(j as u64));
+                            hmm.combine_dips(b, a, cond);
                             j += 1;
-                            hmm.combine_dips(b, a);
                         }
 
                         #[cfg(not(feature = "obliv"))]
@@ -393,8 +368,10 @@ impl<'a> Mcmc<'a> {
                             #[cfg(feature = "obliv")]
                             {
                                 hmm.cur_i = j;
+                                let cond = (start_write_w - start_w as u64).tp_lt_eq(&(j as u64))
+                                    & (end_write_w - start_w as u64).tp_gt(&(j as u64));
+                                hmm.combine_dips(b, a, cond);
                                 j += 1;
-                                hmm.combine_dips(b, a);
                             }
 
                             #[cfg(not(feature = "obliv"))]
@@ -413,9 +390,12 @@ impl<'a> Mcmc<'a> {
                             #[cfg(feature = "obliv")]
                             {
                                 hmm.cur_i = j;
-                                j += 1;
-                                hmm.combine_dips(b, tprob_pairs.view_mut());
+                                let cond = (start_write_w - start_w as u64).tp_lt_eq(&(j as u64))
+                                    & (end_write_w - start_w as u64).tp_gt(&(j as u64));
+                                tprob_pairs.fill(Real::ZERO);
+                                hmm.combine_dips(b, tprob_pairs.view_mut(), cond);
                                 a += &tprob_pairs;
+                                j += 1;
                             }
 
                             #[cfg(not(feature = "obliv"))]
@@ -429,12 +409,26 @@ impl<'a> Mcmc<'a> {
                 }
             }
 
+            #[cfg(not(feature = "obliv"))]
+            let tprobs_window_src =
+                tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
+
             // sample
+            #[cfg(feature = "obliv")]
+            let phased_ind_window = sampling::forward_sampling(
+                prev_ind,
+                tprobs_window.view(),
+                hmm.tprobs_e.view(),
+                genotype_graph_w.graph.view(),
+                is_first_window,
+                start_write_w - start_w as u64,
+                &mut rng,
+            );
+
+            #[cfg(not(feature = "obliv"))]
             let phased_ind_window = sampling::forward_sampling(
                 prev_ind,
                 tprobs_window_src.view(),
-                #[cfg(feature = "obliv")]
-                tprobs_e_window_src.view(),
                 genotype_graph_w
                     .graph
                     .slice(s![start_write_w - start_w..end_write_w - start_w]),
@@ -442,14 +436,39 @@ impl<'a> Mcmc<'a> {
                 &mut rng,
             );
 
+            #[cfg(feature = "obliv")]
+            let mut tmp = self.phased_ind.slice_mut(s![start_w..end_w, ..]);
+
+            #[cfg(not(feature = "obliv"))]
             let mut tmp = self
                 .phased_ind
                 .slice_mut(s![start_write_w..end_write_w, ..]);
-            tmp.assign(&phased_ind_window);
-            prev_ind = (
-                phased_ind_window[[phased_ind_window.nrows() - 1, 0]],
-                phased_ind_window[[phased_ind_window.nrows() - 1, 1]],
-            );
+
+            #[cfg(feature = "obliv")]
+            {
+                ndarray::Zip::indexed(tmp.rows_mut())
+                    .and(phased_ind_window.rows())
+                    .for_each(|i, mut t, s| {
+                        let cond = (start_write_w - start_w as u64).tp_lt_eq(&(i as u64))
+                            & (end_write_w - start_w as u64).tp_gt(&(i as u64));
+                        t[0] = cond.select(s[0], t[0]);
+                        t[1] = cond.select(s[1], t[1]);
+                    });
+
+                for i in 0..phased_ind_window.nrows() {
+                    let cond = (end_write_w - start_w as u64 - 1).tp_eq(&(i as u64));
+                    prev_ind.0 = cond.select(phased_ind_window[[i, 0]], prev_ind.0);
+                    prev_ind.1 = cond.select(phased_ind_window[[i, 1]], prev_ind.1);
+                }
+            }
+            #[cfg(not(feature = "obliv"))]
+            {
+                tmp.assign(&phased_ind_window);
+                prev_ind = (
+                    phased_ind_window[[phased_ind_window.nrows() - 1, 0]],
+                    phased_ind_window[[phased_ind_window.nrows() - 1, 1]],
+                );
+            }
             is_first_window = false;
         }
 
@@ -457,14 +476,7 @@ impl<'a> Mcmc<'a> {
             .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
 
         if iter_option == IterOptionInternal::Pruning {
-            //#[cfg(feature = "obliv")]
-            //{
             self.genotype_graph.prune(self.tprobs.view());
-            //}
-            //#[cfg(not(feature = "obliv"))]
-            //{
-            //self.genotype_graph.prune_rank(self.tprobs.view());
-            //}
             self.cur_overlap_region_len *= 2;
         }
 
@@ -501,7 +513,7 @@ impl<'a> Mcmc<'a> {
         println!("",);
     }
 
-    fn windows(&self, mut rng: impl Rng) -> Vec<((usize, usize), (usize, usize))> {
+    fn windows(&self, mut rng: impl Rng) -> Vec<((usize, usize), (Usize, Usize))> {
         let windows = windows_split::split(
             self.params.variants.view(),
             self.params.min_window_len_cm,
@@ -510,36 +522,63 @@ impl<'a> Mcmc<'a> {
 
         let overlap_len = self.cur_overlap_region_len;
         let mut hmm_windows = Vec::with_capacity(windows.len());
+
+        #[cfg(feature = "obliv")]
+        let mut prev_end_write_boundary = Usize::protect(0);
+
+        #[cfg(not(feature = "obliv"))]
         let mut prev_end_write_boundary = 0;
+
         for (i, window) in windows.iter().enumerate() {
             let split_point = window.1;
 
-            let mut end_write_boundary = None;
+            #[cfg(feature = "obliv")]
+            let mut end_write_boundary = Usize::protect((split_point + overlap_len) as u64);
+
+            #[cfg(not(feature = "obliv"))]
+            let mut end_write_boundary = split_point + overlap_len;
+
+            #[cfg(feature = "obliv")]
+            let mut done = BoolMcc::protect(false);
+
             for i in 0..overlap_len {
                 if split_point + i >= self.genotype_graph.graph.len() {
                     break;
                 }
 
                 #[cfg(feature = "obliv")]
-                if self.genotype_graph.graph[split_point + i]
-                    .is_segment_marker()
-                    .expose()
                 {
-                    end_write_boundary = Some(split_point + i);
-                    break;
+                    let cond = self.genotype_graph.graph[split_point + i].is_segment_marker();
+                    end_write_boundary = (cond & !done)
+                        .select(Usize::protect((split_point + i) as u64), end_write_boundary);
+                    done = cond.select(BoolMcc::protect(true), done);
                 }
 
                 #[cfg(not(feature = "obliv"))]
                 if self.genotype_graph.graph[split_point + i].is_segment_marker() {
-                    end_write_boundary = Some(split_point + i);
+                    end_write_boundary = split_point + i;
                     break;
                 }
             }
-            let end_write_boundary = match end_write_boundary {
-                Some(e) => e,
-                None => split_point + overlap_len,
+            #[cfg(feature = "obliv")]
+            let v = if i == 0 {
+                (
+                    (window.0, window.1 + overlap_len),
+                    (Usize::protect(window.0 as u64), end_write_boundary),
+                )
+            } else if i == windows.len() - 1 {
+                (
+                    (window.0 - overlap_len, window.1),
+                    (prev_end_write_boundary, Usize::protect(window.1 as u64)),
+                )
+            } else {
+                (
+                    (window.0 - overlap_len, window.1 + overlap_len),
+                    (prev_end_write_boundary, end_write_boundary),
+                )
             };
 
+            #[cfg(not(feature = "obliv"))]
             let v = if i == 0 {
                 (
                     (window.0, window.1 + overlap_len),
@@ -562,49 +601,7 @@ impl<'a> Mcmc<'a> {
         hmm_windows
     }
 
-    //fn save_tprobs(&self, mut writer: impl std::io::Write) {
-    //Zip::from(&self.genotype_graph.graph)
-    //.and(self.tprobs.outer_iter())
-    //.for_each(|g, t| {
-    //if g.is_segment_marker() {
-    //bincode::serialize_into(&mut writer, &t).unwrap();
-    //}
-    //});
-    //}
-
-    //fn check_tprobs(&self, mut reader: impl std::io::Read) {
-    //Zip::indexed(&self.genotype_graph.graph)
-    //.and(self.tprobs.outer_iter())
-    //.for_each(|i, g, t| {
-    //if g.is_segment_marker() {
-    //let ref_t: Array2<Real> = bincode::deserialize_from(&mut reader).unwrap();
-    ////if ref_t != t {
-    ////println!("{i}:");
-    ////assert_eq!(ref_t/t );
-    ////}
-    //const R: f64 = 0.1;
-    //for (a, b) in ref_t.iter().zip(t.iter()) {
-    //if a / b >= 1. + R || a / b < 1. - R {
-    //println!("{i}:");
-    //println!("{:#?}", ref_t);
-    //println!("{:#?}", t);
-    //println!("{a}, {b}, {}", a / b);
-    //panic!();
-    //}
-    //}
-    //}
-    //});
-    //}
-
-    //fn save_estimated_haps(&self, writer: impl std::io::Write) {
-    //bincode::serialize_into(writer, &self.estimated_haps).unwrap();
-    //}
-
-    //fn check_estimated_haps(&self, reader: impl std::io::Read) {
-    //let ref_haps: Array2<i8> = bincode::deserialize_from(reader).unwrap();
-    //assert_eq!(self.estimated_haps, ref_haps);
-    //}
-
+    #[cfg(not(feature = "obliv"))]
     fn windows_full_segments(&self, mut rng: impl Rng) -> Vec<((usize, usize), (usize, usize))> {
         let windows = windows_split::split_by_segment(
             &self.genotype_graph,
@@ -612,11 +609,6 @@ impl<'a> Mcmc<'a> {
             self.params.min_window_len_cm,
             &mut rng,
         );
-        //let windows = windows_split::split(
-        //self.params.variants.view(),
-        //self.params.min_window_len_cm,
-        //&mut rng,
-        //);
         let mut hmm_windows = Vec::with_capacity(windows.len());
         let mut prev_end_write_boundary = 0;
         let mut start_boundary = 0;
@@ -632,15 +624,6 @@ impl<'a> Mcmc<'a> {
                 if split_point + j >= self.genotype_graph.graph.len() {
                     break;
                 }
-                #[cfg(feature = "obliv")]
-                if self.genotype_graph.graph[split_point + j]
-                    .is_segment_marker()
-                    .expose()
-                {
-                    end_write_boundary = Some(split_point + j);
-                    break;
-                }
-                #[cfg(not(feature = "obliv"))]
                 if self.genotype_graph.graph[split_point + j].is_segment_marker() {
                     end_write_boundary = Some(split_point + j);
                     break;
@@ -653,15 +636,6 @@ impl<'a> Mcmc<'a> {
                 if split_point < j + 1 {
                     break;
                 }
-                #[cfg(feature = "obliv")]
-                if self.genotype_graph.graph[split_point - j - 1]
-                    .is_segment_marker()
-                    .expose()
-                {
-                    next_start_boundary = Some(split_point - j - 1);
-                    break;
-                }
-                #[cfg(not(feature = "obliv"))]
                 if self.genotype_graph.graph[split_point - j - 1].is_segment_marker() {
                     next_start_boundary = Some(split_point - j - 1);
                     break;
@@ -728,7 +702,7 @@ impl<'a> Mcmc<'a> {
     }
 }
 
-fn select_ref_panel_new(
+fn select_ref_panel(
     ref_panel: &RefPanelSlice,
     neighbors: &[Option<Vec<Usize>>],
 ) -> (Array2<Genotype>, usize) {
@@ -781,39 +755,3 @@ fn select_ref_panel_new(
     #[cfg(not(feature = "obliv"))]
     (ref_panel.filter(&neighbors_bitmap), k)
 }
-
-//fn select_ref_panel(
-//ref_panel: &RefPanelSlice,
-//estimated_haps: ArrayView2<Genotype>,
-//pbwt_evaluted_filter: &[bool],
-//pbwt_group_filter: &[bool],
-//s: usize,
-//) -> (Array2<Genotype>, usize) {
-//let n_pbwt_pos = pbwt_evaluted_filter.iter().filter(|b| **b).count();
-//let neighbors_bitmap = neighbors_finding::find_neighbors(
-//ref_panel
-//.iter()
-//.zip(pbwt_evaluted_filter.iter())
-//.filter_map(|(v, &b)| if b { Some(v) } else { None }),
-//estimated_haps
-//.rows()
-//.into_iter()
-//.map(|r| r.to_owned())
-//.zip(pbwt_evaluted_filter.iter())
-//.filter_map(|(v, &b)| if b { Some(v) } else { None }),
-//pbwt_group_filter
-//.iter()
-//.zip(pbwt_evaluted_filter.iter())
-//.filter_map(|(&b1, &b2)| if b2 { Some(b1) } else { None }),
-//n_pbwt_pos,
-//ref_panel.n_haps,
-//estimated_haps.ncols(),
-//s,
-//);
-
-//let k = neighbors_bitmap.iter().filter(|&&b| b).count();
-//(ref_panel.filter(&neighbors_bitmap), k)
-//}
-
-#[cfg(test)]
-mod test {}

@@ -62,7 +62,6 @@ impl HmmParams {
                         let cm = variants[i].cm - variants[i - 2].cm;
                         compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
                     } else {
-                        assert!(n_skips.expose() != 1);
                         (tp_value_real!(0, i64), tp_value_real!(0, i64))
                     }
                 };
@@ -134,7 +133,6 @@ impl HmmParams {
                         let cm = variants[i + 2].cm - variants[i].cm;
                         compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
                     } else {
-                        assert!(n_skips.expose() != 1);
                         (tp_value_real!(0, i64), tp_value_real!(0, i64))
                     }
                 };
