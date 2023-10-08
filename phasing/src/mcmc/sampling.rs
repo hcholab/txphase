@@ -1,5 +1,5 @@
 use crate::genotype_graph::{G, P};
-use crate::{tp_value_real, RealHmm, Usize, U8};
+use crate::{tp_value_real, Real, U8};
 use ndarray::{s, Array1, Array2, ArrayView1, ArrayView3};
 use rand::Rng;
 
@@ -8,11 +8,11 @@ use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpI16, TpOrd};
 
 pub fn forward_sampling(
     prev_ind: (U8, U8),
-    tprobs: ArrayView3<RealHmm>,
+    tprobs: ArrayView3<Real>,
     #[cfg(feature = "obliv")] tprobs_e: ArrayView3<TpI16>,
     genotype_graph: ArrayView1<G>,
     is_first_window: bool,
-    #[cfg(feature = "obliv")] start_i: Usize,
+    #[cfg(feature = "obliv")] start_i: crate::Usize,
     mut rng: impl Rng,
 ) -> Array2<U8> {
     let m = tprobs.shape()[0];
@@ -43,9 +43,9 @@ pub fn forward_sampling(
 
         #[cfg(feature = "obliv")]
         let (ind1, ind2) = {
-            let mut weights1 = [RealHmm::ZERO; P];
+            let mut weights1 = [Real::ZERO; P];
             let mut weights1_e = [TpI16::protect(0); P];
-            let mut weights2 = [RealHmm::ZERO; P];
+            let mut weights2 = [Real::ZERO; P];
             let mut weights2_e = [TpI16::protect(0); P];
 
             for j in 0..P {
@@ -100,9 +100,9 @@ pub fn forward_sampling(
 // Only pairs of indices that add up to n (length of the weight vectors) are allowed
 // Weight of a pair is the product of the two weights (joint probability)
 fn constrained_paired_sample(
-    weights1: ArrayView1<RealHmm>,
+    weights1: ArrayView1<Real>,
     #[cfg(feature = "obliv")] weights1_e: ArrayView1<TpI16>,
-    weights2: ArrayView1<RealHmm>,
+    weights2: ArrayView1<Real>,
     #[cfg(feature = "obliv")] weights2_e: ArrayView1<TpI16>,
     rng: impl Rng,
 ) -> (U8, U8) {
@@ -113,7 +113,7 @@ fn constrained_paired_sample(
         (weights1, weights2)
     };
 
-    let mut combined = Array1::<RealHmm>::zeros(P);
+    let mut combined = Array1::<Real>::zeros(P);
     #[cfg(feature = "obliv")]
     let mut combined_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
     for i in 0..P {
@@ -136,9 +136,9 @@ fn constrained_paired_sample(
     (ind1 as u8, P as u8 - 1 - ind1 as u8)
 }
 
-fn weighted_sample(weights: ArrayView1<RealHmm>, mut rng: impl Rng) -> U8 {
+fn weighted_sample(weights: ArrayView1<Real>, mut rng: impl Rng) -> U8 {
     let mut total_weight = weights[0];
-    let mut cumulative_weights: Vec<RealHmm> = Vec::with_capacity(weights.len());
+    let mut cumulative_weights: Vec<Real> = Vec::with_capacity(weights.len());
     cumulative_weights.push(total_weight);
     for &w in weights.iter().skip(1) {
         total_weight += w;

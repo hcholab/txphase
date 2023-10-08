@@ -1,6 +1,5 @@
 use crate::hmm::HmmParams;
 use crate::variants::{build_variants, Variant};
-use crate::Genotype;
 use common::ref_panel::{RefPanel, RefPanelSlice};
 #[cfg(feature = "obliv")]
 use compressed_pbwt_obliv::pbwt_trie::PbwtTrie;

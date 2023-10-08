@@ -1,12 +1,6 @@
 use crate::genotype_graph::G;
-use crate::U8;
+use crate::{U8, Real};
 use ndarray::{Array1, Array2, ArrayView1, ArrayView3};
-
-#[cfg(feature = "obliv")]
-type Real = crate::RealHmm;
-
-#[cfg(not(feature = "obliv"))]
-type Real = f64;
 
 #[cfg(feature = "obliv")]
 pub use tp_fixedpoint::timing_shield::{TpEq, TpOrd};

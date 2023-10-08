@@ -7,9 +7,8 @@ pub use params::*;
 use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::Hmm;
 use crate::hmm::{COLL_T, COMBD_T, COMB_T, EMIS_T, TRAN_T};
-//use crate::neighbors_finding;
 use crate::variants::{Rarity, Variant};
-use crate::{tp_value_new, BoolMcc, Genotype, Usize, U8};
+use crate::{tp_value, Bool, Genotype, Real, Usize, U8};
 use common::ref_panel::RefPanelSlice;
 use rand::Rng;
 
@@ -18,13 +17,7 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "obliv")]
 use tp_fixedpoint::timing_shield::{TpEq, TpI8, TpOrd};
 
-#[cfg(feature = "obliv")]
-type Real = crate::RealHmm;
-
-#[cfg(not(feature = "obliv"))]
-type Real = f64;
-
-use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, Zip};
+use ndarray::{s, Array1, Array2, Array3, ArrayView1, Zip};
 
 const N_HETS_PER_SEGMENT: usize = 3;
 const P: usize = 1 << N_HETS_PER_SEGMENT;
@@ -47,7 +40,7 @@ pub struct Mcmc<'a> {
     params: &'a McmcSharedParams,
     cur_overlap_region_len: usize,
     genotype_graph: GenotypeGraph,
-    ignored_sites: Array1<BoolMcc>,
+    ignored_sites: Array1<Bool>,
     estimated_haps: Array2<Genotype>,
     phased_ind: Array2<U8>,
     tprobs: Array3<Real>,
@@ -62,10 +55,10 @@ impl<'a> Mcmc<'a> {
         iterations: &[IterOption],
         mut rng: impl Rng,
     ) -> Array2<Genotype> {
-        //match iterations.last().unwrap() {
-        //IterOption::Main(_) => {}
-        //_ => panic!("Last iterations must be main."),
-        //}
+        match iterations.last().unwrap() {
+            IterOption::Main(_) => {}
+            _ => panic!("Last iterations must be main."),
+        }
 
         let mut iterations_iternal = Vec::new();
         for i in iterations {
@@ -92,42 +85,16 @@ impl<'a> Mcmc<'a> {
             }
         }
 
-        //let mut ref_file = std::io::BufReader::new(
-        //std::fs::File::open(
-        //"/home/ndokmai/workspace/phasing-oram/phasing/tests/ref_tprobs_chr1.bin",
-        //)
-        //.unwrap(),
-        //);
-
-        //let mut ref_file = std::io::BufWriter::new(
-        //std::fs::File::create(
-        //"/home/ndokmai/workspace/phasing-oram/phasing/tests/ref_tprobs_chr1.bin",
-        //)
-        //.unwrap(),
-        //);
-
         let mut mcmc = Self::initialize(&params, genotypes.view());
-
-        //mcmc.save_estimated_haps(&mut ref_file);
-        //mcmc.check_estimated_haps(&mut ref_file);
 
         for i in iterations_iternal {
             mcmc.iteration(i, &mut rng);
-            //mcmc.save_tprobs(&mut ref_file);
-            //mcmc.save_estimated_haps(&mut ref_file);
-            //mcmc.check_tprobs(&mut ref_file);
-            //mcmc.check_estimated_haps(&mut ref_file);
-            //println!("{:#?}", mcmc.tprobs.slice(s![..10, .., ..]));
-            //unimplemented!();
         }
 
         mcmc.phased_ind = viterbi::viterbi(mcmc.tprobs.view(), mcmc.genotype_graph.graph.view());
 
         mcmc.genotype_graph
             .traverse_graph_pair(mcmc.phased_ind.view(), mcmc.estimated_haps.view_mut());
-
-        //mcmc.save_estimated_haps(&mut ref_file);
-        //mcmc.check_estimated_haps(&mut ref_file);
 
         mcmc.estimated_haps
     }
@@ -186,30 +153,6 @@ impl<'a> Mcmc<'a> {
             tprobs_e,
         }
     }
-
-    //fn initialize_from_input(
-    //params: &'a McmcSharedParams,
-    //genotypes: ArrayView1<Genotype>,
-    //estimated_haps: Array2<Genotype>,
-    //) -> Self {
-    //println!("=== Initialization ===",);
-    //let now = Instant::now();
-    //let phased_ind = Array2::<u8>::zeros((estimated_haps.nrows(), 2));
-    //let tprobs = Array3::<Real>::zeros((estimated_haps.nrows(), P, P));
-    //let genotype_graph = GenotypeGraph::build(genotypes);
-    //let ignored_sites = Self::get_ignored_sites(params.variants.view(), genotypes);
-    //println!("Initialization: {} ms", (Instant::now() - now).as_millis());
-    //println!("",);
-    //Self {
-    //params,
-    //cur_overlap_region_len: params.overlap_region_len,
-    //genotype_graph,
-    //estimated_haps,
-    //phased_ind,
-    //tprobs,
-    //ignored_sites,
-    //}
-    //}
 
     fn iteration(&mut self, iter_option: IterOptionInternal, mut rng: impl Rng) {
         {
@@ -306,7 +249,7 @@ impl<'a> Mcmc<'a> {
             ks.push(k as f64);
 
             let mut hmm = Hmm::new();
-            let mut tprobs_window = hmm.forward_backward(
+            let tprobs_window = hmm.forward_backward(
                 selected_ref_panel.view(),
                 genotype_graph_w.graph.view(),
                 &self.params.hmm_params,
@@ -314,6 +257,9 @@ impl<'a> Mcmc<'a> {
                 ignored_sites_w,
                 is_first_window,
             );
+
+            #[cfg(not(feature = "obliv"))]
+            let mut tprobs_window = tprobs_window;
 
             #[cfg(feature = "obliv")]
             let tprobs_window_src = tprobs_window.view();
@@ -501,15 +447,15 @@ impl<'a> Mcmc<'a> {
             sum_window_size as f64 / n_windows as f64 / 1e6
         );
 
-        //println!("Elapsed time: {} ms", (Instant::now() - now).as_millis());
-        //println!("Emission: {} ms", EMIS_T.lock().unwrap().as_millis());
-        //println!("Transition: {} ms", TRAN_T.lock().unwrap().as_millis());
-        //println!("Collapse: {} ms", COLL_T.lock().unwrap().as_millis());
-        //println!("Combine: {} ms", COMB_T.lock().unwrap().as_millis());
-        //println!(
-        //"Combine Diploid: {} ms",
-        //COMBD_T.lock().unwrap().as_millis()
-        //);
+        println!("Elapsed time: {} ms", (Instant::now() - now).as_millis());
+        println!("Emission: {} ms", EMIS_T.lock().unwrap().as_millis());
+        println!("Transition: {} ms", TRAN_T.lock().unwrap().as_millis());
+        println!("Collapse: {} ms", COLL_T.lock().unwrap().as_millis());
+        println!("Combine: {} ms", COMB_T.lock().unwrap().as_millis());
+        println!(
+            "Combine Diploid: {} ms",
+            COMBD_T.lock().unwrap().as_millis()
+        );
         println!("",);
     }
 
@@ -539,7 +485,7 @@ impl<'a> Mcmc<'a> {
             let mut end_write_boundary = split_point + overlap_len;
 
             #[cfg(feature = "obliv")]
-            let mut done = BoolMcc::protect(false);
+            let mut done = Bool::protect(false);
 
             for i in 0..overlap_len {
                 if split_point + i >= self.genotype_graph.graph.len() {
@@ -551,7 +497,7 @@ impl<'a> Mcmc<'a> {
                     let cond = self.genotype_graph.graph[split_point + i].is_segment_marker();
                     end_write_boundary = (cond & !done)
                         .select(Usize::protect((split_point + i) as u64), end_write_boundary);
-                    done = cond.select(BoolMcc::protect(true), done);
+                    done = cond.select(Bool::protect(true), done);
                 }
 
                 #[cfg(not(feature = "obliv"))]
@@ -675,9 +621,8 @@ impl<'a> Mcmc<'a> {
     fn get_ignored_sites(
         variants: ArrayView1<Variant>,
         genotypes: ArrayView1<Genotype>,
-    ) -> Array1<BoolMcc> {
-        let mut ignored_sites =
-            Array1::<BoolMcc>::from_elem(variants.dim(), tp_value_new!(false, bool));
+    ) -> Array1<Bool> {
+        let mut ignored_sites = Array1::<Bool>::from_elem(variants.dim(), tp_value!(false, bool));
         Zip::from(&mut ignored_sites)
             .and(&variants)
             .and(&genotypes)
@@ -708,7 +653,7 @@ fn select_ref_panel(
 ) -> (Array2<Genotype>, usize) {
     #[cfg(feature = "obliv")]
     let neighbors_bitmap = {
-        let mut bitmap = compressed_pbwt_obliv::obliv::bitmap::OblivBitmap::new(ref_panel.n_haps);
+        let mut bitmap = obliv_utils::bitmap::OblivBitmap::new(ref_panel.n_haps);
         bitmap.map_from_iter(
             neighbors
                 .into_iter()

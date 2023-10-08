@@ -2,8 +2,7 @@ mod params;
 pub use params::*;
 
 use crate::genotype_graph::{G, P};
-use crate::tp_value_real;
-use crate::{BoolMcc, Genotype, Real, RealHmm};
+use crate::{Bool, Genotype, Real};
 #[cfg(feature = "obliv")]
 use ndarray::{Array1, ArrayViewMut1};
 #[cfg(feature = "obliv")]
@@ -77,9 +76,9 @@ impl Hmm {
         genograph: ArrayView1<G>,
         hmm_params: &HmmParams,
         rprobs: &RprobsSlice,
-        ignored_sites: ArrayView1<BoolMcc>,
+        ignored_sites: ArrayView1<Bool>,
         is_first_window: bool,
-    ) -> Array3<RealHmm> {
+    ) -> Array3<Real> {
         let m = ref_panel.nrows();
         let k = ref_panel.ncols();
         let mut rprobs_iter = rprobs.get_forward();
@@ -91,7 +90,7 @@ impl Hmm {
             self.is_backward = false;
         }
 
-        let mut tprobs = Array3::<RealHmm>::zeros((m, P, P));
+        let mut tprobs = Array3::<Real>::zeros((m, P, P));
 
         #[cfg(feature = "obliv")]
         {
@@ -102,8 +101,8 @@ impl Hmm {
             self.first_combine(bprobs.slice(s![0, .., ..]), tprobs.slice_mut(s![0, .., ..]));
         }
 
-        let mut prev_fprobs = Array2::<RealHmm>::zeros((P, k));
-        let mut cur_fprobs = Array2::<RealHmm>::zeros((P, k));
+        let mut prev_fprobs = Array2::<Real>::zeros((P, k));
+        let mut cur_fprobs = Array2::<Real>::zeros((P, k));
 
         self.init(
             ref_panel.slice(s![0, ..]),
@@ -116,7 +115,7 @@ impl Hmm {
         self.prev_fprobs_e.assign(&self.cur_fprobs_e);
 
         #[cfg(feature = "obliv")]
-        let mut tprobs_3x = Array3::<RealHmm>::zeros((m.div_ceil(3), P, P));
+        let mut tprobs_3x = Array3::<Real>::zeros((m.div_ceil(3), P, P));
         #[cfg(feature = "obliv")]
         let mut tprobs_3x_e = Array3::<TpI16>::from_elem((m.div_ceil(3), P, P), TpI16::protect(0));
         #[cfg(feature = "obliv")]
@@ -239,9 +238,9 @@ impl Hmm {
 
     pub fn combine_dips(
         &self,
-        tprobs: ArrayView2<RealHmm>,
-        tprobs_dips: ArrayViewMut2<RealHmm>,
-        #[cfg(feature = "obliv")] cond: BoolMcc,
+        tprobs: ArrayView2<Real>,
+        tprobs_dips: ArrayViewMut2<Real>,
+        #[cfg(feature = "obliv")] cond: Bool,
     ) {
         let t = Instant::now();
 
@@ -258,7 +257,7 @@ impl Hmm {
         let mut _tprobs_dips = tprobs_dips;
 
         #[cfg(feature = "obliv")]
-        let mut tprobs_dips = Array2::<RealHmm>::zeros((P, P));
+        let mut tprobs_dips = Array2::<Real>::zeros((P, P));
 
         #[cfg(feature = "obliv")]
         let mut tprobs_dips_e_ext = Array2::<TpI16>::from_elem((P, P), TpI16::protect(0));
@@ -299,13 +298,13 @@ impl Hmm {
         genograph: ArrayView1<G>,
         hmm_params: &HmmParams,
         rprobs: &RprobsSlice,
-        ignored_sites: ArrayView1<BoolMcc>,
-    ) -> Array3<RealHmm> {
+        ignored_sites: ArrayView1<Bool>,
+    ) -> Array3<Real> {
         let m = ref_panel.nrows();
         let n = ref_panel.ncols();
         let mut rprobs_iter = rprobs.get_backward();
 
-        let mut bprobs = Array3::<RealHmm>::zeros((m, P, n));
+        let mut bprobs = Array3::<Real>::zeros((m, P, n));
 
         #[cfg(feature = "obliv")]
         {
@@ -389,21 +388,21 @@ impl Hmm {
         cond_haps: ArrayView1<Genotype>,
         graph_col: G,
         hmm_params: &HmmParams,
-        mut probs: ArrayViewMut2<RealHmm>,
+        mut probs: ArrayViewMut2<Real>,
     ) {
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row).and(cond_haps).for_each(|p, &z| {
                 #[cfg(feature = "obliv")]
                 {
                     let g = graph_col.get_row(i);
-                    *p = (z.tp_not_eq(&g)).select(hmm_params.eprob, RealHmm::protect_i64(1));
+                    *p = (z.tp_not_eq(&g)).select(hmm_params.eprob, Real::protect_i64(1));
                 }
 
                 #[cfg(not(feature = "obliv"))]
                 if z != graph_col.get_row(i) {
                     *p = hmm_params.eprob;
                 } else {
-                    *p = tp_value_real!(1, i64);
+                    *p = 1.;
                 }
             });
         });
@@ -417,7 +416,7 @@ impl Hmm {
         cond_haps: ArrayView1<Genotype>,
         graph_col: G,
         #[cfg(not(feature = "obliv"))] hmm_params: &HmmParams,
-        mut probs: ArrayViewMut2<RealHmm>,
+        mut probs: ArrayViewMut2<Real>,
     ) {
         let t = Instant::now();
 
@@ -447,9 +446,9 @@ impl Hmm {
 
     fn transition(
         &mut self,
-        rprob: (RealHmm, RealHmm),
-        prev_probs: ArrayView2<RealHmm>,
-        mut cur_probs: ArrayViewMut2<RealHmm>,
+        rprob: (Real, Real),
+        prev_probs: ArrayView2<Real>,
+        mut cur_probs: ArrayViewMut2<Real>,
     ) {
         let t = Instant::now();
         #[cfg(feature = "obliv")]
@@ -480,16 +479,14 @@ impl Hmm {
 
         #[cfg(not(feature = "obliv"))]
         {
-            let sum: RealHmm = all_sum_h.sum();
-            let scale = tp_value_real!(1, i64) / sum;
-            cur_probs *= scale;
+            cur_probs /= all_sum_h.sum();
         }
 
         let mut _t = TRAN_T.lock().unwrap();
         *_t += Instant::now() - t;
     }
 
-    fn collapse(&mut self, mut cur_probs: ArrayViewMut2<RealHmm>) {
+    fn collapse(&mut self, mut cur_probs: ArrayViewMut2<Real>) {
         let t = Instant::now();
 
         #[cfg(feature = "obliv")]
@@ -500,9 +497,7 @@ impl Hmm {
 
         #[cfg(not(feature = "obliv"))]
         {
-            let sum = sum_k.sum();
-            let scale = tp_value_real!(1, i64) / sum;
-            sum_k *= scale;
+            sum_k /= sum_k.sum();
         }
 
         #[cfg(feature = "obliv")]
@@ -515,8 +510,8 @@ impl Hmm {
 
     fn first_combine(
         &mut self,
-        first_bprobs: ArrayView2<RealHmm>,
-        mut first_tprobs: ArrayViewMut2<RealHmm>,
+        first_bprobs: ArrayView2<Real>,
+        mut first_tprobs: ArrayViewMut2<Real>,
     ) {
         //#[cfg(feature = "obliv")]
         //debug_sum_by_row(first_bprobs, self.bprobs_e.row(0));
@@ -540,16 +535,16 @@ impl Hmm {
 
     #[cfg(feature = "obliv")]
     fn combine(
-        fprobs: ArrayView2<RealHmm>,
+        fprobs: ArrayView2<Real>,
         fprobs_e: ArrayView1<TpI16>,
-        bprobs: ArrayView2<RealHmm>,
+        bprobs: ArrayView2<Real>,
         bprobs_e: ArrayView1<TpI16>,
-        mut tprobs: ArrayViewMut2<RealHmm>,
+        mut tprobs: ArrayViewMut2<Real>,
         mut tprobs_e: ArrayViewMut2<TpI16>,
     ) {
         let t = Instant::now();
 
-        RealHmm::matmul(fprobs, bprobs.t(), tprobs.view_mut());
+        Real::matmul(fprobs, bprobs.t(), tprobs.view_mut());
 
         Zip::from(tprobs_e.rows_mut())
             .and(&fprobs_e)
@@ -569,9 +564,9 @@ impl Hmm {
 
     #[cfg(not(feature = "obliv"))]
     fn combine(
-        fprobs: ArrayView2<RealHmm>,
-        bprobs: ArrayView2<RealHmm>,
-        mut tprobs: ArrayViewMut2<RealHmm>,
+        fprobs: ArrayView2<Real>,
+        bprobs: ArrayView2<Real>,
+        mut tprobs: ArrayViewMut2<Real>,
     ) {
         let t = Instant::now();
         tprobs.assign(&fprobs.dot(&bprobs.t()));
@@ -654,7 +649,7 @@ mod inner {
 
     pub fn match_scale(
         e_to_match: TpI16,
-        mut probs: ArrayViewMut2<RealHmm>,
+        mut probs: ArrayViewMut2<Real>,
         mut probs_e: ArrayViewMut1<TpI16>,
     ) {
         Zip::from(probs.rows_mut())
@@ -702,9 +697,9 @@ mod inner {
     }
 
     pub fn sum_scale_by_row(
-        probs: ArrayView2<RealHmm>,
+        probs: ArrayView2<Real>,
         probs_e: ArrayView1<TpI16>,
-    ) -> (Array1<RealHmm>, Array1<TpI16>) {
+    ) -> (Array1<Real>, Array1<TpI16>) {
         //debug_sum_by_row(probs, probs_e);
         let mut sum_by_row = Zip::from(probs.rows()).map_collect(|r| r.sum());
         let mut sum_by_row_e = probs_e.to_owned();
@@ -712,7 +707,7 @@ mod inner {
         (sum_by_row, sum_by_row_e)
     }
 
-    pub fn debug_sum_by_row(probs: ArrayView2<RealHmm>, probs_e: ArrayView1<TpI16>) {
+    pub fn debug_sum_by_row(probs: ArrayView2<Real>, probs_e: ArrayView1<TpI16>) {
         Zip::from(probs.rows()).and(&probs_e).for_each(|r, &e| {
             if r.iter()
                 .map(|v| v.into_inner().expose() as f64)
@@ -727,9 +722,9 @@ mod inner {
     }
 
     pub fn sum_scale_by_column(
-        probs: ArrayView2<RealHmm>,
+        probs: ArrayView2<Real>,
         probs_e: ArrayView1<TpI16>,
-    ) -> (Array1<RealHmm>, TpI16) {
+    ) -> (Array1<Real>, TpI16) {
         let mut sum_e = max_e(probs_e);
 
         let mut probs = probs.to_owned();
@@ -748,9 +743,9 @@ mod inner {
     }
 
     pub fn sum_scale_arr1(
-        mut probs: ArrayViewMut1<RealHmm>,
+        mut probs: ArrayViewMut1<Real>,
         mut probs_e: ArrayViewMut1<TpI16>,
-    ) -> (RealHmm, TpI16) {
+    ) -> (Real, TpI16) {
         let mut sum_e = max_e(probs_e.view());
 
         Zip::from(&mut probs).and(&mut probs_e).for_each(|p, e| {
@@ -763,13 +758,13 @@ mod inner {
         (sum, sum_e)
     }
 
-    pub fn sum_scale(probs: ArrayView2<RealHmm>, probs_e: ArrayView1<TpI16>) -> (RealHmm, TpI16) {
+    pub fn sum_scale(probs: ArrayView2<Real>, probs_e: ArrayView1<TpI16>) -> (Real, TpI16) {
         let (mut sum_by_row, mut sum_by_row_e) = sum_scale_by_row(probs.view(), probs_e.view());
         sum_scale_arr1(sum_by_row.view_mut(), sum_by_row_e.view_mut())
     }
 
     pub fn renorm_equalize_scale(
-        mut probs: ArrayViewMut2<RealHmm>,
+        mut probs: ArrayViewMut2<Real>,
         mut probs_e: ArrayViewMut2<TpI16>,
         mut equalized_probs_e: ArrayViewMut1<TpI16>,
     ) {
@@ -825,16 +820,16 @@ mod inner {
             .unwrap()
     }
 
-    pub fn debug_expose(s: RealHmm, e: TpI16) -> f64 {
+    pub fn debug_expose(s: Real, e: TpI16) -> f64 {
         s.expose_into_f32() as f64 * (e.expose() as f64).exp2()
     }
 
-    pub fn debug_expose_row(s: ArrayView1<RealHmm>, e: TpI16) -> Array1<f64> {
+    pub fn debug_expose_row(s: ArrayView1<Real>, e: TpI16) -> Array1<f64> {
         let e = (e.expose() as f64).exp2();
         s.map(|v| v.expose_into_f32() as f64 * e)
     }
 
-    pub fn debug_expose_array(s: ArrayView2<RealHmm>, e: ArrayView1<TpI16>) -> Array2<f64> {
+    pub fn debug_expose_array(s: ArrayView2<Real>, e: ArrayView1<TpI16>) -> Array2<f64> {
         let mut s_out = Array2::<f64>::zeros(s.dim());
         Zip::from(s_out.rows_mut())
             .and(s.rows())
@@ -843,16 +838,16 @@ mod inner {
         s_out
     }
 
-    pub fn debug_expose_array_ext(s: ArrayView2<RealHmm>, e: ArrayView2<TpI16>) -> Array2<f64> {
+    pub fn debug_expose_array_ext(s: ArrayView2<Real>, e: ArrayView2<TpI16>) -> Array2<f64> {
         Zip::from(&s)
             .and(&e)
             .map_collect(|&_s, &_e| debug_expose(_s, _e))
     }
 
-    pub fn debug_expose_s(s: ArrayView2<RealHmm>) -> Array2<f64> {
+    pub fn debug_expose_s(s: ArrayView2<Real>) -> Array2<f64> {
         s.map(|v| v.expose_into_f32() as f64)
     }
-    pub fn debug_expose_s_arr1(s: ArrayView1<RealHmm>) -> Array1<f64> {
+    pub fn debug_expose_s_arr1(s: ArrayView1<Real>) -> Array1<f64> {
         s.map(|v| v.expose_into_f32() as f64)
     }
 

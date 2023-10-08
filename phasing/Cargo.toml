@@ -7,8 +7,6 @@ edition = "2018"
 
 [features]
 default = ["obliv"]
-leak-resist = ["tp-fixedpoint"] 
-leak-resist-fast = ["leak-resist"] 
 obliv = ["tp-fixedpoint", "compressed-pbwt-obliv", "obliv-utils"]
 
 [dependencies]
@@ -21,8 +19,8 @@ bincode = "1.3"
 bufstream = "0.1"
 common = { path = "../common" }
 obliv-utils = { path = "../obliv-utils", optional = true }
-compressed-pbwt = { path = "/home/ndokmai/workspace/compressed-pbwt", default-features=false, optional = true }
-compressed-pbwt-obliv = { package = "compressed-pbwt", path = "/home/ndokmai/workspace/compressed-pbwt", optional = true }
+compressed-pbwt = { path = "../compressed-pbwt", default-features=false, optional = true }
+compressed-pbwt-obliv = { package = "compressed-pbwt", path = "../compressed-pbwt", optional = true }
 #oram-sgx = { path = "../oram-sgx" }
 tp-fixedpoint = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/tp-fixedpoint", optional = true }
 m3vcf = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/m3vcf" }
