@@ -445,7 +445,7 @@ impl Hmm {
 
     fn transition(
         &mut self,
-        rprob: (Real, Real),
+        rprob: Real,
         prev_probs: ArrayView2<Real>,
         mut cur_probs: ArrayViewMut2<Real>,
     ) {
@@ -460,8 +460,6 @@ impl Hmm {
 
         #[cfg(feature = "obliv")]
         let all_sum_h_e = prev_probs_e.to_owned();
-
-        let rprob = rprob.0 / rprob.1;
 
         let _all_sum_h = &all_sum_h * rprob;
 
