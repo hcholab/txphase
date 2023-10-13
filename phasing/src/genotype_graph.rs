@@ -1,4 +1,4 @@
-use crate::{Bool, Genotype, U8, Real};
+use crate::{Bool, Genotype, Real, U8};
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayView3, ArrayViewMut2, Zip};
 
 pub const HET_PER_SEGMENT: u8 = 3;
@@ -787,4 +787,3 @@ mod inner {
 
 #[cfg(feature = "obliv")]
 use inner::*;
-

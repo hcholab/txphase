@@ -3,8 +3,12 @@
 mod genotype_graph;
 mod hmm;
 mod mcmc;
+mod rss_hmm;
 mod utils;
 mod variants;
+
+#[cfg(feature = "obliv")]
+mod dynamic_fixed;
 
 #[cfg(feature = "obliv")]
 mod inner {
@@ -55,8 +59,8 @@ fn main() {
     let n_pos_window_overlap = (3. / min_het_rate).ceil() as usize;
     let s = 4;
 
-    let seed = rand::thread_rng().next_u64();
-    //let seed = 1098614457002977507;
+    //let seed = rand::thread_rng().next_u64();
+    let seed = 1176131483100594936;
     let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
     println!("Parameters:");

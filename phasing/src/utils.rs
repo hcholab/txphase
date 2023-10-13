@@ -90,4 +90,3 @@ pub fn next_log2(v: u32) -> u32 {
 pub fn log2(v: u32) -> u32 {
     31 - v.leading_zeros()
 }
-

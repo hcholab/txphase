@@ -447,7 +447,6 @@ impl Hmm {
                 #[cfg(feature = "obliv")]
                 {
                     let g = graph_col.get_row(i);
-                    //*p = (z.tp_not_eq(&g)).select(*p * hmm_params.eprob, *p);
                     *p = (z.tp_not_eq(&g))
                         .select((*p >> 14) + (*p >> 15) + (*p >> 17) + (*p >> 20), *p);
                 }

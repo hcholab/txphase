@@ -1,5 +1,5 @@
 use crate::genotype_graph::G;
-use crate::{U8, Real};
+use crate::{Real, U8};
 use ndarray::{Array1, Array2, ArrayView1, ArrayView3};
 
 #[cfg(feature = "obliv")]
