@@ -563,12 +563,12 @@ impl<'a> Mcmc<'a> {
             let mut j = 0;
             Zip::indexed(tprobs_window.outer_iter_mut())
                 .and(&genotype_graph_w.graph)
-                .for_each(|i, mut t, g| {
+                .for_each(|_i, mut t, g| {
                     #[cfg(feature = "obliv")]
                     if g.is_segment_marker().expose() {
                         t.assign(&tprobs.slice(s![j, .., ..]));
                         tprobs_window_e
-                            .slice_mut(s![i, .., ..])
+                            .slice_mut(s![_i, .., ..])
                             .assign(&tprobs_e.slice(s![j, .., ..]));
                         j += 1;
                     }

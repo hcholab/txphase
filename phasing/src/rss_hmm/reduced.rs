@@ -278,6 +278,7 @@ impl HmmReduced {
                     block,
                     genotype_graph[site_i],
                     do_collapse,
+                    #[cfg(not(feature = "obliv"))]
                     eprob,
                     rprob,
                     prev_alpha_pre.view(),
@@ -360,6 +361,7 @@ impl HmmReduced {
                     block,
                     genotype_graph[site_i],
                     do_collapse,
+                    #[cfg(not(feature = "obliv"))]
                     eprob,
                     rprob,
                     cur_block_prob.alpha_pre.view(),
@@ -531,6 +533,7 @@ impl HmmReduced {
                     block,
                     genotype_graph[site_i],
                     do_collapse,
+                    #[cfg(not(feature = "obliv"))]
                     eprob,
                     rprob,
                     prev_alpha_pre.view(),
@@ -630,6 +633,7 @@ impl HmmReduced {
                     block,
                     genotype_graph[site_i],
                     do_collapse,
+                    #[cfg(not(feature = "obliv"))]
                     eprob,
                     rprob,
                     cur_block_prob.alpha_pre.view(),
@@ -776,7 +780,7 @@ impl HmmReduced {
         block: &FilteredBlockSlice<'a>,
         graph_pos: G,
         do_collapse: bool,
-        eprob: Real,
+        #[cfg(not(feature = "obliv"))] eprob: Real,
         rprob: Real,
         alpha_pre: ArrayView2<Real>,
         block_site_i: usize,
@@ -845,6 +849,7 @@ impl HmmReduced {
         Self::emission(
             cur_ref_panel_pos.view(),
             graph_pos,
+            #[cfg(not(feature = "obliv"))]
             eprob,
             cur_c_prob.view_mut(),
             #[cfg(feature = "obliv")]
@@ -854,6 +859,7 @@ impl HmmReduced {
         Self::emission(
             cur_ref_panel_pos.view(),
             graph_pos,
+            #[cfg(not(feature = "obliv"))]
             eprob,
             cur_cnr_prob.view_mut(),
             #[cfg(feature = "obliv")]
@@ -871,7 +877,7 @@ impl HmmReduced {
         cur_block: &FilteredBlockSlice<'a>,
         cur_graph_pos: G,
         do_collapse: bool,
-        eprob: Real,
+        #[cfg(not(feature = "obliv"))] eprob: Real,
         rprob: Real,
         prev_alpha_pre: ArrayView2<Real>,
         mut prev_alpha_post: ArrayViewMut1<Real>,
@@ -1062,6 +1068,7 @@ impl HmmReduced {
             Self::emission(
                 cur_block.expand_pos(cur_block_site).view(),
                 cur_graph_pos,
+                #[cfg(not(feature = "obliv"))]
                 eprob,
                 cur_c_prob.view_mut(),
                 #[cfg(feature = "obliv")]
@@ -1070,6 +1077,7 @@ impl HmmReduced {
             Self::emission(
                 cur_block.expand_pos(cur_block_site).view(),
                 cur_graph_pos,
+                #[cfg(not(feature = "obliv"))]
                 eprob,
                 cur_cnr_prob.view_mut(),
                 #[cfg(feature = "obliv")]
@@ -1192,6 +1200,7 @@ impl HmmReduced {
             Self::emission(
                 cur_block.expand_pos(cur_block_site).view(),
                 cur_graph_pos,
+                #[cfg(not(feature = "obliv"))]
                 eprob,
                 cur_c_prob.view_mut(),
                 #[cfg(feature = "obliv")]
@@ -1208,7 +1217,7 @@ impl HmmReduced {
     fn emission(
         cond_haps: ArrayView1<i8>,
         graph_col: G,
-        eprob: Real,
+        #[cfg(not(feature = "obliv"))] eprob: Real,
         mut probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut probs_e: ArrayViewMut1<TpI16>,
     ) {
@@ -1481,9 +1490,6 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         let inv_weights = inv_weights.map(|&v| Real::protect_f32(v as f32));
 
-        //#[cfg(feature = "obliv")]
-        //let mut tprobs_e = Array2::from_elem((P, P), TpI16::protect(0));
-
         let mut alpha_11 = Array3::<Real>::zeros((P, P, block.n_unique()));
         let mut alpha_10 = Array2::<Real>::zeros((P, block.n_unique()));
         let mut alpha_01 = Array2::<Real>::zeros((P, block.n_unique()));
@@ -1585,22 +1591,10 @@ impl HmmReduced {
                             });
                     });
 
-                //#[cfg(feature = "obliv")]
-                //let mut tprobs_e_dips = Array1::from_elem(P, TpI16::protect(0));
-
-                //#[cfg(feature = "obliv")]
-                //renorm_equalize_scale(t.view_mut(), tprobs_e.view_mut(), tprobs_e_dips.view_mut());
-
-                //#[cfg(not(feature = "obliv"))]
-                //{
-                //t /= t.sum();
-                //}
-
-                //t.assign(&Self::combine_dip(
-                //t.view(),
-                //#[cfg(feature = "obliv")]
-                //tprobs_e_dips.view(),
-                //));
+                #[cfg(feature = "obliv")]
+                Zip::from(&mut t)
+                    .and(&mut tprobs_e.slice_mut(s![i, .., ..]))
+                    .for_each(|t, e| renorm_scale_single(t, e));
             });
         let mut _t = COMBINE_T.lock().unwrap();
         *_t += t.elapsed();
