@@ -5,8 +5,8 @@ use std::collections::HashMap;
 pub struct Block {
     pub index_map: Array1<usize>,
     pub haplotypes: Array2<u8>,
-    pub weights: Array1<f64>,
-    pub inv_weights: Array1<f64>,
+    //pub weights: Array1<f64>,
+    //pub inv_weights: Array1<f64>,
     pub n_unique: usize,
 }
 
@@ -27,6 +27,8 @@ impl Block {
         BlockSlice {
             index_map: self.index_map.view(),
             haplotypes: self.haplotypes.view(),
+            //weights: self.weights.view(),
+            //inv_weights: self.inv_weights.view(),
             n_unique: self.n_unique,
         }
     }
@@ -35,6 +37,8 @@ impl Block {
         BlockSlice {
             index_map: self.index_map.view(),
             haplotypes: self.haplotypes.slice(s![start..end, ..]),
+            //weights: self.weights.view(),
+            //inv_weights: self.inv_weights.view(),
             n_unique: self.n_unique,
         }
     }
@@ -107,10 +111,10 @@ pub fn make_unique_hap_block(block: &Block) -> Block {
             *i = *c;
         });
     let n_unique = unique.len();
-    let mut weights = Array1::<f64>::zeros(n_unique);
-    for &i in &new_index_map {
-        weights[i as usize] += 1.;
-    }
+    //let mut weights = Array1::<f64>::zeros(n_unique);
+    //for &i in &new_index_map {
+    //weights[i as usize] += 1.;
+    //}
 
     let mut new_haps = Array2::<u8>::zeros((n_unique, block.n_sites().div_ceil(8)));
     for (b, i) in unique.into_iter() {
@@ -124,8 +128,8 @@ pub fn make_unique_hap_block(block: &Block) -> Block {
     Block {
         index_map: new_index_map,
         haplotypes: new_haps_transposed,
-        inv_weights: weights.map(|v| 1. / v),
-        weights,
+        //inv_weights: weights.map(|v| 1. / v),
+        //weights,
         n_unique,
     }
 }
@@ -151,10 +155,10 @@ pub fn merge_blocks(left_block: &Block, right_block: &Block) -> Block {
         });
 
     let n_unique = unique.len();
-    let mut weights = Array1::<f64>::zeros(n_unique);
-    for &i in &new_index_map {
-        weights[i as usize] += 1.;
-    }
+    //let mut weights = Array1::<f64>::zeros(n_unique);
+    //for &i in &new_index_map {
+    //weights[i as usize] += 1.;
+    //}
 
     let mut new_haps = Array2::<u8>::zeros((
         n_unique,
@@ -179,8 +183,8 @@ pub fn merge_blocks(left_block: &Block, right_block: &Block) -> Block {
     Block {
         index_map: new_index_map,
         haplotypes: new_haps_transposed,
-        inv_weights: weights.map(|v| 1. / v),
-        weights,
+        //inv_weights: weights.map(|v| 1. / v),
+        //weights,
         n_unique,
     }
 }
@@ -189,6 +193,8 @@ pub fn merge_blocks(left_block: &Block, right_block: &Block) -> Block {
 pub struct BlockSlice<'a> {
     pub index_map: ArrayView1<'a, usize>,
     pub haplotypes: ArrayView2<'a, u8>,
+    //pub weights: ArrayView1<'a, f64>,
+    //pub inv_weights: ArrayView1<'a, f64>,
     pub n_unique: usize,
 }
 
@@ -212,6 +218,20 @@ impl<'a> BlockSlice<'a> {
                 .map(|v| *v)
                 .collect::<Vec<_>>()
         })
+    }
+
+    pub fn expand_pos(&self, pos: usize) -> Array1<i8> {
+        let haps = self.haplotypes.row(pos);
+        self.expand(haps)
+    }
+
+    fn expand(&self, haps: ArrayView1<u8>) -> Array1<i8> {
+        let haps = BitSlice::<u8, Lsb0>::from_slice(haps.as_slice().unwrap());
+        let mut expanded = Array1::<i8>::zeros(self.n_unique());
+        for (src, tar) in haps.iter().zip(expanded.iter_mut()) {
+            *tar = *src as i8;
+        }
+        expanded
     }
 
     pub fn get_members(&self) -> Vec<Vec<usize>> {
@@ -334,18 +354,18 @@ pub fn m3vcf_block_scan(
         row.assign(&ref_row);
     }
 
-    let mut weights = Array1::<f64>::zeros(block.nuniq);
-    for &i in &block.indmap {
-        weights[i as usize] += 1.;
-    }
+    //let mut weights = Array1::<f64>::zeros(block.nuniq);
+    //for &i in &block.indmap {
+    //weights[i as usize] += 1.;
+    //}
 
     let index_map = block.indmap.map(|&i| i as usize);
 
     Some(Block {
         index_map,
         haplotypes: filtered_haps,
-        inv_weights: weights.map(|v| 1. / v),
-        weights,
+        //inv_weights: weights.map(|v| 1. / v),
+        //weights,
         n_unique: block.nuniq,
     })
 }

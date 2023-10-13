@@ -5,7 +5,7 @@ mod windows_split;
 pub use params::*;
 
 use crate::genotype_graph::GenotypeGraph;
-use crate::hmm::Hmm;
+use crate::hmm::{combine_dips, Hmm};
 use crate::hmm::{COLL_T, COMBD_T, COMB_T, EMIS_T, TRAN_T};
 use crate::variants::{Rarity, Variant};
 use crate::{tp_value, Bool, Genotype, Real, Usize, U8};
@@ -89,12 +89,13 @@ impl<'a> Mcmc<'a> {
 
         for i in iterations_iternal {
             mcmc.iteration(i, &mut rng);
+            //mcmc.iteration_rss(i, &mut rng);
         }
 
         mcmc.phased_ind = viterbi::viterbi(mcmc.tprobs.view(), mcmc.genotype_graph.graph.view());
 
         mcmc.genotype_graph
-            .traverse_graph_pair(mcmc.phased_ind.view(), mcmc.estimated_haps.view_mut());
+        .traverse_graph_pair(mcmc.phased_ind.view(), mcmc.estimated_haps.view_mut());
 
         mcmc.estimated_haps
     }
@@ -167,6 +168,7 @@ impl<'a> Mcmc<'a> {
         let now = Instant::now();
 
         let mut pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
+
         pbwt_group_filter
             .iter_mut()
             .zip(&self.params.pbwt_evaluted)
@@ -296,13 +298,13 @@ impl<'a> Mcmc<'a> {
                             let cond = (start_write_w - start_w as u64).tp_lt_eq(&j)
                                 & (end_write_w - start_w as u64).tp_gt(&j);
                             let s_e = tprobs_window_src_e.slice(s![j as usize, .., ..]);
-                            hmm.combine_dips(s, s_e, t, cond);
+                            combine_dips(s, s_e, t, cond);
                             j += 1;
                         }
 
                         #[cfg(not(feature = "obliv"))]
                         if i == 0 || genotype_graph.graph[i].is_segment_marker() {
-                            hmm.combine_dips(s, t);
+                            combine_dips(s, t);
                         } else {
                             let mut t = t;
                             t.fill(0.);
@@ -319,14 +321,14 @@ impl<'a> Mcmc<'a> {
                                 & (end_write_w - start_w as u64).tp_gt(&j);
                             tprob_pairs.fill(Real::ZERO);
                             let s_e = tprobs_window_src_e.slice(s![j as usize, .., ..]);
-                            hmm.combine_dips(s, s_e, tprob_pairs.view_mut(), cond);
+                            combine_dips(s, s_e, tprob_pairs.view_mut(), cond);
                             t += &tprob_pairs;
                             j += 1;
                         }
 
                         #[cfg(not(feature = "obliv"))]
                         if i == 0 || genotype_graph.graph[i].is_segment_marker() {
-                            hmm.combine_dips(s, tprob_pairs.view_mut());
+                            combine_dips(s, tprob_pairs.view_mut());
                             t += &tprob_pairs;
                         }
 
@@ -437,6 +439,344 @@ impl<'a> Mcmc<'a> {
         );
         println!("",);
     }
+
+    //fn iteration_rss(&mut self, iter_option: IterOptionInternal, mut rng: impl Rng) {
+        //println!("=== {:?} Iteration ===", iter_option);
+        //let now = Instant::now();
+
+        //let mut pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
+        //pbwt_group_filter
+            //.iter_mut()
+            //.zip(&self.params.pbwt_evaluted)
+            //.for_each(|(a, &b)| *a = *a && b);
+
+        //let neighbors = {
+            //#[cfg(feature = "obliv")]
+            //let (h_0, h_1): (Vec<_>, Vec<_>) = self
+                //.estimated_haps
+                //.rows()
+                //.into_iter()
+                //.map(|v| (v[0].tp_eq(&1), v[1].tp_eq(&1)))
+                //.unzip();
+
+            //#[cfg(not(feature = "obliv"))]
+            //let (h_0, h_1): (Vec<_>, Vec<_>) = self
+                //.estimated_haps
+                //.rows()
+                //.into_iter()
+                //.map(|v| (v[0] == 1, v[1] == 1))
+                //.unzip();
+
+            //#[cfg(feature = "obliv")]
+            //use compressed_pbwt_obliv::nn::find_top_neighbors;
+
+            //#[cfg(not(feature = "obliv"))]
+            //use compressed_pbwt::nn::find_top_neighbors;
+
+            //let mut nn_0 = find_top_neighbors(
+                //&h_0,
+                //self.params.s,
+                //&self.params.pbwt_tries,
+                //self.params.ref_panel.n_haps,
+                //&pbwt_group_filter,
+            //);
+
+            //let nn_1 = find_top_neighbors(
+                //&h_1,
+                //self.params.s,
+                //&self.params.pbwt_tries,
+                //self.params.ref_panel.n_haps,
+                //&pbwt_group_filter,
+            //);
+
+            //for (a, b) in nn_0.iter_mut().zip(nn_1.into_iter()) {
+                //a.as_mut().map(|v| v.extend(b.unwrap().into_iter()));
+            //}
+            //nn_0
+        //};
+
+        //let windows = self.windows(&mut rng);
+
+        //#[cfg(feature = "obliv")]
+        //let mut prev_ind = (U8::protect(0), U8::protect(0));
+        //#[cfg(not(feature = "obliv"))]
+        //let mut prev_ind = (0, 0);
+        //let mut sum_window_size = 0;
+        //let n_windows = windows.len();
+        //let mut ks = Vec::new();
+        //let mut tprob_pairs = Array2::<Real>::zeros((P, P));
+
+        //let mut i = 0;
+        //let mut is_first_window = true;
+
+        //let rprobs = self.params.hmm_params.get_rprobs(
+            ////self.ignored_sites.view(),
+            //Array1::from_elem(self.ignored_sites.len(), false).view(),
+            //&self.genotype_graph,
+            //self.params.variants.view(),
+        //);
+
+        //for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
+            //sum_window_size +=
+                //self.params.variants[end_w - 1].bp - self.params.variants[start_w].bp;
+            //let genotype_graph_w = self.genotype_graph.slice(start_w, end_w);
+            //let params_w = self.params.slice(start_w, end_w);
+            //let rprobs_w = rprobs.slice(start_w, end_w);
+            //let neighbors_w = &neighbors[start_w..end_w];
+            //let ignored_sites_w = self.ignored_sites.slice(s![start_w..end_w]);
+            //let (full_filter, k) = find_nn_bitmap(neighbors_w, params_w.ref_panel.n_haps);
+            //ks.push(k as f64);
+
+            //let filtered_blocks = params_w
+                //.ref_panel
+                //.blocks
+                //.iter()
+                //.map(|b| {
+                    //crate::rss_hmm::filtered_block::FilteredBlockSlice::from_block_slice(
+                        //b,
+                        //&full_filter,
+                    //)
+                //})
+                //.collect::<Vec<_>>();
+
+            //let (first_tprobs, tprobs) = crate::rss_hmm::HmmReduced::fwbw(
+                //&filtered_blocks,
+                //params_w.ref_panel.n_sites,
+                //genotype_graph_w.graph.view(),
+                //self.params.hmm_params.eprob,
+                //&rprobs_w,
+                ////ignored_sites_w,
+                //Array1::from_elem(ignored_sites_w.len(), false).view(),
+            //);
+
+            //let mut tprobs_window = Array3::<Real>::zeros(((end_w - start_w), P, P));
+
+            //let mut j = 0;
+            //Zip::from(tprobs_window.outer_iter_mut())
+                //.and(&genotype_graph_w.graph)
+                //.for_each(|mut t, g| {
+                    //if g.is_segment_marker() {
+                        //t.assign(&tprobs.slice(s![j, .., ..]));
+                        //j += 1;
+                    //}
+                //});
+
+            //if is_first_window {
+                //Zip::from(tprobs_window.slice_mut(s![0, .., ..]).rows_mut())
+                    //.for_each(|mut r| r.assign(&first_tprobs));
+            //}
+
+            ////{
+                ////let (selected_ref_panel, k) = select_ref_panel(&params_w.ref_panel, neighbors_w);
+                ////let mut hmm = Hmm::new();
+                ////let tprobs_window_ref = hmm.forward_backward(
+                    ////selected_ref_panel.view(),
+                    ////genotype_graph_w.graph.view(),
+                    ////&self.params.hmm_params,
+                    ////&rprobs_w,
+                    //////ignored_sites_w,
+                    ////Array1::from_elem(ignored_sites_w.len(), false).view(),
+                    ////is_first_window,
+                ////);
+
+                ////println!("window {:?}", (start_w, end_w));
+                ////Zip::indexed(tprobs_window_ref.outer_iter())
+                    ////.and(tprobs_window.outer_iter())
+                    ////.and(&genotype_graph_w.graph)
+                    ////.for_each(|i, r, t, g| {
+                        ////if g.is_segment_marker() {
+                            ////let ref_normalized = &r / r.sum();
+                            ////let test_normalized = &t / t.sum();
+                            ////if !ref_normalized.abs_diff_eq(&test_normalized, 1e6) {
+                                ////println!("site {i}");
+                                ////println!("ref:\n {:?}", r);
+                                ////println!("ref:\n {:?}", ref_normalized);
+                                ////println!("test:\n {:?}", t);
+                                ////println!("test:\n {:?}", test_normalized);
+                                ////panic!();
+                            ////} else {
+                                ////println!("site {i} (OK)");
+                            ////}
+                        ////}
+                    ////});
+            ////}
+
+            //#[cfg(feature = "obliv")]
+            //let tprobs_window_src = tprobs_window.view();
+
+            //#[cfg(feature = "obliv")]
+            //let tprobs_window_src_e = hmm.tprobs_e.view();
+
+            //#[cfg(feature = "obliv")]
+            //let mut tprobs_window_target = self.tprobs.slice_mut(s![start_w..end_w, .., ..]);
+
+            //#[cfg(not(feature = "obliv"))]
+            //let tprobs_window_src =
+                //tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
+
+            //#[cfg(not(feature = "obliv"))]
+            //let genotype_graph = &self.genotype_graph;
+
+            //#[cfg(not(feature = "obliv"))]
+            //let mut tprobs_window_target =
+                //self.tprobs
+                    //.slice_mut(s![start_write_w..end_write_w, .., ..]);
+
+            //#[cfg(feature = "obliv")]
+            //let mut j = 0u64;
+
+            //if iter_option == IterOptionInternal::Pruning
+                //|| iter_option == IterOptionInternal::Main(true)
+            //{
+                //Zip::from(tprobs_window_target.outer_iter_mut())
+                    //.and(tprobs_window_src.outer_iter())
+                    //.for_each(|t, s| {
+                        //#[cfg(feature = "obliv")]
+                        //{
+                            //let cond = (start_write_w - start_w as u64).tp_lt_eq(&j)
+                                //& (end_write_w - start_w as u64).tp_gt(&j);
+                            //let s_e = tprobs_window_src_e.slice(s![j as usize, .., ..]);
+                            //combine_dips(s, s_e, t, cond);
+                            //j += 1;
+                        //}
+
+                        //#[cfg(not(feature = "obliv"))]
+                        //if i == 0 || genotype_graph.graph[i].is_segment_marker() {
+                            //combine_dips(s, t);
+                        //} else {
+                            //let mut t = t;
+                            //t.fill(0.);
+                        //}
+                        //i += 1;
+                    //});
+            //} else if iter_option == IterOptionInternal::Main(false) {
+                //Zip::from(tprobs_window_target.outer_iter_mut())
+                    //.and(tprobs_window_src.outer_iter())
+                    //.for_each(|mut t, s| {
+                        //#[cfg(feature = "obliv")]
+                        //{
+                            //let cond = (start_write_w - start_w as u64).tp_lt_eq(&j)
+                                //& (end_write_w - start_w as u64).tp_gt(&j);
+                            //tprob_pairs.fill(Real::ZERO);
+                            //let s_e = tprobs_window_src_e.slice(s![j as usize, .., ..]);
+                            //combine_dips(s, s_e, tprob_pairs.view_mut(), cond);
+                            //t += &tprob_pairs;
+                            //j += 1;
+                        //}
+
+                        //#[cfg(not(feature = "obliv"))]
+                        //if i == 0 || genotype_graph.graph[i].is_segment_marker() {
+                            //combine_dips(s, tprob_pairs.view_mut());
+                            //t += &tprob_pairs;
+                        //}
+
+                        //i += 1;
+                    //});
+            //}
+
+            //#[cfg(not(feature = "obliv"))]
+            //let tprobs_window_src =
+                //tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
+
+            //// sample
+            //#[cfg(feature = "obliv")]
+            //let phased_ind_window = sampling::forward_sampling(
+                //prev_ind,
+                //tprobs_window.view(),
+                //hmm.tprobs_e.view(),
+                //genotype_graph_w.graph.view(),
+                //is_first_window,
+                //start_write_w - start_w as u64,
+                //&mut rng,
+            //);
+
+            //#[cfg(not(feature = "obliv"))]
+            //let phased_ind_window = sampling::forward_sampling(
+                //prev_ind,
+                //tprobs_window_src.view(),
+                //genotype_graph_w
+                    //.graph
+                    //.slice(s![start_write_w - start_w..end_write_w - start_w]),
+                //is_first_window,
+                //&mut rng,
+            //);
+
+            //#[cfg(feature = "obliv")]
+            //let mut tmp = self.phased_ind.slice_mut(s![start_w..end_w, ..]);
+
+            //#[cfg(not(feature = "obliv"))]
+            //let mut tmp = self
+                //.phased_ind
+                //.slice_mut(s![start_write_w..end_write_w, ..]);
+
+            //#[cfg(feature = "obliv")]
+            //{
+                //ndarray::Zip::indexed(tmp.rows_mut())
+                    //.and(phased_ind_window.rows())
+                    //.for_each(|i, mut t, s| {
+                        //let cond = (start_write_w - start_w as u64).tp_lt_eq(&(i as u64))
+                            //& (end_write_w - start_w as u64).tp_gt(&(i as u64));
+                        //t[0] = cond.select(s[0], t[0]);
+                        //t[1] = cond.select(s[1], t[1]);
+                    //});
+
+                //for i in 0..phased_ind_window.nrows() {
+                    //let cond = (end_write_w - start_w as u64 - 1).tp_eq(&(i as u64));
+                    //prev_ind.0 = cond.select(phased_ind_window[[i, 0]], prev_ind.0);
+                    //prev_ind.1 = cond.select(phased_ind_window[[i, 1]], prev_ind.1);
+                //}
+            //}
+            //#[cfg(not(feature = "obliv"))]
+            //{
+                //tmp.assign(&phased_ind_window);
+                //prev_ind = (
+                    //phased_ind_window[[phased_ind_window.nrows() - 1, 0]],
+                    //phased_ind_window[[phased_ind_window.nrows() - 1, 1]],
+                //);
+            //}
+            //is_first_window = false;
+        //}
+
+        //self.genotype_graph
+            //.traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
+
+        //if iter_option == IterOptionInternal::Pruning {
+            //self.genotype_graph.prune(self.tprobs.view());
+            //self.cur_overlap_region_len *= 2;
+        //}
+
+        //#[cfg(not(feature = "obliv"))]
+        //println!(
+            //"#Segments: {}",
+            //self.genotype_graph
+                //.graph
+                //.iter()
+                //.filter(|g| g.is_segment_marker())
+                //.count()
+        //);
+        //use statrs::statistics::Statistics;
+        //println!(
+            //"K: {:.3}+/-{:.3}",
+            //Statistics::mean(&ks),
+            //Statistics::std_dev(&ks)
+        //);
+
+        //println!(
+            //"Window size: {:.2} Mb",
+            //sum_window_size as f64 / n_windows as f64 / 1e6
+        //);
+
+        //println!("Elapsed time: {} ms", (Instant::now() - now).as_millis());
+        //println!("Emission: {} ms", EMIS_T.lock().unwrap().as_millis());
+        //println!("Transition: {} ms", TRAN_T.lock().unwrap().as_millis());
+        //println!("Collapse: {} ms", COLL_T.lock().unwrap().as_millis());
+        //println!("Combine: {} ms", COMB_T.lock().unwrap().as_millis());
+        //println!(
+            //"Combine Diploid: {} ms",
+            //COMBD_T.lock().unwrap().as_millis()
+        //);
+        //println!("",);
+    //}
 
     fn windows(&self, mut rng: impl Rng) -> Vec<((usize, usize), (Usize, Usize))> {
         let windows = windows_split::split(
@@ -679,3 +1019,44 @@ fn select_ref_panel(
     #[cfg(not(feature = "obliv"))]
     (ref_panel.filter(&neighbors_bitmap), k)
 }
+
+//fn find_nn_bitmap(neighbors: &[Option<Vec<Usize>>], n_haps: usize) -> (Vec<Bool>, usize) {
+    //#[cfg(feature = "obliv")]
+    //let neighbors_bitmap = {
+        //let mut bitmap = obliv_utils::bitmap::OblivBitmap::new(ref_panel.n_haps);
+        //bitmap.map_from_iter(
+            //neighbors
+                //.into_iter()
+                //.filter_map(|v| v.as_ref())
+                //.map(|v| v.iter().map(|&v| v.as_u32()))
+                //.flatten(),
+        //);
+        //bitmap
+    //};
+
+    //#[cfg(not(feature = "obliv"))]
+    //let neighbors_bitmap = {
+        //let mut bitmap = vec![false; n_haps];
+        //for &i in neighbors
+            //.into_iter()
+            //.filter_map(|v| v.as_ref())
+            //.map(|v| v.iter())
+            //.flatten()
+        //{
+            //bitmap[i] = true;
+        //}
+        //bitmap
+    //};
+
+    //#[cfg(feature = "obliv")]
+    //let k = neighbors_bitmap.iter().filter(|b| b.expose()).count();
+
+    //#[cfg(not(feature = "obliv"))]
+    //let k = neighbors_bitmap.iter().filter(|&&b| b).count();
+
+    //#[cfg(feature = "obliv")]
+    //return (neighbors_bitmap.into_iter().collect(), k);
+
+    //#[cfg(not(feature = "obliv"))]
+    //(neighbors_bitmap, k)
+//}

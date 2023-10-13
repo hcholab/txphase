@@ -125,7 +125,7 @@ fn constrained_paired_sample(
     }
 
     #[cfg(feature = "obliv")]
-    crate::hmm::renorm_equalize_scale_arr1(combined.view_mut(), combined_e.view_mut());
+    crate::dynamic_fixed::renorm_equalize_scale_arr1(combined.view_mut(), combined_e.view_mut());
 
     let ind1 = weighted_sample(combined.view(), rng);
 
