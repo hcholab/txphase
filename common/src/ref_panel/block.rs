@@ -1,12 +1,10 @@
 use bitvec::prelude::{BitSlice, BitVec, Lsb0};
-use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
+use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, Zip};
 use std::collections::HashMap;
 
 pub struct Block {
-    pub index_map: Array1<usize>,
+    pub index_map: Array1<u16>,
     pub haplotypes: Array2<u8>,
-    //pub weights: Array1<f64>,
-    //pub inv_weights: Array1<f64>,
     pub n_unique: usize,
 }
 
@@ -27,8 +25,6 @@ impl Block {
         BlockSlice {
             index_map: self.index_map.view(),
             haplotypes: self.haplotypes.view(),
-            //weights: self.weights.view(),
-            //inv_weights: self.inv_weights.view(),
             n_unique: self.n_unique,
         }
     }
@@ -37,8 +33,6 @@ impl Block {
         BlockSlice {
             index_map: self.index_map.view(),
             haplotypes: self.haplotypes.slice(s![start..end, ..]),
-            //weights: self.weights.view(),
-            //inv_weights: self.inv_weights.view(),
             n_unique: self.n_unique,
         }
     }
@@ -101,21 +95,16 @@ fn transpose_haps(haps: ArrayView2<u8>, ncols: usize) -> Array2<u8> {
 pub fn make_unique_hap_block(block: &Block) -> Block {
     let block_transposed = block.transpose();
     let mut unique = HashMap::new();
-    let mut new_index_map = Array1::<usize>::zeros(block.index_map.len());
+    let mut new_index_map = Array1::<u16>::zeros(block.index_map.len());
     Zip::from(&block.index_map)
         .and(&mut new_index_map)
         .for_each(|&i_b, i| {
-            let item = block_transposed.haplotypes.row(i_b);
+            let item = block_transposed.haplotypes.row(i_b as usize);
             let cur_len = unique.len();
             let c = unique.entry(item.clone()).or_insert(cur_len);
-            *i = *c;
+            *i = *c as u16;
         });
     let n_unique = unique.len();
-    //let mut weights = Array1::<f64>::zeros(n_unique);
-    //for &i in &new_index_map {
-    //weights[i as usize] += 1.;
-    //}
-
     let mut new_haps = Array2::<u8>::zeros((n_unique, block.n_sites().div_ceil(8)));
     for (b, i) in unique.into_iter() {
         let bv = BitVec::<u8, Lsb0>::from_slice(b.as_slice().unwrap());
@@ -128,8 +117,35 @@ pub fn make_unique_hap_block(block: &Block) -> Block {
     Block {
         index_map: new_index_map,
         haplotypes: new_haps_transposed,
-        //inv_weights: weights.map(|v| 1. / v),
-        //weights,
+        n_unique,
+    }
+}
+
+pub fn make_unique_hap_block_slice(block: &BlockSlice) -> Block {
+    let block_transposed = block.transpose();
+    let mut unique = HashMap::new();
+    let mut new_index_map = Array1::<u16>::zeros(block.index_map.len());
+    Zip::from(&block.index_map)
+        .and(&mut new_index_map)
+        .for_each(|&i_b, i| {
+            let item = block_transposed.haplotypes.row(i_b as usize);
+            let cur_len = unique.len();
+            let c = unique.entry(item.clone()).or_insert(cur_len);
+            *i = *c as u16;
+        });
+    let n_unique = unique.len();
+    let mut new_haps = Array2::<u8>::zeros((n_unique, block.n_sites().div_ceil(8)));
+    for (b, i) in unique.into_iter() {
+        let bv = BitVec::<u8, Lsb0>::from_slice(b.as_slice().unwrap());
+        new_haps
+            .row_mut(i)
+            .assign(&ArrayView1::<u8>::from(bv.as_raw_slice()));
+    }
+
+    let new_haps_transposed = transpose_haps(new_haps.view(), block.n_sites());
+    Block {
+        index_map: new_index_map,
+        haplotypes: new_haps_transposed,
         n_unique,
     }
 }
@@ -139,27 +155,22 @@ pub fn merge_blocks(left_block: &Block, right_block: &Block) -> Block {
     let right_transposed = right_block.transpose();
 
     let mut unique = HashMap::new();
-    let mut new_index_map = Array1::<usize>::zeros(left_block.index_map.len());
+    let mut new_index_map = Array1::<u16>::zeros(left_block.index_map.len());
 
     Zip::from(&left_block.index_map)
         .and(&right_block.index_map)
         .and(&mut new_index_map)
         .for_each(|&i_l, &i_r, i| {
             let item = (
-                left_transposed.haplotypes.row(i_l),
-                right_transposed.haplotypes.row(i_r),
+                left_transposed.haplotypes.row(i_l as usize),
+                right_transposed.haplotypes.row(i_r as usize),
             );
             let cur_len = unique.len();
             let c = unique.entry(item.clone()).or_insert(cur_len);
-            *i = *c;
+            *i = *c as u16;
         });
 
     let n_unique = unique.len();
-    //let mut weights = Array1::<f64>::zeros(n_unique);
-    //for &i in &new_index_map {
-    //weights[i as usize] += 1.;
-    //}
-
     let mut new_haps = Array2::<u8>::zeros((
         n_unique,
         ((left_block.n_sites() + right_block.n_sites()) + 7) / 8,
@@ -183,18 +194,32 @@ pub fn merge_blocks(left_block: &Block, right_block: &Block) -> Block {
     Block {
         index_map: new_index_map,
         haplotypes: new_haps_transposed,
-        //inv_weights: weights.map(|v| 1. / v),
-        //weights,
         n_unique,
     }
 }
 
+pub fn break_block(block: &Block, max_unique: usize) -> Vec<Block> {
+    let mut new_blocks = Vec::new();
+    let left_block = make_unique_hap_block_slice(&block.slice(0, block.n_sites()/2));
+    let right_block = make_unique_hap_block_slice(&block.slice(block.n_sites()/2, block.n_sites()));
+
+    if left_block.n_unique() > max_unique {
+        new_blocks.extend(break_block(&left_block, max_unique).into_iter());
+    } else {
+        new_blocks.push(left_block);
+    }
+    if right_block.n_unique() > max_unique {
+        new_blocks.extend(break_block(&right_block, max_unique).into_iter());
+    } else {
+        new_blocks.push(right_block);
+    }
+    new_blocks
+}
+
 #[derive(Clone)]
 pub struct BlockSlice<'a> {
-    pub index_map: ArrayView1<'a, usize>,
+    pub index_map: ArrayView1<'a, u16>,
     pub haplotypes: ArrayView2<'a, u8>,
-    //pub weights: ArrayView1<'a, f64>,
-    //pub inv_weights: ArrayView1<'a, f64>,
     pub n_unique: usize,
 }
 
@@ -237,71 +262,89 @@ impl<'a> BlockSlice<'a> {
     pub fn get_members(&self) -> Vec<Vec<usize>> {
         let mut members = vec![Vec::new(); self.n_unique];
         for (i, &index) in self.index_map.iter().enumerate() {
-            members[index].push(i);
+            members[index as usize].push(i);
         }
         members
+    }
+
+    pub fn transpose(&self) -> TransposedBlock {
+        let ncols = (self.n_sites() + 7) / 8;
+        let mut transposed_haplotypes = Array2::<u8>::zeros((self.n_unique(), ncols));
+        Zip::indexed(self.haplotypes.rows()).for_each(|i, s| {
+            let s = BitSlice::<u8, Lsb0>::from_slice(s.as_slice().unwrap());
+            for (b, mut hap) in s.iter().zip(transposed_haplotypes.rows_mut().into_iter()) {
+                let hap = BitSlice::<u8, Lsb0>::from_slice_mut(hap.as_slice_mut().unwrap());
+                hap.set(i, *b);
+            }
+        });
+
+        TransposedBlock {
+            index_map: self.index_map.to_owned(),
+            haplotypes: transposed_haplotypes,
+            n_sites: self.n_sites(),
+        }
     }
 }
 
 pub struct TransposedBlock {
-    pub index_map: Array1<usize>,
+    pub index_map: Array1<u16>,
     pub haplotypes: Array2<u8>,
     pub n_sites: usize,
 }
 
-impl TransposedBlock {
-    pub fn slice(&self, start: usize, end: usize) -> TransposedBlockSlice {
-        TransposedBlockSlice {
-            index_map: self.index_map.view(),
-            haplotypes: self.haplotypes.view(),
-            n_sites: end - start,
-            range: Some((start, end)),
-        }
-    }
+//impl TransposedBlock {
+//pub fn slice(&self, start: usize, end: usize) -> TransposedBlockSlice {
+//TransposedBlockSlice {
+//index_map: self.index_map.view(),
+//haplotypes: self.haplotypes.view(),
+//n_sites: end - start,
+//range: Some((start, end)),
+//}
+//}
 
-    pub fn as_slice(&self) -> TransposedBlockSlice {
-        TransposedBlockSlice {
-            index_map: self.index_map.view(),
-            haplotypes: self.haplotypes.view(),
-            n_sites: self.n_sites,
-            range: None,
-        }
-    }
-}
+//pub fn as_slice(&self) -> TransposedBlockSlice {
+//TransposedBlockSlice {
+//index_map: self.index_map.view(),
+//haplotypes: self.haplotypes.view(),
+//n_sites: self.n_sites,
+//range: None,
+//}
+//}
+//}
 
-pub struct TransposedBlockSlice<'a> {
-    index_map: ArrayView1<'a, usize>,
-    haplotypes: ArrayView2<'a, u8>,
-    n_sites: usize,
-    range: Option<(usize, usize)>,
-}
+//pub struct TransposedBlockSlice<'a> {
+//index_map: ArrayView1<'a, usize>,
+//haplotypes: ArrayView2<'a, u8>,
+//n_sites: usize,
+//range: Option<(usize, usize)>,
+//}
 
-impl<'a> TransposedBlockSlice<'a> {
-    pub fn filter(&self, bitmask: &[bool], mut output: ArrayViewMut2<i8>) {
-        assert_eq!(output.nrows(), self.n_sites);
-        let mut hap_count = 0;
-        for (i, b) in bitmask.iter().enumerate() {
-            if *b {
-                let hap_i = self.index_map[i] as usize;
-                let tmp = self.haplotypes.row(hap_i);
-                let hap = BitSlice::<u8, Lsb0>::from_slice(tmp.as_slice().unwrap());
-                let hap = if let Some(&(start, end)) = self.range.as_ref() {
-                    &hap[start..end]
-                } else {
-                    &hap[..self.n_sites]
-                };
-                for (mut p, b) in output.rows_mut().into_iter().zip(hap.iter()) {
-                    p[hap_count] = *b as i8;
-                }
-                hap_count += 1;
-            }
-        }
-    }
+//impl<'a> TransposedBlockSlice<'a> {
+//pub fn filter(&self, bitmask: &[bool], mut output: ArrayViewMut2<i8>) {
+//assert_eq!(output.nrows(), self.n_sites);
+//let mut hap_count = 0;
+//for (i, b) in bitmask.iter().enumerate() {
+//if *b {
+//let hap_i = self.index_map[i] as usize;
+//let tmp = self.haplotypes.row(hap_i);
+//let hap = BitSlice::<u8, Lsb0>::from_slice(tmp.as_slice().unwrap());
+//let hap = if let Some(&(start, end)) = self.range.as_ref() {
+//&hap[start..end]
+//} else {
+//&hap[..self.n_sites]
+//};
+//for (mut p, b) in output.rows_mut().into_iter().zip(hap.iter()) {
+//p[hap_count] = *b as i8;
+//}
+//hap_count += 1;
+//}
+//}
+//}
 
-    pub fn n_sites(&self) -> usize {
-        self.n_sites
-    }
-}
+//pub fn n_sites(&self) -> usize {
+//self.n_sites
+//}
+//}
 
 pub struct ExpandedBlock {
     pub rhap: Array2<i8>,
@@ -354,18 +397,9 @@ pub fn m3vcf_block_scan(
         row.assign(&ref_row);
     }
 
-    //let mut weights = Array1::<f64>::zeros(block.nuniq);
-    //for &i in &block.indmap {
-    //weights[i as usize] += 1.;
-    //}
-
-    let index_map = block.indmap.map(|&i| i as usize);
-
     Some(Block {
-        index_map,
+        index_map: block.indmap.clone(),
         haplotypes: filtered_haps,
-        //inv_weights: weights.map(|v| 1. / v),
-        //weights,
         n_unique: block.nuniq,
     })
 }

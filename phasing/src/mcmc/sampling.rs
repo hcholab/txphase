@@ -131,12 +131,19 @@ fn constrained_paired_sample(
 
     #[cfg(feature = "obliv")]
     return (ind1, P as u8 - 1 - ind1);
+    #[cfg(not(feature = "obliv"))]
+    assert!(ind1 != 8);
 
     #[cfg(not(feature = "obliv"))]
     (ind1 as u8, P as u8 - 1 - ind1 as u8)
 }
 
 fn weighted_sample(weights: ArrayView1<Real>, mut rng: impl Rng) -> U8 {
+    //for &i in weights {
+        //assert_ne!(i, 0.);
+    //}
+    //let weights = &weights/weights.sum();
+
     let mut total_weight = weights[0];
     let mut cumulative_weights: Vec<Real> = Vec::with_capacity(weights.len());
     cumulative_weights.push(total_weight);
@@ -144,6 +151,8 @@ fn weighted_sample(weights: ArrayView1<Real>, mut rng: impl Rng) -> U8 {
         total_weight += w;
         cumulative_weights.push(total_weight);
     }
+
+    //println!("{total_weight}");
 
     #[cfg(feature = "obliv")]
     let chosen_weight = tp_value_real!(rng.gen_range(0.0..1.0), f32) * total_weight;

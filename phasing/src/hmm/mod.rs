@@ -57,7 +57,21 @@ pub fn combine_dips(
 
     #[cfg(feature = "obliv")]
     {
-        crate::hmm::renorm_equalize_scale_all(tprobs_dips.view_mut(), tprobs_dips_e_ext.view_mut());
+        renorm_equalize_scale_all(tprobs_dips.view_mut(), tprobs_dips_e_ext.view_mut());
+         //let mut tprobs_dips_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
+            //renorm_equalize_scale(
+                //tprobs_dips.view_mut(),
+                //tprobs_dips_e_ext.view_mut(),
+                //tprobs_dips_e.view_mut(),
+            //);
+
+        //let (sum, sum_e) = sum_scale(tprobs_dips.view(), tprobs_dips_e.view());
+        //tprobs_dips *= Real::protect_i64(1) / sum;
+        //tprobs_dips_e.map_mut(|v| *v -= sum_e);
+        //Zip::from(tprobs_dips.rows_mut())
+            //.and(&mut tprobs_dips_e)
+            //.for_each(|t, e| match_scale_row(TpI16::protect(0), t, e));
+
         ndarray::Zip::from(&mut _tprobs_dips)
             .and(&tprobs_dips)
             .for_each(|t, &s| *t = cond.select(s, *t));

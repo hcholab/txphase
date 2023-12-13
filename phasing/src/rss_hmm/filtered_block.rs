@@ -5,7 +5,7 @@ use ndarray::{Array1, ArrayView1, ArrayView2};
 
 #[derive(Clone)]
 pub struct FilteredBlockSlice<'a> {
-    pub index_map: Array1<usize>,
+    pub index_map: Array1<u16>,
     pub haplotypes: ArrayView2<'a, u8>,
     pub weights: Array1<f64>,
     pub inv_weights: Array1<f64>,
@@ -25,8 +25,8 @@ impl<'a> FilteredBlockSlice<'a> {
             .zip(block_slice.index_map.iter())
             .filter(|(&b, _)| b)
             .for_each(|(_, &i)| {
-                filter[i] = true;
-                weights[i] += 1;
+                filter[i as usize] = true;
+                weights[i as usize] += 1;
             });
 
         let mut count = 0;
@@ -34,7 +34,7 @@ impl<'a> FilteredBlockSlice<'a> {
             .iter()
             .map(|&b| {
                 let tmp = count;
-                count += b as usize;
+                count += b as u16;
                 tmp
             })
             .collect::<Vec<_>>();
@@ -44,7 +44,7 @@ impl<'a> FilteredBlockSlice<'a> {
                 .iter()
                 .zip(block_slice.index_map.iter())
                 .filter(|(&b, _)| b)
-                .map(|(_, &i)| remap[i]),
+                .map(|(_, &i)| remap[i as usize]),
         );
 
         let weights = Array1::from_iter(weights.into_iter().filter(|&v| v != 0).map(|v| v as f64));

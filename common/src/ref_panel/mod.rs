@@ -3,6 +3,9 @@ pub use block::*;
 
 use ndarray::Array1;
 
+const MAX_UNIQUE: usize = 10000;
+const MIN_UNIQUE: usize = 300;
+
 pub fn m3vcf_scan(
     meta: &m3vcf::RefPanelMeta,
     m3vcf_blocks: &[m3vcf::Block],
@@ -13,7 +16,7 @@ pub fn m3vcf_scan(
     let mut pos = 0;
 
     let mut blocks = Vec::new();
-    let mut transposed_blocks = Vec::new();
+    //let mut transposed_blocks = Vec::new();
 
     let mut cur_block: Option<Block> = None;
 
@@ -36,12 +39,15 @@ pub fn m3vcf_scan(
         if let Some(block) = m3vcf_block_scan(m3vcf_block, sites_bitmask_block, i == 0, &mut afreqs)
         {
             if let Some(cur_block_) = cur_block.take() {
-                if cur_block_.n_unique() < 300 {
+                if cur_block_.n_unique() < MIN_UNIQUE  {
                     let merge_block = merge_blocks(&cur_block_, &block);
                     cur_block = Some(merge_block);
+                } else if cur_block_.n_unique() > MAX_UNIQUE {
+                    blocks.extend(break_block(&cur_block_, MAX_UNIQUE).into_iter());
+                    cur_block = Some(block);
                 } else {
                     let cur_block_ = make_unique_hap_block(&cur_block_);
-                    transposed_blocks.push(cur_block_.transpose());
+                    //transposed_blocks.push(cur_block_.transpose());
                     blocks.push(cur_block_);
 
                     //blocks.push(make_unique_hap_block(&cur_block_));
@@ -52,18 +58,24 @@ pub fn m3vcf_scan(
             }
         }
     }
+
     if let Some(cur_block) = cur_block.take() {
-        let new_block = make_unique_hap_block(&cur_block);
-        transposed_blocks.push(new_block.transpose());
-        blocks.push(new_block);
+        if cur_block.n_unique() > MAX_UNIQUE {
+            blocks.extend(break_block(&cur_block, MAX_UNIQUE).into_iter());
+        } else {
+            let new_block = make_unique_hap_block(&cur_block);
+            blocks.push(new_block);
+        }
+        //transposed_blocks.push(new_block.transpose());
     }
 
+    //println!("n_blocks: {}", blocks.len());
     //for block in &blocks {
-    //println!(
-    //"n_unique: {},\t n_sites: {}",
-    //block.n_unique(),
-    //block.n_sites()
-    //);
+        //println!(
+            //"n_unique: {},\t n_sites: {}",
+            //block.n_unique(),
+            //block.n_sites()
+        //);
     //}
 
     //for i in 1..blocks.len() {
@@ -93,7 +105,7 @@ pub fn m3vcf_scan(
 
     let ref_panel = RefPanel {
         blocks,
-        transposed_blocks,
+        //transposed_blocks,
         block_map,
         n_haps: meta.n_haps,
         n_sites: afreqs.len(),
@@ -104,7 +116,7 @@ pub fn m3vcf_scan(
 
 pub struct RefPanel {
     pub blocks: Vec<Block>,
-    pub transposed_blocks: Vec<TransposedBlock>,
+    //pub transposed_blocks: Vec<TransposedBlock>,
     pub block_map: Vec<usize>,
     pub n_haps: usize,
     pub n_sites: usize,
@@ -134,32 +146,32 @@ impl RefPanel {
         };
 
         let mut block_slices = Vec::with_capacity(end_block_id - start_block_id + 1);
-        let mut transposed_block_slices = Vec::with_capacity(end_block_id - start_block_id + 1);
+        //let mut transposed_block_slices = Vec::with_capacity(end_block_id - start_block_id + 1);
 
         let start_block_slice =
             self.blocks[start_block_id].slice(start_offset, self.blocks[start_block_id].n_sites());
-        let start_transposed_block_slice = self.transposed_blocks[start_block_id]
-            .slice(start_offset, self.blocks[start_block_id].n_sites());
+        //let start_transposed_block_slice = self.transposed_blocks[start_block_id]
+        //.slice(start_offset, self.blocks[start_block_id].n_sites());
 
         let end_block_slice = self.blocks[end_block_id].slice(0, end_offset);
-        let end_transposed_block_slice = self.transposed_blocks[end_block_id].slice(0, end_offset);
+        //let end_transposed_block_slice = self.transposed_blocks[end_block_id].slice(0, end_offset);
 
         block_slices.push(start_block_slice);
-        transposed_block_slices.push(start_transposed_block_slice);
+        //transposed_block_slices.push(start_transposed_block_slice);
 
         for i in (start_block_id + 1)..end_block_id {
             block_slices.push(self.blocks[i].as_slice());
-            transposed_block_slices.push(self.transposed_blocks[i].as_slice());
+            //transposed_block_slices.push(self.transposed_blocks[i].as_slice());
         }
 
         block_slices.push(end_block_slice);
-        transposed_block_slices.push(end_transposed_block_slice);
+        //transposed_block_slices.push(end_transposed_block_slice);
 
         let n_sites = block_slices.iter().map(|b| b.n_sites()).sum();
 
         RefPanelSlice {
             blocks: block_slices,
-            transposed_blocks: transposed_block_slices,
+            //transposed_blocks: transposed_block_slices,
             n_haps: self.n_haps,
             n_sites,
         }
@@ -172,32 +184,32 @@ impl RefPanel {
 
 pub struct RefPanelSlice<'a> {
     pub blocks: Vec<BlockSlice<'a>>,
-    pub transposed_blocks: Vec<TransposedBlockSlice<'a>>,
+    //pub transposed_blocks: Vec<TransposedBlockSlice<'a>>,
     pub n_haps: usize,
     pub n_sites: usize,
 }
 
-use crate::types::Genotype;
-use ndarray::{s, Array2};
+//use crate::types::Genotype;
+//use ndarray::{s, Array2};
 
 impl<'a> RefPanelSlice<'a> {
     pub fn iter(&self) -> RowIterator<'a, Box<dyn Iterator<Item = BlockSlice<'a>> + 'a>> {
         RowIterator::from_blocks_iter(Box::new(self.blocks.clone().into_iter()))
     }
 
-    pub fn filter(&self, bitmask: &[bool]) -> Array2<Genotype> {
-        let n_haps = bitmask.iter().filter(|b| **b).count();
-        let mut ref_panel = Array2::<Genotype>::zeros((self.n_sites, n_haps));
-        let mut pos = 0;
-        for block in self.transposed_blocks.iter() {
-            block.filter(
-                bitmask,
-                ref_panel.slice_mut(s![pos..pos + block.n_sites(), ..]),
-            );
-            pos += block.n_sites();
-        }
-        ref_panel
-    }
+    //pub fn filter(&self, bitmask: &[bool]) -> Array2<Genotype> {
+    //let n_haps = bitmask.iter().filter(|b| **b).count();
+    //let mut ref_panel = Array2::<Genotype>::zeros((self.n_sites, n_haps));
+    //let mut pos = 0;
+    //for block in self.transposed_blocks.iter() {
+    //block.filter(
+    //bitmask,
+    //ref_panel.slice_mut(s![pos..pos + block.n_sites(), ..]),
+    //);
+    //pos += block.n_sites();
+    //}
+    //ref_panel
+    //}
 }
 
 fn gen_block_map(blocks: &[Block]) -> Vec<usize> {

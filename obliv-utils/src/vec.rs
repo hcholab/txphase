@@ -92,7 +92,6 @@ where
             .flatten()
             .take(len)
     }
-
     pub fn cond_copy_from(&mut self, src: &Self, cond: TpBool) {
         assert_eq!(self.len(), src.len());
 
@@ -160,6 +159,15 @@ where
         }
         new_self
     }
+
+    pub fn default(len: usize) -> Self {
+        let n_aligned = len.div_ceil(rl_cap::<T>());
+        Self {
+            inner: vec![Aligned::<T>::default(); n_aligned],
+            len: len as u32, 
+            last_len: (len % rl_cap::<T>()) as u8,
+        }
+    }
 }
 
 impl<T> OblivVec<T>
@@ -200,12 +208,12 @@ where
         }
     }
 
-    //pub fn cond_copy_from(&mut self, src: &Self, cond: TpBool) {
-    //assert_eq!(self.len(), src.len());
-    //for (target, source) in self.iter_mut().zip(src.iter()) {
-    //*target = cond.select(source.clone(), target.clone());
-    //}
-    //}
+    pub fn cond_copy_from_slice(&mut self, src: &[T], cond: TpBool) {
+        assert_eq!(self.len(), src.len());
+        for (target, source) in self.iter_mut().zip(src.iter()) {
+            *target = cond.select(source.clone(), target.clone());
+        }
+    }
 }
 
 impl<T> OblivVec<T>
@@ -250,6 +258,27 @@ where
         rank_list
     }
 }
+
+impl<T> std::ops::IndexMut<usize> for OblivVec<T>
+where
+    [(); rl_cap::<T>()]:,
+{
+    fn index_mut(&mut self, index: usize) -> &mut T {
+        if index >= self.len() {
+            panic!();
+        }
+        &mut self.inner[index/rl_cap::<T>()].0[index%rl_cap::<T>()]
+    }
+}
+
+//impl<T> std::ops::Index<usize> for OblivVec<T>
+//where
+    //[(); rl_cap::<T>()]:,
+//{
+    //fn index(&self, index: usize) -> &T {
+        //&mut self.inner[index/rl_cap::<T>()].0[index%rl_cap::<T>()]
+    //}
+//}
 
 impl<T> Extend<T> for OblivVec<T>
 where

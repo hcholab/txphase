@@ -9,7 +9,7 @@ default = []
 obliv = []
 
 [dependencies]
-m3vcf = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/m3vcf" }
+m3vcf = { path = "/home/nd549/workspace/sgx-genotype-imputation/m3vcf" }
 ndarray = {version = "0.15", features = ["approx", "serde"]}
 bitvec = "1.0"
 #timing_shield = { /home/ndokmai/workspace/sgx-genotype-imputation/m3vcf }

@@ -4,7 +4,7 @@ mod geneticmap;
 mod record;
 mod site;
 
-use ndarray::ArrayView2;
+use ndarray::Array2;
 use rust_htslib::bcf;
 use std::collections::HashSet;
 use std::io::Write;
@@ -38,9 +38,8 @@ fn main() {
         m3vcf::load_ref_panel(std::path::Path::new(ref_panel_path));
     let ref_panel_blocks = ref_panel_block_iter.collect::<Vec<_>>();
 
-    let (mut target_samples, ref_sites_bitmask, input_bcf_header, input_records_filtered) =
+    let (target_samples, ref_sites_bitmask, input_bcf_header, input_records_filtered) =
         process_input(&Path::new(input_path), &mut Path::new(ref_sites_path));
-    let target_sample = target_samples.pop().unwrap();
 
     let mut sp_stream = bufstream::BufStream::new(tcp_keep_connecting(SocketAddr::from((
         IpAddr::from_str("127.0.0.1").unwrap(),
@@ -54,13 +53,16 @@ fn main() {
     bincode::serialize_into(&mut sp_stream, &ref_sites_bitmask).unwrap();
     bincode::serialize_into(&mut sp_stream, &interpolated_cms).unwrap();
     bincode::serialize_into(&mut sp_stream, &bps).unwrap();
-    bincode::serialize_into(&mut sp_stream, &target_sample).unwrap();
+    bincode::serialize_into(&mut sp_stream, &target_samples).unwrap();
     sp_stream.flush().unwrap();
 
-    let phased: ndarray::Array2<i8> = bincode::deserialize_from(&mut sp_stream).unwrap();
+    let phased: Vec<ndarray::Array2<i8>> = bincode::deserialize_from(&mut sp_stream).unwrap();
+
+    println!("phased len = {}", phased.len());
+
     write_vcf(
         &output_path,
-        phased.view(),
+        &phased[..],
         &input_bcf_header,
         &input_records_filtered,
     );
@@ -145,16 +147,25 @@ fn process_input(
 
 fn write_vcf(
     file_name: &str,
-    phased: ArrayView2<i8>,
+    phased: &[Array2<i8>],
     input_bcf_header: &bcf::header::HeaderView,
     input_records_filtered: &[bcf::record::Record],
 ) {
     use bcf::record::GenotypeAllele;
-    let phased = phased
-        .rows()
-        .into_iter()
-        .map(|v| (v[0], v[1]))
-        .collect::<Vec<_>>();
+
+    let mut genotypes = vec![Vec::new(); input_records_filtered.len()];
+
+    for sample in phased {
+        for (r, g) in sample.rows().into_iter().zip(genotypes.iter_mut()) {
+            if r[0] != -1 && r[1] != -1 {
+                g.push(GenotypeAllele::Phased(r[0] as i32));
+                g.push(GenotypeAllele::Phased(r[1] as i32));
+            } else {
+                g.push(GenotypeAllele::PhasedMissing);
+                g.push(GenotypeAllele::PhasedMissing);
+            }
+        }
+    }
 
     let mut out_vcf = bcf::Writer::from_path(
         &Path::new(file_name),
@@ -164,18 +175,13 @@ fn write_vcf(
     )
     .unwrap();
 
-    for (genotype, input_record) in phased.into_iter().zip(input_records_filtered) {
+    for (genotype, input_record) in genotypes.into_iter().zip(input_records_filtered) {
         let mut new_record = out_vcf.empty_record();
         new_record.set_rid(input_record.rid());
         new_record.set_pos(input_record.pos());
         new_record.set_id(&input_record.id()).unwrap();
         new_record.set_alleles(&input_record.alleles()).unwrap();
-        new_record
-            .push_genotypes(&[
-                GenotypeAllele::Phased(genotype.0 as i32),
-                GenotypeAllele::Phased(genotype.1 as i32),
-            ])
-            .unwrap();
+        new_record.push_genotypes(&genotype).unwrap();
         out_vcf.write(&new_record).unwrap();
     }
 }

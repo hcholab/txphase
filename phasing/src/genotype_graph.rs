@@ -165,7 +165,7 @@ impl G {
     }
     #[inline]
     pub fn is_het(&self) -> Bool {
-        self.meta.get_segment_marker()
+        self.meta.get_het()
     }
 
     #[inline]
@@ -201,6 +201,10 @@ impl G {
             0b1111111 => 2,
             _ => 1,
         }
+    }
+
+    pub fn get_graph(&self) -> U8 {
+        self.graph
     }
 }
 
@@ -273,6 +277,13 @@ impl GenotypeGraph {
             graph: self.graph.slice(s![start..end]),
         }
     }
+
+
+    #[cfg(not(feature = "obliv"))]
+    pub fn n_segments(&self) -> usize {
+        self.graph.iter().filter(|g| g.is_segment_marker()).count()
+    }
+
 
     // TODO: limit merges to maximum of MAX_AMBIGUOUS het sites within a block
     pub fn prune(&mut self, tprob: ArrayView3<Real>) {

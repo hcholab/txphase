@@ -9,7 +9,7 @@ use compressed_pbwt::pbwt_trie::PbwtTrie;
 use ndarray::{s, Array1, ArrayView1};
 use rand::Rng;
 
-const PBWT_MAC: usize = 2;
+const PBWT_MAC: usize = 4;
 
 pub struct McmcSharedParams {
     pub ref_panel: RefPanel,

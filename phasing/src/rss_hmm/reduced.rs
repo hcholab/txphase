@@ -1287,7 +1287,7 @@ impl HmmReduced {
     }
 
     fn collapse(
-        index_map: ArrayView1<usize>,
+        index_map: ArrayView1<u16>,
         is_first_segment: bool,
         alpha_pre: ArrayView2<Real>,
         mut alpha_post: ArrayViewMut1<Real>,
@@ -1402,7 +1402,7 @@ impl HmmReduced {
     }
 
     fn expand_prob(
-        index_map: ArrayView1<usize>,
+        index_map: ArrayView1<u16>,
         inv_weights: ArrayView1<Real>,
         cr_prob: ArrayView2<Real>,
         #[cfg(feature = "obliv")] cr_prob_e: ArrayView1<TpI16>,
@@ -1503,7 +1503,7 @@ impl HmmReduced {
             .and(backward.alpha_pre.rows())
             .and(&backward.alpha_post)
             .for_each(|&i, f_pre, &f_post, b_pre, &b_post| {
-                arr[i].push((f_pre, f_post, b_pre, b_post));
+                arr[i as usize].push((f_pre, f_post, b_pre, b_post));
             });
 
         for (i, u) in arr.into_iter().enumerate() {

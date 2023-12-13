@@ -12,9 +12,10 @@ fi
 
 MERGED=$TAR_DIR/.switch_rate_merged.vcf.gz
 
-rm $MERGED_NAME 2> /dev/null
-bcftools index -t $TEST > /dev/null 2>&1
+rm $MERGED 2> /dev/null
+bcftools index -f $TEST > /dev/null 2>&1
 bcftools merge -m none -o $MERGED -O z $TEST $REF1 $REF2 > /dev/null 2>&1
+
 
 #Child, nTested, nMendelian Errors, nSwitch, nSwitch (%)
 bcftools +trio-switch-rate $MERGED -- -p $TRIO | \

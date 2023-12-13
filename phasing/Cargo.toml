@@ -22,16 +22,15 @@ obliv-utils = { path = "../obliv-utils", optional = true }
 compressed-pbwt = { path = "../compressed-pbwt", default-features=false, optional = true }
 compressed-pbwt-obliv = { package = "compressed-pbwt", path = "../compressed-pbwt", optional = true }
 #oram-sgx = { path = "../oram-sgx" }
-tp-fixedpoint = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/tp-fixedpoint", optional = true }
-m3vcf = { path = "/home/ndokmai/workspace/sgx-genotype-imputation/m3vcf" }
+tp-fixedpoint = { path = "/home/nd549/workspace/sgx-genotype-imputation/tp-fixedpoint", optional = true }
+m3vcf = { path = "/home/nd549/workspace/sgx-genotype-imputation/m3vcf" }
 #timing-shield = { version = "0.3", optional = true }
 rand_chacha = "0.3"
-log = "0.4"
-env_logger = "0.9"
 anyhow = "1.0"
 statrs = "0.16"
 num-traits = "0.2"
 lazy_static = "1.4"
+rayon = "1.8"
 
 #[dev-dependencies]
 #rand_chacha = "0.3"
@@ -40,20 +39,19 @@ lazy_static = "1.4"
 # stack size (in bytes) for each thread, the default stack size is 0x20000.
 stack-size=0x200000
 # heap size (in bytes), the default heap size is 0x2000000.
-#heap-size=0x800000000
-#heap-size=0x400000000
-heap-size=0x40000000
+#heap-size=0x700000000
+heap-size=0x100000000
 # the default number of threads is equal to the number of available CPUs of
 # the current system.
 # Gotcha: Don't forget to count the main thread when counting number of
 # threads.
-threads=10
+threads=9
 # SSA frame size (in pages) for each thread, the default SSA frame size is 1.
 # You normally don't need to change the SSA frame size.
 ssaframesize=1
 # whether to enable EDP debugging features in the enclave, debugging is
 # enabled by default.
-debug=true
+#debug=true
 
 
 [profile.release]

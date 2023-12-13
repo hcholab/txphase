@@ -27,10 +27,7 @@ fn merge<T: TpOrd + TpCondSwap>(items: &mut [T], dir: bool) {
 
 fn cond_swap_in_slice<T: TpCondSwap>(cond: TpBool, slice: &mut [T], i: usize, j: usize) {
     assert!(j < slice.len());
-    assert!(i < j);
-    let (a, b) = slice.split_at_mut(i + 1);
-    let a = &mut a[i];
-    let b = &mut b[j - (i + 1)];
+    let [a, b] = unsafe { slice.get_many_unchecked_mut([i, j]) };
     cond.cond_swap(a, b);
 }
 

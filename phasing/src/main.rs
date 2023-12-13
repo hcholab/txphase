@@ -1,5 +1,7 @@
 #![feature(stmt_expr_attributes)]
+#![feature(iter_array_chunks)]
 #![allow(dead_code)]
+
 mod genotype_graph;
 mod hmm;
 mod mcmc;
@@ -7,12 +9,17 @@ mod rss_hmm;
 mod utils;
 mod variants;
 
+#[cfg(not(feature = "obliv"))]
+mod neighbors_finding;
+#[cfg(not(feature = "obliv"))]
+mod pbwt;
+
 #[cfg(feature = "obliv")]
 mod dynamic_fixed;
 
 #[cfg(feature = "obliv")]
 mod inner {
-    use tp_fixedpoint::timing_shield::{TpBool, TpI32, TpI8, TpU32, TpU64, TpU8};
+    pub use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpI32, TpI8, TpU32, TpU64, TpU8};
     pub type Genotype = TpI8;
     pub type UInt = TpU32;
     pub type Usize = TpU64;
@@ -37,9 +44,9 @@ mod inner {
 use inner::*;
 
 use crate::mcmc::IterOption;
-//use log::info;
-use ndarray::Array1;
+use ndarray::{Array1, Array2};
 use rand::{RngCore, SeedableRng};
+use rayon::prelude::*;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::str::FromStr;
 
@@ -52,19 +59,11 @@ fn main() {
     assert_eq!(args.len(), 2);
     let host_port = args[1].parse::<u16>().unwrap();
 
-    env_logger::init();
-    let min_window_len_cm = 2.5;
-    let pbwt_modulo = 0.02;
-    let min_het_rate = 0.3f64;
+    let min_window_len_cm = 4.0;
+    let min_het_rate = 0.1f64;
     let n_pos_window_overlap = (3. / min_het_rate).ceil() as usize;
-    let s = 4;
-
-    //let seed = rand::thread_rng().next_u64();
-    let seed = 1176131483100594936;
-    let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
     println!("Parameters:");
-    println!("{}", &log_template("Seed", &format!("{seed}")));
 
     let (host_stream, _host_socket) = TcpListener::bind(SocketAddr::from((
         IpAddr::from_str("127.0.0.1").unwrap(),
@@ -80,55 +79,9 @@ fn main() {
     let ref_panel_blocks: Vec<m3vcf::Block> = bincode::deserialize_from(&mut host_stream).unwrap();
     let sites_bitmask: Vec<bool> = bincode::deserialize_from(&mut host_stream).unwrap();
 
-    let (ref_panel_new, afreqs) =
-        common::ref_panel::m3vcf_scan(&ref_panel_meta, &ref_panel_blocks, &sites_bitmask);
-
-    let cms = {
-        let cms: Vec<f64> = bincode::deserialize_from(&mut host_stream).unwrap();
-        let mut cms = cms
-            .into_iter()
-            .zip(sites_bitmask.iter())
-            .filter(|(_, b)| **b)
-            .map(|(cm, _)| cm)
-            .collect::<Vec<_>>();
-        let first = cms[0];
-        cms.iter_mut().for_each(|cm| *cm -= first);
-        cms
-    };
-    println!("#sites = {}", cms.len());
-    let bps = {
-        let bps: Vec<u32> = bincode::deserialize_from(&mut host_stream).unwrap();
-        bps.into_iter()
-            .zip(sites_bitmask.iter())
-            .filter(|(_, b)| **b)
-            .map(|(cm, _)| cm)
-            .collect::<Vec<_>>()
-    };
-
-    let genotypes: Vec<i8> = bincode::deserialize_from(&mut host_stream).unwrap();
-
-    #[cfg(feature = "obliv")]
-    let genotypes = Array1::<Genotype>::from_vec(
-        genotypes
-            .into_iter()
-            .map(|v| Genotype::protect(v))
-            .collect(),
-    );
-
-    #[cfg(not(feature = "obliv"))]
-    let genotypes = Array1::<Genotype>::from_vec(genotypes);
-
-    let mcmc_params = mcmc::McmcSharedParams::new(
-        ref_panel_new,
-        bps,
-        cms,
-        afreqs,
-        min_window_len_cm,
-        n_pos_window_overlap,
-        pbwt_modulo,
-        s,
-    );
-
+    let cms: Vec<f64> = bincode::deserialize_from(&mut host_stream).unwrap();
+    let bps: Vec<u32> = bincode::deserialize_from(&mut host_stream).unwrap();
+    let genotypes: Vec<Vec<i8>> = bincode::deserialize_from(&mut host_stream).unwrap();
     let iterations = [
         IterOption::Burnin(5),
         IterOption::Pruning(1),
@@ -138,10 +91,247 @@ fn main() {
         IterOption::Pruning(1),
         IterOption::Main(5),
     ];
-    let phased = mcmc::Mcmc::run(&mcmc_params, genotypes.view(), &iterations, rng);
 
-    #[cfg(feature = "obliv")]
-    let phased = phased.map(|v| v.expose());
+    let pbwt_depth = ((9. - ((ref_panel_meta.n_haps / 2) as f64).log10()).round() as usize)
+        .min(8)
+        .max(2);
 
-    bincode::serialize_into(&mut host_stream, &phased).unwrap();
+    let pbwt_modulo = ((((ref_panel_meta.n_haps / 2) as f64).ln() - 50f64.ln() + 1.) * 0.01)
+        .min(0.15)
+        .max(0.005);
+
+    println!("pbwt-depth = {pbwt_depth}");
+    println!("pbwt-modulo = {:.3}", pbwt_modulo);
+
+    let phase_single = true;
+
+    if phase_single {
+        let seed = rand::thread_rng().next_u64();
+        //let seed = 1697416311822861122; 
+        //let seed = 16928654553966631652;
+        //let seed = 3552546168628277630;
+        println!("seed: {seed}");
+        let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+
+        #[cfg(feature = "obliv")]
+        let genotypes = genotypes[0]
+            .iter()
+            .map(|&v| Genotype::protect(v))
+            .collect::<Vec<_>>();
+
+        #[cfg(not(feature = "obliv"))]
+        let genotypes = genotypes[0].clone();
+
+        let mut present = Vec::new();
+        let filtered_genotypes = genotypes
+            .iter()
+            .filter(|&v| {
+                #[cfg(feature = "obliv")]
+                let cond = v.tp_not_eq(&-1).expose();
+
+                #[cfg(not(feature = "obliv"))]
+                let cond = *v != -1;
+
+                present.push(cond);
+                cond
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let filtered_genotypes = Array1::<Genotype>::from_vec(filtered_genotypes);
+
+        println!("#sites = {}", filtered_genotypes.len());
+
+        let mcmc_params = {
+            let mut sites_bitmask = sites_bitmask.clone();
+            sites_bitmask
+                .iter_mut()
+                .filter(|v| **v)
+                .zip(present.iter())
+                .for_each(|(b, &p)| *b = p);
+
+            let bps = bps
+                .iter()
+                .zip(sites_bitmask.iter())
+                .filter(|(_, b)| **b)
+                .map(|(&cm, _)| cm)
+                .collect::<Vec<_>>();
+
+            let mut cms = cms
+                .iter()
+                .zip(sites_bitmask.iter())
+                .filter(|(_, b)| **b)
+                .map(|(&cm, _)| cm)
+                .collect::<Vec<_>>();
+            let first = cms[0];
+            cms.iter_mut().for_each(|cm| *cm -= first);
+
+            let (ref_panel_new, afreqs) =
+                common::ref_panel::m3vcf_scan(&ref_panel_meta, &ref_panel_blocks, &sites_bitmask);
+
+            mcmc::McmcSharedParams::new(
+                ref_panel_new,
+                bps,
+                cms,
+                afreqs,
+                min_window_len_cm,
+                n_pos_window_overlap,
+                pbwt_modulo,
+                pbwt_depth,
+            )
+        };
+
+        drop(ref_panel_meta);
+        drop(ref_panel_blocks);
+        drop(bps);
+        drop(cms);
+        drop(sites_bitmask);
+
+        let phased = mcmc::Mcmc::run(
+            &mcmc_params,
+            filtered_genotypes.view(),
+            &iterations,
+            rng,
+            &1.to_string(),
+        );
+
+        #[cfg(feature = "obliv")]
+        let phased = phased.map(|v| v.expose());
+
+        let mut phased_with_missing = Array2::zeros((present.len(), 2));
+
+        let mut phased_iter = phased.rows().into_iter();
+
+        for (b, mut r) in present
+            .into_iter()
+            .zip(phased_with_missing.rows_mut().into_iter())
+        {
+            if b {
+                r.assign(&phased_iter.next().unwrap());
+            } else {
+                r.fill(-1);
+            }
+        }
+        bincode::serialize_into(&mut host_stream, &vec![phased_with_missing]).unwrap();
+    } else {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(8)
+            .build_global()
+            .unwrap();
+
+        let counter = std::sync::atomic::AtomicUsize::new(1);
+
+        let all_phased = genotypes
+            .into_par_iter()
+            .map(|genotypes| {
+                let id = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let seed = rand::thread_rng().next_u64();
+                //let seed = 685851609597047061;
+                println!("{}", &log_template("Seed", &format!("{seed}")));
+
+                let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+
+                #[cfg(feature = "obliv")]
+                let genotypes = genotypes
+                    .into_iter()
+                    .map(|v| Genotype::protect(v))
+                    .collect::<Vec<_>>();
+
+                let mut present = Vec::new();
+                let filtered_genotypes = genotypes
+                    .into_iter()
+                    .filter(|&v| {
+                        #[cfg(feature = "obliv")]
+                        let cond = v.tp_not_eq(&-1).expose();
+
+                        #[cfg(not(feature = "obliv"))]
+                        let cond = v != -1;
+
+                        present.push(cond);
+                        cond
+                    })
+                    .collect::<Vec<_>>();
+
+                let filtered_genotypes = Array1::<Genotype>::from_vec(filtered_genotypes);
+
+                println!("#sites = {}", filtered_genotypes.len());
+
+                let mcmc_params = {
+                    let mut sites_bitmask = sites_bitmask.clone();
+                    sites_bitmask
+                        .iter_mut()
+                        .filter(|v| **v)
+                        .zip(present.iter())
+                        .for_each(|(b, &p)| *b = p);
+
+                    let bps = bps
+                        .iter()
+                        .zip(sites_bitmask.iter())
+                        .filter(|(_, b)| **b)
+                        .map(|(&cm, _)| cm)
+                        .collect::<Vec<_>>();
+
+                    let mut cms = cms
+                        .iter()
+                        .zip(sites_bitmask.iter())
+                        .filter(|(_, b)| **b)
+                        .map(|(&cm, _)| cm)
+                        .collect::<Vec<_>>();
+                    let first = cms[0];
+                    cms.iter_mut().for_each(|cm| *cm -= first);
+
+                    let (ref_panel_new, afreqs) = common::ref_panel::m3vcf_scan(
+                        &ref_panel_meta,
+                        &ref_panel_blocks,
+                        &sites_bitmask,
+                    );
+
+                    mcmc::McmcSharedParams::new(
+                        ref_panel_new,
+                        bps,
+                        cms,
+                        afreqs,
+                        min_window_len_cm,
+                        n_pos_window_overlap,
+                        pbwt_modulo,
+                        pbwt_depth,
+                    )
+                };
+
+                let phased = mcmc::Mcmc::run(
+                    &mcmc_params,
+                    filtered_genotypes.view(),
+                    &iterations,
+                    rng,
+                    &id.to_string(),
+                );
+
+                #[cfg(feature = "obliv")]
+                let phased = phased.map(|v| v.expose());
+
+                let mut phased_with_missing = Array2::zeros((present.len(), 2));
+
+                let mut phased_iter = phased.rows().into_iter();
+
+                for (b, mut r) in present
+                    .into_iter()
+                    .zip(phased_with_missing.rows_mut().into_iter())
+                {
+                    if b {
+                        r.assign(&phased_iter.next().unwrap());
+                    } else {
+                        r.fill(-1);
+                    }
+                }
+                phased_with_missing
+            })
+            .collect::<Vec<_>>();
+
+        //println!("Insert: {} ms", compressed_pbwt::nn::INSERT_T.lock().unwrap().as_millis());
+        //println!("Init: {} ms", compressed_pbwt::nn::INIT_T.lock().unwrap().as_millis());
+        //println!("Neighbors: {} ms", compressed_pbwt::nn::NEIGH_T.lock().unwrap().as_millis());
+        //println!("Update: {} ms", compressed_pbwt::nn::UPDATE_T.lock().unwrap().as_millis());
+
+        bincode::serialize_into(&mut host_stream, &all_phased).unwrap();
+    }
 }
