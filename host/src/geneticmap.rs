@@ -1,4 +1,4 @@
-use crate::site::Site;
+use m3vcf::Site;
 use std::path::Path;
 
 pub fn genetic_map_from_csv_path(path: &Path) -> anyhow::Result<Vec<(u32, f64)>> {

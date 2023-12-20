@@ -50,6 +50,8 @@ use rayon::prelude::*;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::str::FromStr;
 
+const N_THREADS: usize = 48;
+
 pub fn log_template(str1: &str, str2: &str) -> String {
     format!("\t* {str1}\t: {str2}")
 }
@@ -77,6 +79,7 @@ fn main() {
 
     let ref_panel_meta: m3vcf::RefPanelMeta = bincode::deserialize_from(&mut host_stream).unwrap();
     let ref_panel_blocks: Vec<m3vcf::Block> = bincode::deserialize_from(&mut host_stream).unwrap();
+
     let sites_bitmask: Vec<bool> = bincode::deserialize_from(&mut host_stream).unwrap();
 
     let cms: Vec<f64> = bincode::deserialize_from(&mut host_stream).unwrap();
@@ -103,7 +106,7 @@ fn main() {
     println!("pbwt-depth = {pbwt_depth}");
     println!("pbwt-modulo = {:.3}", pbwt_modulo);
 
-    let phase_single = true;
+    let phase_single = false;
 
     if phase_single {
         let seed = rand::thread_rng().next_u64();
@@ -215,7 +218,7 @@ fn main() {
         bincode::serialize_into(&mut host_stream, &vec![phased_with_missing]).unwrap();
     } else {
         rayon::ThreadPoolBuilder::new()
-            .num_threads(8)
+            .num_threads(N_THREADS)
             .build_global()
             .unwrap();
 

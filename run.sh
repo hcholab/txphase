@@ -4,10 +4,9 @@ source config.sh
 source common.sh
 
 REF_PANEL=$1
-REF_SITES=$2
-GMAP=$3
-INPUT=$4
-OUTPUT=$5
+GMAP=$2
+INPUT=$3
+OUTPUT=$4
 
-(cd host && cargo +nightly run $PROFILE $BIN_FLAGS -- $PORT $REF_PANEL $REF_SITES $GMAP $INPUT $OUTPUT &)
+(cd host && cargo +nightly run $PROFILE $BIN_FLAGS -- $PORT $REF_PANEL $GMAP $INPUT $OUTPUT &)
 (cd phasing && cargo +nightly run --no-default-features --features compressed-pbwt $PROFILE $BIN_FLAGS -- $PORT)

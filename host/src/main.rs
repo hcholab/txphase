@@ -4,6 +4,7 @@ mod geneticmap;
 mod record;
 mod site;
 
+use m3vcf::Site;
 use ndarray::Array2;
 use rust_htslib::bcf;
 use std::collections::HashSet;
@@ -14,32 +15,65 @@ use std::str::FromStr;
 
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
-    assert_eq!(args.len(), 7);
+    assert_eq!(args.len(), 6);
     let sp_port = args[1].parse::<u16>().unwrap();
     let ref_panel_path = &args[2];
-    let ref_sites_path = &args[3];
-    let genetic_map_path = &args[4];
-    let input_path = &args[5];
-    let output_path = &args[6];
+    let genetic_map_path = &args[3];
+    let input_path = &args[4];
+    let output_path = &args[5];
 
     eprintln!("Port: \t\t\t{sp_port}");
     eprintln!("Reference panel: \t{ref_panel_path}");
-    eprintln!("Reference sites: \t{ref_sites_path}");
     eprintln!("Genetic map: \t\t{genetic_map_path}");
     eprintln!("Input: \t\t\t{input_path}");
     eprintln!("Output: \t\t{output_path}");
 
-    let genetic_map = geneticmap::genetic_map_from_csv_path(&Path::new(genetic_map_path)).unwrap();
-    let sites = site::sites_from_csv_path(&Path::new(ref_sites_path)).unwrap();
-    let bps = sites.iter().map(|s| s.pos).collect::<Vec<_>>();
-    let interpolated_cms = geneticmap::interpolate_cm(&genetic_map, &sites);
+    let sites = m3vcf::read_sites(std::path::Path::new(ref_panel_path));
 
     let (ref_panel_meta, ref_panel_block_iter) =
         m3vcf::load_ref_panel(std::path::Path::new(ref_panel_path));
     let ref_panel_blocks = ref_panel_block_iter.collect::<Vec<_>>();
 
-    let (target_samples, ref_sites_bitmask, input_bcf_header, input_records_filtered) =
-        process_input(&Path::new(input_path), &mut Path::new(ref_sites_path));
+    let genetic_map = geneticmap::genetic_map_from_csv_path(&Path::new(genetic_map_path)).unwrap();
+    let bps = sites.iter().map(|s| s.pos).collect::<Vec<_>>();
+    let interpolated_cms = geneticmap::interpolate_cm(&genetic_map, &sites);
+
+    let mut afreqs = Vec::new();
+
+    for (i, block) in ref_panel_blocks.iter().enumerate() {
+        if i != ref_panel_blocks.len() - 1 {
+            afreqs.extend(block.afreq.iter().take(block.nvar - 1).cloned());
+        } else {
+            afreqs.extend(block.afreq.iter().cloned());
+        }
+    }
+
+    const THRES: f32 = 0.001;
+
+    let afreq_filter = afreqs
+        .iter()
+        .map(|f| f.min(1. - f) > THRES)
+        .collect::<Vec<_>>();
+
+    println!("count {}", afreq_filter.iter().filter(|&&b| b).count());
+
+    let afreq_sites = afreq_filter
+        .iter()
+        .zip(sites.iter())
+        .filter_map(|(b, s)| if *b { Some(s.clone()) } else { None })
+        .collect::<Vec<_>>();
+
+    let (target_samples, afreq_bitmask, input_bcf_header, input_records_filtered) =
+        process_input(&Path::new(input_path), &afreq_sites);
+
+    let mut ref_sites_bitmask = vec![false; sites.len()];
+
+    afreq_filter
+        .iter()
+        .zip(ref_sites_bitmask.iter_mut())
+        .filter_map(|(a, b)| if *a { Some(b) } else { None })
+        .zip(afreq_bitmask.iter())
+        .for_each(|(b, a)| *b |= *a);
 
     let mut sp_stream = bufstream::BufStream::new(tcp_keep_connecting(SocketAddr::from((
         IpAddr::from_str("127.0.0.1").unwrap(),
@@ -72,14 +106,14 @@ fn main() {
 
 fn process_input(
     input_path: &Path,
-    ref_sites_path: &Path,
+    ref_sites: &[Site],
 ) -> (
     Vec<Vec<i8>>,
     Vec<bool>,
     bcf::header::HeaderView,
     Vec<bcf::record::Record>,
 ) {
-    let ref_sites = site::sites_from_csv_path(ref_sites_path).unwrap();
+    //let ref_sites = site::sites_from_csv_path(ref_sites_path).unwrap();
 
     let (input_sites, input_bcf_header, input_bcf_records) =
         site::sites_from_bcf_path(input_path).unwrap();
@@ -111,7 +145,7 @@ fn process_input(
 
     for site in overlap {
         while let Some(ref_site) = ref_sites_iter.next() {
-            if ref_site == site {
+            if ref_site == &site {
                 ref_sites_bitmask.push(true);
                 break;
             } else {

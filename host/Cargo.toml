@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-m3vcf = { path = "/home/nd549/workspace/sgx-genotype-imputation/m3vcf" }
+m3vcf = { path = "../m3vcf" }
+common = { path = "../common" }
 ndarray = { version = "0.15", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 csv = "1.1"

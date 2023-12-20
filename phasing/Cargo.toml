@@ -22,8 +22,8 @@ obliv-utils = { path = "../obliv-utils", optional = true }
 compressed-pbwt = { path = "../compressed-pbwt", default-features=false, optional = true }
 compressed-pbwt-obliv = { package = "compressed-pbwt", path = "../compressed-pbwt", optional = true }
 #oram-sgx = { path = "../oram-sgx" }
-tp-fixedpoint = { path = "/home/nd549/workspace/sgx-genotype-imputation/tp-fixedpoint", optional = true }
-m3vcf = { path = "/home/nd549/workspace/sgx-genotype-imputation/m3vcf" }
+tp-fixedpoint = { path = "../tp-fixedpoint", optional = true }
+m3vcf = { path = "../m3vcf" }
 #timing-shield = { version = "0.3", optional = true }
 rand_chacha = "0.3"
 anyhow = "1.0"
