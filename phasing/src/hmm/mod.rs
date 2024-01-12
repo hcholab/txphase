@@ -4,7 +4,7 @@ pub use params::*;
 #[cfg(feature = "obliv")]
 use crate::dynamic_fixed::*;
 use crate::genotype_graph::{G, P};
-use crate::{Bool, Genotype, Real};
+use crate::{Bool, Genotype, Real, Usize};
 #[cfg(feature = "obliv")]
 use ndarray::{Array1, ArrayViewMut1};
 #[cfg(feature = "obliv")]
@@ -58,19 +58,19 @@ pub fn combine_dips(
     #[cfg(feature = "obliv")]
     {
         renorm_equalize_scale_all(tprobs_dips.view_mut(), tprobs_dips_e_ext.view_mut());
-         //let mut tprobs_dips_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
-            //renorm_equalize_scale(
-                //tprobs_dips.view_mut(),
-                //tprobs_dips_e_ext.view_mut(),
-                //tprobs_dips_e.view_mut(),
-            //);
+        //let mut tprobs_dips_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
+        //renorm_equalize_scale(
+        //tprobs_dips.view_mut(),
+        //tprobs_dips_e_ext.view_mut(),
+        //tprobs_dips_e.view_mut(),
+        //);
 
         //let (sum, sum_e) = sum_scale(tprobs_dips.view(), tprobs_dips_e.view());
         //tprobs_dips *= Real::protect_i64(1) / sum;
         //tprobs_dips_e.map_mut(|v| *v -= sum_e);
         //Zip::from(tprobs_dips.rows_mut())
-            //.and(&mut tprobs_dips_e)
-            //.for_each(|t, e| match_scale_row(TpI16::protect(0), t, e));
+        //.and(&mut tprobs_dips_e)
+        //.for_each(|t, e| match_scale_row(TpI16::protect(0), t, e));
 
         ndarray::Zip::from(&mut _tprobs_dips)
             .and(&tprobs_dips)
@@ -146,7 +146,12 @@ impl Hmm {
     ) -> Array3<Real> {
         let m = ref_panel.nrows();
         let k = ref_panel.ncols();
-        let mut rprobs_iter = rprobs.get_forward();
+
+        #[cfg(feature = "obliv")]
+        let mut rprobs_iter = rprobs.get_forward(Usize::protect(k as u64));
+
+        #[cfg(not(feature = "obliv"))]
+        let mut rprobs_iter = rprobs.get_forward(k);
 
         let bprobs = self.backward(ref_panel, genograph, hmm_params, rprobs, ignored_sites);
 
@@ -338,7 +343,12 @@ impl Hmm {
     ) -> Array3<Real> {
         let m = ref_panel.nrows();
         let n = ref_panel.ncols();
-        let mut rprobs_iter = rprobs.get_backward();
+
+        #[cfg(feature = "obliv")]
+        let mut rprobs_iter = rprobs.get_backward(Usize::protect(n as u64));
+
+        #[cfg(not(feature = "obliv"))]
+        let mut rprobs_iter = rprobs.get_backward(n);
 
         let mut bprobs = Array3::<Real>::zeros((m, P, n));
 

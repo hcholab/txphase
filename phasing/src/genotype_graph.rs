@@ -7,7 +7,7 @@ pub const MCMC_PRUNE_PROB_THRES: f64 = 0.999; // "mcmc-prune" parameter in Shape
 pub const MAX_HETS: usize = 22; // "MAX_AMB" constant in ShapeIt4 (utils/otools.h)
 
 #[cfg(feature = "obliv")]
-use tp_fixedpoint::timing_shield::{TpCondSwap, TpEq, TpOrd};
+use tp_fixedpoint::timing_shield::{TpCondSwap, TpOrd};
 
 #[derive(Clone, Copy)]
 pub struct GMeta(U8);
@@ -278,12 +278,10 @@ impl GenotypeGraph {
         }
     }
 
-
     #[cfg(not(feature = "obliv"))]
     pub fn n_segments(&self) -> usize {
         self.graph.iter().filter(|g| g.is_segment_marker()).count()
     }
-
 
     // TODO: limit merges to maximum of MAX_AMBIGUOUS het sites within a block
     pub fn prune(&mut self, tprob: ArrayView3<Real>) {

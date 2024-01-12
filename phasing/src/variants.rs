@@ -57,6 +57,8 @@ impl Variant {
 }
 
 pub fn build_variants(bps: &[u32], cms: &[f64], afreqs: &[f64], n_haps: usize) -> Vec<Variant> {
+    assert_eq!(bps.len(), cms.len());
+    assert_eq!(cms.len(), afreqs.len());
     bps.iter()
         .zip(afreqs.iter())
         .zip(cms.iter())

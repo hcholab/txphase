@@ -40,7 +40,49 @@ impl McmcSharedParams {
             variants.iter().filter(|v| v.rarity().is_rare()).count()
         );
         let hmm_params = HmmParams::new(ref_panel.n_haps);
-        let (pbwt_evaluted, pbwt_groups) = Self::get_pbwt_evaluted(&variants, pbwt_modulo);
+        let (pbwt_evaluted, pbwt_groups) = Self::get_pbwt_evaluated(&variants, pbwt_modulo);
+
+        //let pbwt_groups = {
+        //use std::io::BufRead;
+        //let f = std::io::BufReader::new(
+        //std::fs::File::open(std::path::Path::new("groups.txt")).unwrap(),
+        //);
+        //let group_map = f
+        //.lines()
+        //.map(|l| {
+        //let l = l.unwrap();
+        //let l = l.split_whitespace().collect::<Vec<_>>();
+        //assert_eq!(l[0].parse::<u8>().unwrap(), 1);
+        //l[1].parse::<usize>().unwrap()
+        //})
+        //.collect::<Vec<_>>();
+        //let mut groups = vec![Vec::new(); group_map.last().unwrap() + 1];
+        //group_map
+        //.into_iter()
+        //.enumerate()
+        //.for_each(|(i, g)| groups[g].push(i));
+        //groups
+        //};
+
+        //{
+        //use std::io::Write;
+        //crate::DEBUG_FILE.with(|f| {
+        //let mut f = f.borrow_mut();
+        //writeln!(*f, "## pbwt evaluated ##").unwrap();
+
+        //let mut group = Vec::new();
+
+        //for (i, g) in pbwt_groups.iter().enumerate() {
+        //for _ in 0..g.len() {
+        //group.push(i);
+        //}
+        //}
+
+        //for ((g, &e), _c) in group.into_iter().zip(pbwt_evaluted.iter()).zip(cms.iter()) {
+        //writeln!(*f, "{} {g}", e as u8).unwrap();
+        //}
+        //});
+        //}
 
         let mut pbwt_tries = Vec::<PbwtTrie>::new();
 
@@ -103,13 +145,13 @@ impl McmcSharedParams {
         use rand::prelude::SliceRandom;
         let mut filter = vec![false; self.variants.len()];
         for group in &self.pbwt_groups {
-            let i = group.choose(&mut rng).unwrap();
-            filter[*i] = true;
+            let i = *group.choose(&mut rng).unwrap();
+            filter[i] = true;
         }
         filter
     }
 
-    fn get_pbwt_evaluted(variants: &[Variant], pbwt_modulo: f64) -> (Vec<bool>, Vec<Vec<usize>>) {
+    fn get_pbwt_evaluated(variants: &[Variant], pbwt_modulo: f64) -> (Vec<bool>, Vec<Vec<usize>>) {
         let mut pbwt_evaluted = vec![true; variants.len()];
         let mut last_group_id = 0;
         let mut pbwt_groups = Vec::new();
@@ -129,6 +171,7 @@ impl McmcSharedParams {
             }
             cur_group.push(i);
         }
+        pbwt_groups.push(cur_group);
         (pbwt_evaluted, pbwt_groups)
     }
 }

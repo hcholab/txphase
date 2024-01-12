@@ -140,7 +140,7 @@ fn constrained_paired_sample(
 
 fn weighted_sample(weights: ArrayView1<Real>, mut rng: impl Rng) -> U8 {
     //for &i in weights {
-        //assert_ne!(i, 0.);
+    //assert_ne!(i, 0.);
     //}
     //let weights = &weights/weights.sum();
 

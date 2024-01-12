@@ -1,6 +1,6 @@
 use crate::genotype_graph::GenotypeGraph;
 use crate::variants::Variant;
-use crate::{tp_value, tp_value_real, Bool, Real};
+use crate::{tp_value, tp_value_real, Bool, Real, Usize};
 use ndarray::ArrayView1;
 #[cfg(feature = "obliv")]
 use tp_fixedpoint::timing_shield::{TpEq, TpOrd, TpU32};
@@ -54,13 +54,13 @@ impl HmmParams {
                 let cond = !ignored_sites[i];
                 let r0 = {
                     let cm = variants[i].cm - variants[i - 1].cm;
-                    compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
+                    compute_recomb_prob(cm, self.r_const)
                 };
 
                 let r1 = {
                     if i >= 2 {
                         let cm = variants[i].cm - variants[i - 2].cm;
-                        compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
+                        compute_recomb_prob(cm, self.r_const)
                     } else {
                         tp_value_real!(0, i64)
                     }
@@ -68,7 +68,7 @@ impl HmmParams {
 
                 let r2 = {
                     let cm = tp_value_real!(variants[i].cm, f32) - last_cm;
-                    compute_recomb_prob_obliv(cm, self.r_const_obliv, self.n_haps_ref_frac_obliv)
+                    compute_recomb_prob_obliv(cm, self.r_const_obliv)
                 };
 
                 let r = cond.select(
@@ -88,13 +88,13 @@ impl HmmParams {
             let r = if !ignored_sites[i] {
                 let r = if n_skips == 0 {
                     let cm = variants[i].cm - variants[i - 1].cm;
-                    compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
+                    compute_recomb_prob(cm, self.r_const)
                 } else if n_skips == 1 {
                     let cm = variants[i].cm - variants[i - 2].cm;
-                    compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
+                    compute_recomb_prob(cm, self.r_const)
                 } else {
                     let cm = variants[i].cm - last_cm;
-                    compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
+                    compute_recomb_prob(cm, self.r_const)
                 };
 
                 last_cm = variants[i].cm;
@@ -118,12 +118,12 @@ impl HmmParams {
                 let cond = !ignored_sites[i] | genotype_graph.graph[i + 1].is_segment_marker();
                 let r0 = {
                     let cm = variants[i + 1].cm - variants[i].cm;
-                    compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
+                    compute_recomb_prob(cm, self.r_const)
                 };
                 let r1 = {
                     if i + 2 <= variants.len() - 1 {
                         let cm = variants[i + 2].cm - variants[i].cm;
-                        compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
+                        compute_recomb_prob(cm, self.r_const)
                     } else {
                         tp_value_real!(0, i64)
                     }
@@ -131,7 +131,7 @@ impl HmmParams {
 
                 let r2 = {
                     let cm = last_cm - tp_value_real!(variants[i].cm, f32);
-                    compute_recomb_prob_obliv(cm, self.r_const_obliv, self.n_haps_ref_frac_obliv)
+                    compute_recomb_prob_obliv(cm, self.r_const_obliv)
                 };
 
                 let r = cond.select(
@@ -150,13 +150,13 @@ impl HmmParams {
             let r = if !ignored_sites[i] || genotype_graph.graph[i + 1].is_segment_marker() {
                 let r = if n_skips == 0 {
                     let cm = variants[i + 1].cm - variants[i].cm;
-                    compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
+                    compute_recomb_prob(cm, self.r_const)
                 } else if n_skips == 1 {
                     let cm = variants[i + 2].cm - variants[i].cm;
-                    compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
+                    compute_recomb_prob(cm, self.r_const)
                 } else {
                     let cm = last_cm - tp_value_real!(variants[i].cm, f32);
-                    compute_recomb_prob(cm, self.r_const, self.n_haps_ref_frac)
+                    compute_recomb_prob(cm, self.r_const)
                 };
 
                 last_cm = tp_value_real!(variants[i].cm, f32);
@@ -198,31 +198,48 @@ pub struct RprobsSlice<'a> {
 }
 
 impl<'a> RprobsSlice<'a> {
-    pub fn get_forward(&self) -> Box<dyn Iterator<Item = Real>> {
-        Box::new(self.fwd.to_owned().into_iter())
+    pub fn get_forward(&self, n_haps: Usize) -> Box<dyn Iterator<Item = Real>> {
+        #[cfg(feature = "obliv")]
+        let frac_n_haps: Real = tp_value_real!(1., f32) / From::from(n_haps);
+
+        #[cfg(not(feature = "obliv"))]
+        let frac_n_haps = 1. / n_haps as f64;
+
+        Box::new(
+            self.fwd
+                .to_owned()
+                .into_iter()
+                .map(move |v| v * frac_n_haps),
+        )
     }
 
-    pub fn get_backward(&self) -> Box<dyn Iterator<Item = Real>> {
+    pub fn get_backward(&self, n_haps: Usize) -> Box<dyn Iterator<Item = Real>> {
+        #[cfg(feature = "obliv")]
+        let frac_n_haps: Real = tp_value_real!(1., f32) / From::from(n_haps);
+
+        #[cfg(not(feature = "obliv"))]
+        let frac_n_haps = 1. / n_haps as f64;
+
         let mut bwd = self.bwd.to_owned();
         bwd.reverse();
-        Box::new(bwd.into_iter())
+        Box::new(bwd.into_iter().map(move |v| v * frac_n_haps))
     }
 }
 
 #[inline]
-fn compute_recomb_prob(dist_cm: f64, r_const: f64, n_haps_ref_frac: f64) -> Real {
+fn compute_recomb_prob(dist_cm: f64, r_const: f64) -> Real {
     let r = -(-r_const * dist_cm.max(MIN_DIST)).exp_m1();
-    tp_value_real!(r * n_haps_ref_frac / (1. - r), f32)
+    tp_value_real!(r / (1. - r), f32)
 }
 
 #[inline]
 #[cfg(feature = "obliv")]
-fn compute_recomb_prob_obliv(dist_cm: Real, r_const: Real, n_haps_ref_frac: Real) -> Real {
+fn compute_recomb_prob_obliv(dist_cm: Real, r_const: Real) -> Real {
     let dist_cm = {
         let min_dist = Real::protect_f32(MIN_DIST as f32);
         dist_cm.tp_gt(&min_dist).select(dist_cm, min_dist)
     };
     let x = r_const * dist_cm;
     let r = x.tp_lt(&Real::protect_f32(0.02)).select(x, x.ode());
-    (r * n_haps_ref_frac) / (Real::protect_i64(1) - r)
+    r / (Real::protect_i64(1) - r)
 }

@@ -244,9 +244,7 @@ mod tests {
         let a = 11f32;
         let b = 9f32;
         let reference = (a.exp() + b.exp()).ln();
-        let res = F::protect_f32(a)
-            .lse(F::protect_f32(b))
-            .expose_into_f32();
+        let res = F::protect_f32(a).lse(F::protect_f32(b)).expose_into_f32();
         assert!((reference - res).abs() < 1e-3);
     }
 
@@ -255,9 +253,7 @@ mod tests {
         let a = 11f32;
         let b = 9f32;
         let reference = (a.exp() - b.exp()).ln();
-        let res = F::protect_f32(a)
-            .lde(F::protect_f32(b))
-            .expose_into_f32();
+        let res = F::protect_f32(a).lde(F::protect_f32(b)).expose_into_f32();
         assert!((reference - res).abs() < 1e-3);
     }
 

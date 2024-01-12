@@ -60,4 +60,3 @@ pub(crate) fn read_metadata(mut lines_iter: impl Iterator<Item = Result<String>>
         n_markers,
     }
 }
-

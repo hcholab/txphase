@@ -22,9 +22,9 @@ fn main() {
     let n = 100;
     let n_fold = 1000000;
     let alpha = 0.05;
-    leading_zeros(n*10, n_fold*10, alpha, save);
-    leftshift_tests(n*100, n_fold, alpha, save);
-    rightshift_tests(n*100, n_fold, alpha, save);
+    leading_zeros(n * 10, n_fold * 10, alpha, save);
+    leftshift_tests(n * 100, n_fold, alpha, save);
+    rightshift_tests(n * 100, n_fold, alpha, save);
     if_else_tests(n, n_fold, alpha, save);
     f32_tests(n, n_fold, alpha, save);
     const_select_tests(n, n_fold, alpha, save);
@@ -45,7 +45,6 @@ fn save_results(baseline: Vec<f64>, test: Vec<f64>, title: &str) {
     test.into_iter()
         .for_each(|v| writeln!(&mut f_test, "{:.5}", v).unwrap());
 }
-
 
 fn if_else_tests(n: usize, n_fold: usize, alpha: f64, save: bool) {
     let title = "if-else";

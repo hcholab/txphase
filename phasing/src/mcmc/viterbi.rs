@@ -3,7 +3,7 @@ use crate::{Real, U8};
 use ndarray::{Array1, Array2, ArrayView1, ArrayView3};
 
 #[cfg(feature = "obliv")]
-pub use tp_fixedpoint::timing_shield::{TpEq, TpOrd};
+pub use tp_fixedpoint::timing_shield::TpOrd;
 
 pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> Array2<U8> {
     let m = tprob_dips.shape()[0];

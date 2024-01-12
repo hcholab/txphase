@@ -65,7 +65,7 @@ fn read_block_sites(mut lines_iter: impl Iterator<Item = Result<String>>) -> Opt
 
         let site = {
             let chr = iter.next().unwrap().to_owned();
-            let pos = iter.next().unwrap().parse::<u32>().unwrap() - 1;
+            let pos = iter.next().unwrap().parse::<u32>().unwrap();
             iter.next();
             let allele_ref = iter.next().unwrap().to_owned();
             let allele_alt = iter.next().unwrap().to_owned();

@@ -127,6 +127,8 @@ impl<'a> Mcmc<'a> {
         #[cfg(feature = "obliv")]
         use compressed_pbwt_obliv::mcmc_init::mcmc_init;
 
+        //let (h_0, h_1) = mcmc_init_loaded("init.txt");
+
         #[cfg(not(feature = "obliv"))]
         use compressed_pbwt::mcmc_init::mcmc_init;
 
@@ -164,6 +166,23 @@ impl<'a> Mcmc<'a> {
 
         let genotype_graph = GenotypeGraph::build(genotypes);
 
+        //{
+        //use std::io::Write;
+        //crate::DEBUG_FILE.with(|f| {
+        //let mut f = f.borrow_mut();
+        //writeln!(*f, "## genotype graph ##").unwrap();
+        //let mut count = 0;
+        //for g in &genotype_graph.graph {
+        //if g.is_segment_marker() {
+        //writeln!(*f, "{count}").unwrap();
+        //count = 0;
+        //}
+        //count += 1;
+        //}
+        //writeln!(*f, "{count}").unwrap();
+        //});
+        //}
+
         #[cfg(not(feature = "obliv"))]
         let n_old_segments = genotype_graph.n_segments();
 
@@ -191,6 +210,13 @@ impl<'a> Mcmc<'a> {
         let now = Instant::now();
 
         let pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
+        //let pbwt_group_filter = {
+        //use std::io::BufRead;
+        //let f = std::io::BufReader::new(std::fs::File::open("random_pbwt.txt").unwrap());
+        //f.lines()
+        //.map(|l| l.unwrap().parse::<u8>().unwrap() == 1)
+        //.collect::<Vec<_>>()
+        //};
 
         let neighbors = {
             let pbwt_group_filter = pbwt_group_filter
@@ -220,26 +246,63 @@ impl<'a> Mcmc<'a> {
 
             #[cfg(not(feature = "obliv"))]
             use compressed_pbwt::nn::find_top_neighbors;
+            //use crate::neighbors_finding::find_top_neighbors;
 
             let mut nn_0 = find_top_neighbors(
                 &h_0,
                 self.params.s,
                 &self.params.pbwt_tries,
+                //self.params.ref_panel.iter(),
                 self.params.ref_panel.n_haps,
                 &pbwt_group_filter,
             );
+
+            //nn_0[3] = Some(vec![6054 - 2, 527 - 2, 19938 - 2, 19854 - 2, 19773 - 2]);
 
             let nn_1 = find_top_neighbors(
                 &h_1,
                 self.params.s,
                 &self.params.pbwt_tries,
+                //self.params.ref_panel.iter(),
                 self.params.ref_panel.n_haps,
                 &pbwt_group_filter,
             );
+            //{
+            //use std::io::Write;
+            //crate::DEBUG_FILE.with(|f| {
+            //let mut f = f.borrow_mut();
+            //writeln!(*f, "## neighbors ##").unwrap();
+
+            //for (i, ((a, &h_0), (b, &h_1))) in nn_0
+            //.iter()
+            //.zip(h_0.iter())
+            //.zip(nn_1.iter().zip(h_1.iter()))
+            //.enumerate()
+            //{
+            //if let Some(a) = a.as_ref() {
+            //write!(*f, "{i}, 0, {}: ", h_0 as u8).unwrap();
+            //for v in a {
+            //let v = v + 2;
+            //write!(*f, "{v} ").unwrap();
+            //}
+            //writeln!(*f).unwrap();
+            //}
+            //if let Some(b) = b.as_ref() {
+            //write!(*f, "{i}, 1, {}: ", h_1 as u8).unwrap();
+            //for v in b {
+            //let v = v + 2;
+            //write!(*f, "{v} ").unwrap();
+            //}
+            //writeln!(*f).unwrap();
+            //}
+            //}
+            //});
+            //}
 
             for (a, b) in nn_0.iter_mut().zip(nn_1.into_iter()) {
                 a.as_mut().map(|v| v.extend(b.unwrap().into_iter()));
             }
+
             nn_0
         };
         println!(
@@ -250,6 +313,26 @@ impl<'a> Mcmc<'a> {
         let now2 = Instant::now();
 
         let windows = self.windows(&mut rng);
+
+        //let windows = {
+        //use std::io::BufRead;
+        //let f = std::io::BufReader::new(std::fs::File::open("windows.txt").unwrap());
+        //let mut prev_end = 0;
+        //f.lines()
+        //.map(|l| {
+        //let l = l.unwrap();
+        //let mut l = l.split_whitespace();
+        //let start_w = l.next().unwrap().parse::<usize>().unwrap();
+        //let end_w = l.next().unwrap().parse::<usize>().unwrap() + 1;
+
+        //let start_write_w = if prev_end != 0 { prev_end } else { start_w };
+
+        //prev_end = end_w;
+
+        //((start_w, end_w), (start_write_w, end_w))
+        //})
+        //.collect::<Vec<_>>()
+        //};
 
         #[cfg(feature = "obliv")]
         let mut prev_ind = (U8::protect(0), U8::protect(0));
@@ -268,6 +351,7 @@ impl<'a> Mcmc<'a> {
             &self.genotype_graph,
             self.params.variants.view(),
         );
+        //let mut windows_count = 0;
 
         for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
             sum_window_size +=
@@ -277,6 +361,33 @@ impl<'a> Mcmc<'a> {
             let rprobs_w = rprobs.slice(start_w, end_w);
 
             let neighbors_w = &neighbors[start_w..end_w];
+
+            //{
+            //let mut n_set = std::collections::HashSet::new();
+            //for n in neighbors_w {
+            //if let Some(n) = n.as_ref() {
+            //for j in n {
+            //n_set.insert(j);
+            //}
+            //}
+            //}
+            //let mut n_list = n_set.into_iter().collect::<Vec<_>>();
+            //n_list.sort();
+
+            //use std::io::Write;
+            //crate::DEBUG_FILE.with(|f| {
+            //let mut f = f.borrow_mut();
+            //if windows_count == 0 {
+            //writeln!(*f, "## kstates ##").unwrap();
+            //}
+            //writeln!(*f, "window {windows_count}").unwrap();
+            //for j in n_list {
+            //writeln!(*f, "{}", j + 2).unwrap();
+            //}
+            //});
+
+            //windows_count += 1;
+            //}
 
             let (full_filter, k) = find_nn_bitmap(neighbors_w, params_w.ref_panel.n_haps);
             ks.push(k as f64);
@@ -513,6 +624,35 @@ impl<'a> Mcmc<'a> {
             }
             is_first_window = false;
         }
+
+        //{
+        //use std::io::Write;
+        //crate::DEBUG_FILE.with(|f| {
+        //let mut f = f.borrow_mut();
+        //writeln!(*f, "## transitions ##").unwrap();
+        ////println!("# transisions = {}", self.genotype_graph.graph.iter().filter(|v| v.is_segment_marker()).count());
+        ////write!(*f, "0: ").unwrap();
+        ////for i in &first_tprobs {
+        ////write!(*f, "{:.8e} ", i).unwrap();
+        ////}
+        ////writeln!(*f).unwrap();
+        //for (c, t) in self
+        //.tprobs
+        //.outer_iter()
+        //.into_iter()
+        //.zip(self.genotype_graph.graph.iter())
+        //.filter_map(|(t, g)| if g.is_segment_marker() { Some(t) } else { None })
+        //.enumerate()
+        //{
+
+        //write!(*f, "{}: ", c+1).unwrap();
+        //for i in &t {
+        //write!(*f, "{:.3e} ", i).unwrap();
+        //}
+        //writeln!(*f).unwrap();
+        //}
+        //});
+        //}
 
         self.genotype_graph
             .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
@@ -1226,3 +1366,19 @@ fn find_nn_bitmap(neighbors: &[Option<Vec<Usize>>], n_haps: usize) -> (Vec<Bool>
     #[cfg(not(feature = "obliv"))]
     (neighbors_bitmap, k)
 }
+
+//fn mcmc_init_loaded(path: &str) -> (Vec<Bool>, Vec<Bool>) {
+//use std::io::BufRead;
+//let f = std::io::BufReader::new(std::fs::File::open(std::path::Path::new(path)).unwrap());
+//let mut h0 = Vec::new();
+//let mut h1 = Vec::new();
+//for line in f.lines() {
+//let line = line.unwrap();
+//let mut line = line.split_whitespace();
+//let _h0 = line.next().unwrap().parse::<u8>().unwrap();
+//let _h1 = line.next().unwrap().parse::<u8>().unwrap();
+//h0.push(_h0 == 1);
+//h1.push(_h1 == 1);
+//}
+//(h0, h1)
+//}

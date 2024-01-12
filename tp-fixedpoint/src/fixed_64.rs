@@ -1,7 +1,7 @@
 use super::*;
 use paste::paste;
 use std::mem::transmute;
-use timing_shield::{TpBool, TpCondSwap, TpEq, TpI64, TpOrd, TpU32};
+use timing_shield::{TpBool, TpCondSwap, TpEq, TpI64, TpOrd, TpU32, TpU64};
 
 use ndarray::{Array1, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
 
@@ -286,6 +286,12 @@ impl<const F: usize> From<TpFixed32<F>> for TpFixed64<F> {
     }
 }
 
+impl<const F: usize> From<TpU64> for TpFixed64<F> {
+    fn from(v: TpU64) -> Self {
+        new_self!(v.as_i64() << F as u32)
+    }
+}
+
 impl<const F: usize> num_traits::Zero for TpFixed64<F> {
     fn zero() -> Self {
         Self::ZERO
@@ -403,7 +409,6 @@ impl<const F: usize> std::ops::Div for TpFixed64<F> {
     type Output = Self;
     #[inline]
     fn div(self, rhs: Self) -> Self::Output {
-        use timing_shield::TpU64;
         let self_is_neg = self.tp_lt(&Self::ZERO);
         let rhs_is_neg = rhs.tp_lt(&Self::ZERO);
         let result_sign_is_pos = self_is_neg.tp_eq(&rhs_is_neg);

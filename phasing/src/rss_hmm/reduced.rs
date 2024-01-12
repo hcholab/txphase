@@ -60,6 +60,36 @@ impl ProbBlock {
         }
     }
 
+    //pub fn expand(
+    //&self,
+    //index_map: ArrayView1<u16>,
+    //inv_weights: ArrayView1<Real>,
+    //) -> Array3<Real> {
+    //let mut expanded = Array3::<Real>::zeros((
+    //self.n_segments(),
+    //self.alpha_pre.dim().0,
+    //self.alpha_pre.dim().1,
+    //));
+    //let cr_prob = &self.c_prob - &self.cnr_prob;
+    //Zip::from(expanded.outer_iter_mut())
+    //.and(cr_prob.outer_iter())
+    //.and(self.cnr_prob.outer_iter())
+    //.and(&self.is_pre)
+    //.map_collect(|exp, cr, cnr, &is_pre| {
+    //HmmReduced::expand_prob(
+    //index_map,
+    //inv_weights,
+    //cr,
+    //cnr,
+    //self.alpha_pre.view(),
+    //self.alpha_post.view(),
+    //is_pre,
+    //exp,
+    //);
+    //});
+    //expanded
+    //}
+
     pub fn n_segments(&self) -> usize {
         self.is_pre.len()
     }
@@ -131,7 +161,12 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         let mut tprobs_e = Array3::<TpI16>::from_elem((m, P, P), TpI16::protect(0));
 
-        let mut rprobs_iter = rprobs.get_forward();
+        #[cfg(feature = "obliv")]
+        let mut rprobs_iter = rprobs.get_forward(Usize::protect(n as u64));
+
+        #[cfg(not(feature = "obliv"))]
+        let mut rprobs_iter = rprobs.get_forward(n);
+
         let mut site_i = 0;
         let mut segment_i = 0;
         let mut is_first_segment = true;
@@ -422,7 +457,13 @@ impl HmmReduced {
         let m = n_sites;
         let n = blocks[0].n_full();
         let n_blocks = blocks.len();
-        let mut rprobs_iter = rprobs.get_backward();
+
+        #[cfg(feature = "obliv")]
+        let mut rprobs_iter = rprobs.get_backward(Usize::protect(n as u64));
+
+        #[cfg(not(feature = "obliv"))]
+        let mut rprobs_iter = rprobs.get_backward(n);
+
         let mut site_i = m - 1;
         let mut is_first_segment = true;
 
@@ -553,6 +594,7 @@ impl HmmReduced {
                     None,
                 );
             }
+
             #[cfg(feature = "obliv")]
             let cond = genotype_graph[site_i].is_segment_marker().expose();
 

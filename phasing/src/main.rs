@@ -56,6 +56,13 @@ pub fn log_template(str1: &str, str2: &str) -> String {
     format!("\t* {str1}\t: {str2}")
 }
 
+//use std::cell::RefCell;
+//use std::fs::File;
+//use std::io::BufWriter;
+//thread_local! {
+//pub static DEBUG_FILE: RefCell<BufWriter<File>> = RefCell::new(BufWriter::new(File::create("debug.txt").unwrap()));
+//}
+
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     assert_eq!(args.len(), 2);
@@ -93,6 +100,7 @@ fn main() {
         IterOption::Burnin(1),
         IterOption::Pruning(1),
         IterOption::Main(5),
+        //IterOption::Main(1),
     ];
 
     let pbwt_depth = ((9. - ((ref_panel_meta.n_haps / 2) as f64).log10()).round() as usize)
@@ -110,9 +118,6 @@ fn main() {
 
     if phase_single {
         let seed = rand::thread_rng().next_u64();
-        //let seed = 1697416311822861122; 
-        //let seed = 16928654553966631652;
-        //let seed = 3552546168628277630;
         println!("seed: {seed}");
         let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
@@ -168,6 +173,17 @@ fn main() {
                 .collect::<Vec<_>>();
             let first = cms[0];
             cms.iter_mut().for_each(|cm| *cm -= first);
+
+            //{
+            //use std::io::Write;
+            //DEBUG_FILE.with(|f| {
+            //let mut f = f.borrow_mut();
+            //writeln!(*f, "## bit positions and genetic map ##").unwrap();
+            //for (b, c) in bps.iter().zip(cms.iter()) {
+            //writeln!(&mut *f, "{b}: {:.4}",c).unwrap();
+            //}
+            //});
+            //}
 
             let (ref_panel_new, afreqs) =
                 common::ref_panel::m3vcf_scan(&ref_panel_meta, &ref_panel_blocks, &sites_bitmask);
