@@ -2,7 +2,7 @@ use crate::hmm::params::*;
 
 use crate::genotype_graph::{G, P};
 use crate::inner::*;
-use crate::rss_hmm::filtered_block::FilteredBlockSlice;
+use crate::rss_hmm::filtered_block::FilteredBlockSliceObliv;
 use crate::tp_value;
 use ndarray::{
     s, Array, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut1, ArrayViewMut2,
@@ -119,8 +119,10 @@ type FwbwOut = (Array1<Real>, Array3<Real>);
 
 impl HmmReduced {
     pub fn fwbw<'a>(
-        blocks: &[FilteredBlockSlice<'a>],
-        n_sites: usize,
+        blocks: &[FilteredBlockSliceObliv<'a>],
+        n_sites_window: usize,
+        n_full_states: UInt,
+        n_full_haps: usize,
         genotype_graph: ArrayView1<G>,
         eprob: Real,
         rprobs: &RprobsSlice,
@@ -130,13 +132,14 @@ impl HmmReduced {
             Array1::<Bool>::from_elem(_ignored_sites.dim(), tp_value!(false, bool));
         let _ignored_sites = _ignored_sites.view();
 
-        let n_haps = blocks[0].n_full();
-        let m = n_sites;
-        let n = n_haps;
+        //let m = n_sites_window;
+        //let n = blocks[0].n_full_states();
 
         let bprobs = Self::backward(
             blocks,
-            n_sites,
+            n_sites_window,
+            n_full_states,
+            n_full_haps,
             genotype_graph,
             eprob,
             rprobs,
@@ -155,16 +158,16 @@ impl HmmReduced {
         let first_tprobs_e = bprobs.first_c_prob_e.clone();
 
         //let mut tprobs_dip = Array3::<Real>::zeros((m, P, P));
-        let mut tprobs = Array3::<Real>::zeros((m, P, P));
+        let mut tprobs = Array3::<Real>::zeros((n_sites_window, P, P));
 
         #[cfg(feature = "obliv")]
-        let mut tprobs_e = Array3::<TpI16>::from_elem((m, P, P), TpI16::protect(0));
+        let mut tprobs_e = Array3::<TpI16>::from_elem((n_sites_window, P, P), TpI16::protect(0));
 
         #[cfg(feature = "obliv")]
-        let mut rprobs_iter = rprobs.get_forward(Usize::protect(n as u64));
+        let mut rprobs_iter = rprobs.get_forward(n_full_states.as_u64());
 
         #[cfg(not(feature = "obliv"))]
-        let mut rprobs_iter = rprobs.get_forward(n);
+        let mut rprobs_iter = rprobs.get_forward(n_full_states as usize);
 
         let mut site_i = 0;
         let mut segment_i = 0;
@@ -186,7 +189,7 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         let mut prev_cnr_prob_e = Array1::from_elem(P, TpI16::protect(0));
 
-        let mut full_trans_prob = Array2::<Real>::zeros((n, P));
+        let mut full_trans_prob = Array2::<Real>::zeros((n_full_haps, P));
 
         #[cfg(feature = "obliv")]
         let mut full_trans_prob_e = Array1::from_elem(P, TpI16::protect(0));
@@ -195,7 +198,7 @@ impl HmmReduced {
 
         for (block_i, block) in blocks.iter().enumerate() {
             let block_n_sites = block.n_sites();
-            let block_n_unique = block.n_unique();
+            let block_n_unique_haps = block.n_unique_haps();
 
             #[cfg(feature = "obliv")]
             let block_n_segments = genotype_graph
@@ -211,8 +214,8 @@ impl HmmReduced {
                 .filter(|g| g.is_segment_marker())
                 .count();
 
-            cur_c_prob = Array2::<Real>::zeros((P, block_n_unique));
-            cur_cnr_prob = Array2::<Real>::zeros((P, block_n_unique));
+            cur_c_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
+            cur_cnr_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
             #[cfg(feature = "obliv")]
             {
                 cur_c_prob_e = Array1::from_elem(P, TpI16::protect(0));
@@ -221,7 +224,8 @@ impl HmmReduced {
 
             let mut rel_segment_i = 0;
 
-            let mut cur_block_prob = ProbBlock::new(block_n_segments, block_n_unique, n);
+            let mut cur_block_prob =
+                ProbBlock::new(block_n_segments, block_n_unique_haps, n_full_haps);
 
             if block_i == 0 {
                 Self::init(
@@ -349,8 +353,8 @@ impl HmmReduced {
             }
 
             for block_site_i in 1..block_n_sites {
-                cur_c_prob = Array2::<Real>::zeros((P, block_n_unique));
-                cur_cnr_prob = Array2::<Real>::zeros((P, block_n_unique));
+                cur_c_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
+                cur_cnr_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
                 #[cfg(feature = "obliv")]
                 {
                     cur_c_prob_e = Array1::from_elem(P, TpI16::protect(0));
@@ -446,27 +450,29 @@ impl HmmReduced {
     }
 
     pub fn backward<'a>(
-        blocks: &[FilteredBlockSlice<'a>],
-        n_sites: usize,
+        blocks: &[FilteredBlockSliceObliv<'a>],
+        n_sites_window: usize,
+        n_full_states: UInt,
+        n_full_haps: usize,
         genotype_graph: ArrayView1<G>,
         eprob: Real,
         rprobs: &RprobsSlice,
         _ignored_sites: ArrayView1<Bool>,
     ) -> BackwardProbs {
-        let m = n_sites;
-        let n = blocks[0].n_full();
+        //let m = n_sites;
+        //let n = blocks[0].n_full();
         let n_blocks = blocks.len();
 
         #[cfg(feature = "obliv")]
-        let mut rprobs_iter = rprobs.get_backward(Usize::protect(n as u64));
+        let mut rprobs_iter = rprobs.get_backward(n_full_states.as_u64());
 
         #[cfg(not(feature = "obliv"))]
-        let mut rprobs_iter = rprobs.get_backward(n);
+        let mut rprobs_iter = rprobs.get_backward(n_full_states as usize);
 
-        let mut site_i = m - 1;
+        let mut site_i = n_sites_window - 1;
         let mut is_first_segment = true;
 
-        let mut full_trans_prob = Array2::zeros((n, P));
+        let mut full_trans_prob = Array2::zeros((n_full_haps, P));
         #[cfg(feature = "obliv")]
         let mut full_trans_prob_e = Array1::from_elem(P, TpI16::protect(0));
 
@@ -497,7 +503,7 @@ impl HmmReduced {
 
         for (block_i, block) in blocks.iter().enumerate().rev() {
             let block_n_sites = block.n_sites();
-            let block_n_unique = block.n_unique();
+            let block_n_unique_haps = block.n_unique_haps();
 
             #[cfg(feature = "obliv")]
             let block_n_segments = genotype_graph
@@ -519,10 +525,11 @@ impl HmmReduced {
                 0
             };
 
-            let mut cur_block_prob = ProbBlock::new(block_n_segments, block_n_unique, n);
+            let mut cur_block_prob =
+                ProbBlock::new(block_n_segments, block_n_unique_haps, n_full_haps);
 
-            cur_c_prob = Array2::<Real>::zeros((P, block_n_unique));
-            cur_cnr_prob = Array2::<Real>::zeros((P, block_n_unique));
+            cur_c_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
+            cur_cnr_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
             #[cfg(feature = "obliv")]
             {
                 cur_c_prob_e = Array1::from_elem(P, TpI16::protect(0));
@@ -650,8 +657,8 @@ impl HmmReduced {
             is_first_segment = true;
 
             for block_site_i in (0..block_n_sites - 1).rev() {
-                cur_c_prob = Array2::<Real>::zeros((P, block_n_unique));
-                cur_cnr_prob = Array2::<Real>::zeros((P, block_n_unique));
+                cur_c_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
+                cur_cnr_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
                 #[cfg(feature = "obliv")]
                 {
                     cur_c_prob_e = Array1::from_elem(P, TpI16::protect(0));
@@ -760,7 +767,7 @@ impl HmmReduced {
 
     fn init<'a>(
         is_forward: bool,
-        block: &FilteredBlockSlice<'a>,
+        block: &FilteredBlockSliceObliv<'a>,
         graph_pos: G,
         eprob: Real,
         mut c_prob: ArrayViewMut2<Real>,
@@ -770,11 +777,9 @@ impl HmmReduced {
         mut alpha_pre: ArrayViewMut2<Real>,
     ) {
         let weights = block.weights.view();
-        #[cfg(feature = "obliv")]
-        let weights = weights.map(|&v| Real::protect_f32(v as f32));
+
         let inv_weights = block.inv_weights.view();
-        #[cfg(feature = "obliv")]
-        let inv_weights = inv_weights.map(|&v| Real::protect_f32(v as f32));
+
         let index_map = block.index_map.view();
         let weighted_eprobs = &weights * eprob;
         let block_site = if is_forward { 0 } else { block.n_sites() - 1 };
@@ -809,8 +814,19 @@ impl HmmReduced {
 
         Zip::from(alpha_pre.rows_mut())
             .and(&index_map)
-            .for_each(|mut a, &i| {
-                a.fill(inv_weights[i as usize]);
+            .and(&block.full_filter)
+            .for_each(|mut a, &i, &b| {
+                #[cfg(feature = "obliv")]
+                {
+                    a.fill(b.select(inv_weights[i as usize], Real::ZERO))
+                }
+
+                #[cfg(not(feature = "obliv"))]
+                if b {
+                    a.fill(inv_weights[i as usize]);
+                } else {
+                    a.fill(0.);
+                }
             });
     }
 
@@ -819,7 +835,7 @@ impl HmmReduced {
         #[cfg(feature = "obliv")] prev_c_prob_e: ArrayView1<TpI16>,
         prev_cnr_prob: ArrayView2<Real>,
         #[cfg(feature = "obliv")] prev_cnr_prob_e: ArrayView1<TpI16>,
-        block: &FilteredBlockSlice<'a>,
+        block: &FilteredBlockSliceObliv<'a>,
         graph_pos: G,
         do_collapse: bool,
         #[cfg(not(feature = "obliv"))] eprob: Real,
@@ -836,9 +852,6 @@ impl HmmReduced {
     ) {
         let index_map = block.index_map.view();
         let weights = block.weights.view();
-
-        #[cfg(feature = "obliv")]
-        let weights = weights.map(|&v| Real::protect_f32(v as f32));
 
         let rprobs = &weights * rprob;
 
@@ -915,8 +928,8 @@ impl HmmReduced {
         #[cfg(feature = "obliv")] prev_c_prob_e: ArrayView1<TpI16>,
         prev_cnr_prob: ArrayView2<Real>,
         #[cfg(feature = "obliv")] prev_cnr_prob_e: ArrayView1<TpI16>,
-        prev_block: &FilteredBlockSlice<'a>,
-        cur_block: &FilteredBlockSlice<'a>,
+        prev_block: &FilteredBlockSliceObliv<'a>,
+        cur_block: &FilteredBlockSliceObliv<'a>,
         cur_graph_pos: G,
         do_collapse: bool,
         #[cfg(not(feature = "obliv"))] eprob: Real,
@@ -936,15 +949,10 @@ impl HmmReduced {
     ) {
         let prev_weights = prev_block.weights.view();
 
-        #[cfg(feature = "obliv")]
-        let prev_weights = prev_weights.map(|&v| Real::protect_f32(v as f32));
-
         let prev_inv_weights = prev_block.inv_weights.view();
 
-        #[cfg(feature = "obliv")]
-        let prev_inv_weights = prev_inv_weights.map(|&v| Real::protect_f32(v as f32));
-
         let prev_index_map = prev_block.index_map.view();
+        let prev_full_filter = prev_block.full_filter.view();
         let cur_index_map = cur_block.index_map.view();
 
         let rprobs = &prev_weights * rprob;
@@ -995,6 +1003,7 @@ impl HmmReduced {
 
             Self::expand_prob(
                 prev_index_map,
+                prev_full_filter,
                 prev_inv_weights.view(),
                 trans_cr_prob.view(),
                 #[cfg(feature = "obliv")]
@@ -1060,13 +1069,16 @@ impl HmmReduced {
                     .and(&mut div_cur_c_prob_e)
                     .for_each(|p, e| renorm_scale_single(p, e));
                 (
-                    cur_c_prob_.map(|&v| Real::protect_i64(1) / v),
+                    cur_c_prob_.map(|&v| {
+                        v.tp_eq(&Real::ZERO)
+                            .select(Real::ZERO, Real::protect_i64(1) / v)
+                    }),
                     div_cur_c_prob_e,
                 )
             };
 
             #[cfg(not(feature = "obliv"))]
-            let div_cur_c_prob_ = 1. / &cur_c_prob_;
+            let div_cur_c_prob_ = cur_c_prob_.map(|&v| if v == 0. { 0. } else { 1. / v });
 
             Zip::from(cur_alpha_pre.rows_mut())
                 .and(full_trans_prob.rows())
@@ -1162,6 +1174,7 @@ impl HmmReduced {
 
             Self::expand_prob(
                 prev_index_map,
+                prev_full_filter,
                 prev_inv_weights.view(),
                 trans_cr_prob.view(),
                 #[cfg(feature = "obliv")]
@@ -1198,12 +1211,16 @@ impl HmmReduced {
                 Zip::from(&mut div_cur_c_prob_)
                     .and(&mut div_cur_c_prob_e)
                     .for_each(|p, e| renorm_scale_single(p, e));
-                div_cur_c_prob_.map_mut(|v| *v = Real::protect_i64(1) / *v);
+                div_cur_c_prob_.map_mut(|v| {
+                    *v = v
+                        .tp_eq(&Real::ZERO)
+                        .select(Real::ZERO, Real::protect_i64(1) / *v)
+                });
                 (div_cur_c_prob_, div_cur_c_prob_e)
             };
 
             #[cfg(not(feature = "obliv"))]
-            let div_cur_c_prob_ = 1. / &cur_c_prob_;
+            let div_cur_c_prob_ = cur_c_prob_.map(|&v| if v == 0. { 0. } else { 1. / v });
 
             Zip::from(cur_alpha_pre.rows_mut())
                 .and(full_trans_prob.rows())
@@ -1445,6 +1462,7 @@ impl HmmReduced {
 
     fn expand_prob(
         index_map: ArrayView1<u16>,
+        full_filter: ArrayView1<Bool>,
         inv_weights: ArrayView1<Real>,
         cr_prob: ArrayView2<Real>,
         #[cfg(feature = "obliv")] cr_prob_e: ArrayView1<TpI16>,
@@ -1496,30 +1514,83 @@ impl HmmReduced {
             Zip::from(expanded_prob.rows_mut())
                 .and(alpha_pre.rows())
                 .and(&index_map)
-                .for_each(|mut p, a, &i| {
-                    let i = i as usize;
-                    let cr = cr_prob.row(i);
-                    let cnr = cnr_prob.row(i);
-                    p.assign(&(&cr + &cnr * &a));
+                .and(&full_filter)
+                .for_each(|mut p, a, &i, &b| {
+                    #[cfg(feature = "obliv")]
+                    {
+                        let i = i as usize;
+                        let cr = cr_prob.row(i);
+                        let cnr = cnr_prob.row(i);
+                        let tmp = &cr + &cnr * &a;
+                        Zip::from(&mut p).and(&tmp).for_each(|tar, &src| {
+                            *tar = b.select(src, Real::ZERO);
+                        });
+                    }
+
+                    #[cfg(not(feature = "obliv"))]
+                    if b {
+                        let i = i as usize;
+                        let cr = cr_prob.row(i);
+                        let cnr = cnr_prob.row(i);
+                        p.assign(&(&cr + &cnr * &a));
+                    } else {
+                        p.fill(0.);
+                    }
                 });
         } else {
             Zip::from(expanded_prob.rows_mut())
                 .and(&alpha_post)
                 .and(&index_map)
-                .for_each(|mut p, &a, &i| {
-                    let i = i as usize;
-                    let cr = cr_prob.row(i);
-                    let cnr = cnr_prob.row(i);
-                    p.assign(&(&cr + &cnr * a));
+                .and(&full_filter)
+                .for_each(|mut p, &a, &i, &b| {
+                    #[cfg(feature = "obliv")]
+                    {
+                        let i = i as usize;
+                        let cr = cr_prob.row(i);
+                        let cnr = cnr_prob.row(i);
+                        let tmp = &cr + &cnr * a;
+                        Zip::from(&mut p).and(&tmp).for_each(|tar, &src| {
+                            *tar = b.select(src, Real::ZERO);
+                        });
+                    }
+                    #[cfg(not(feature = "obliv"))]
+                    if b {
+                        let i = i as usize;
+                        let cr = cr_prob.row(i);
+                        let cnr = cnr_prob.row(i);
+                        p.assign(&(&cr + &cnr * a));
+                    } else {
+                        p.fill(0.);
+                    }
                 });
         };
+        //println!(
+        //"alpha_pre: {:?}",
+        //alpha_pre
+        //.rows()
+        //.into_iter()
+        //.filter(|r| r.sum() != 0.)
+        //.count()
+        //);
+        //println!(
+        //"alpha_post: {:?}",
+        //alpha_post.iter().filter(|&&r| r != 0.).count()
+        //);
+        //println!(
+        //"expanded: {:?}",
+        //expanded_prob
+        //.rows()
+        //.into_iter()
+        //.filter(|r| r.sum() != 0.)
+        //.count()
+        //);
 
         let mut _t = EXPAND_T.lock().unwrap();
         *_t = t.elapsed();
     }
 
     fn combine_block<'a>(
-        block: &FilteredBlockSlice<'a>,
+        block: &FilteredBlockSliceObliv<'a>,
         forward: &ProbBlock,
         backward: &ProbBlock,
         mut tprobs: ArrayViewMut3<Real>,
@@ -1529,15 +1600,14 @@ impl HmmReduced {
 
         let inv_weights = block.inv_weights.view();
 
-        #[cfg(feature = "obliv")]
-        let inv_weights = inv_weights.map(|&v| Real::protect_f32(v as f32));
+        let n_unique_haps = block.n_unique_haps();
 
-        let mut alpha_11 = Array3::<Real>::zeros((P, P, block.n_unique()));
-        let mut alpha_10 = Array2::<Real>::zeros((P, block.n_unique()));
-        let mut alpha_01 = Array2::<Real>::zeros((P, block.n_unique()));
-        let mut alpha_00 = Array1::<Real>::zeros(block.n_unique());
+        let mut alpha_11 = Array3::<Real>::zeros((P, P, n_unique_haps));
+        let mut alpha_10 = Array2::<Real>::zeros((P, n_unique_haps));
+        let mut alpha_01 = Array2::<Real>::zeros((P, n_unique_haps));
+        let mut alpha_00 = Array1::<Real>::zeros(n_unique_haps);
 
-        let mut arr = vec![Vec::new(); block.n_unique()];
+        let mut arr = vec![Vec::new(); n_unique_haps];
 
         Zip::from(&block.index_map)
             .and(forward.alpha_pre.rows())

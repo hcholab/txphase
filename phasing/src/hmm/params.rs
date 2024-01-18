@@ -200,7 +200,9 @@ pub struct RprobsSlice<'a> {
 impl<'a> RprobsSlice<'a> {
     pub fn get_forward(&self, n_haps: Usize) -> Box<dyn Iterator<Item = Real>> {
         #[cfg(feature = "obliv")]
-        let frac_n_haps: Real = tp_value_real!(1., f32) / From::from(n_haps);
+        let frac_n_haps: Real = n_haps
+            .tp_eq(&Usize::protect(0))
+            .select(Real::ZERO, Real::protect_i64(1) / From::from(n_haps));
 
         #[cfg(not(feature = "obliv"))]
         let frac_n_haps = 1. / n_haps as f64;
@@ -215,7 +217,9 @@ impl<'a> RprobsSlice<'a> {
 
     pub fn get_backward(&self, n_haps: Usize) -> Box<dyn Iterator<Item = Real>> {
         #[cfg(feature = "obliv")]
-        let frac_n_haps: Real = tp_value_real!(1., f32) / From::from(n_haps);
+        let frac_n_haps: Real = n_haps
+            .tp_eq(&Usize::protect(0))
+            .select(Real::ZERO, Real::protect_i64(1) / From::from(n_haps));
 
         #[cfg(not(feature = "obliv"))]
         let frac_n_haps = 1. / n_haps as f64;

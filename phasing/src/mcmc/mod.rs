@@ -8,7 +8,7 @@ use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::combine_dips;
 //use crate::hmm::{COLL_T, COMBD_T, COMB_T, EMIS_T, TRAN_T};
 use crate::variants::{Rarity, Variant};
-use crate::{tp_value, Bool, Genotype, Real, Usize, U8};
+use crate::{tp_value, Bool, Genotype, Real, UInt, Usize, U8};
 //use common::ref_panel::RefPanelSlice;
 use rand::Rng;
 
@@ -390,28 +390,38 @@ impl<'a> Mcmc<'a> {
             //}
 
             let (full_filter, k) = find_nn_bitmap(neighbors_w, params_w.ref_panel.n_haps);
-            ks.push(k as f64);
+            #[cfg(feature = "obliv")]
+            {
+                ks.push(k.expose() as f64);
+            }
+            #[cfg(not(feature = "obliv"))]
+            {
+                ks.push(k as f64);
+            }
 
             let filtered_blocks = params_w
                 .ref_panel
                 .blocks
                 .iter()
                 .map(|b| {
-                    crate::rss_hmm::filtered_block::FilteredBlockSlice::from_block_slice(
+                    crate::rss_hmm::filtered_block::FilteredBlockSliceObliv::from_block_slice(
                         b,
                         &full_filter,
                     )
                 })
                 .collect::<Vec<_>>();
 
-            let fwbw_out = crate::rss_hmm::HmmReduced::fwbw(
+            let fwbw_out = crate::rss_hmm::reduced_obliv::HmmReduced::fwbw(
                 &filtered_blocks,
                 params_w.ref_panel.n_sites,
+                k,
+                params_w.ref_panel.n_haps,
                 genotype_graph_w.graph.view(),
                 self.params.hmm_params.eprob,
                 &rprobs_w,
                 Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(false, bool)).view(),
             );
+
             #[cfg(feature = "obliv")]
             let (first_tprobs, first_tprobs_e, tprobs, tprobs_e) = fwbw_out;
 
@@ -1326,7 +1336,7 @@ impl<'a> Mcmc<'a> {
 //(ref_panel.filter(&neighbors_bitmap), k)
 //}
 
-fn find_nn_bitmap(neighbors: &[Option<Vec<Usize>>], n_haps: usize) -> (Vec<Bool>, usize) {
+fn find_nn_bitmap(neighbors: &[Option<Vec<Usize>>], n_haps: usize) -> (Vec<Bool>, UInt) {
     #[cfg(feature = "obliv")]
     let neighbors_bitmap = {
         let mut bitmap = obliv_utils::bitmap::OblivBitmap::new(n_haps);
@@ -1355,10 +1365,12 @@ fn find_nn_bitmap(neighbors: &[Option<Vec<Usize>>], n_haps: usize) -> (Vec<Bool>
     };
 
     #[cfg(feature = "obliv")]
-    let k = neighbors_bitmap.iter().filter(|b| b.expose()).count();
+    let k = neighbors_bitmap
+        .iter()
+        .fold(UInt::protect(0), |acc, v| acc + v.as_u32());
 
     #[cfg(not(feature = "obliv"))]
-    let k = neighbors_bitmap.iter().filter(|&&b| b).count();
+    let k = neighbors_bitmap.iter().filter(|&&b| b).count() as u32;
 
     #[cfg(feature = "obliv")]
     return (neighbors_bitmap.iter().collect(), k);
