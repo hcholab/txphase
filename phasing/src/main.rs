@@ -50,7 +50,7 @@ use rayon::prelude::*;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::str::FromStr;
 
-const N_THREADS: usize = 48;
+const N_THREADS: usize = 40;
 
 pub fn log_template(str1: &str, str2: &str) -> String {
     format!("\t* {str1}\t: {str2}")
@@ -244,8 +244,8 @@ fn main() {
             .into_par_iter()
             .map(|genotypes| {
                 let id = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let seed = rand::thread_rng().next_u64();
-                //let seed = 685851609597047061;
+                //let seed = rand::thread_rng().next_u64();
+                let seed = 12727004758508603152;
                 println!("{}", &log_template("Seed", &format!("{seed}")));
 
                 let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
@@ -303,6 +303,18 @@ fn main() {
                         &ref_panel_meta,
                         &ref_panel_blocks,
                         &sites_bitmask,
+                    );
+
+                    let block_sizes = ref_panel_new
+                        .blocks
+                        .iter()
+                        .map(|b| b.n_unique() as f64)
+                        .collect::<Vec<_>>();
+                    use statrs::statistics::Statistics;
+                    println!(
+                        "Block sizes: {:.3}+/-{:.3}",
+                        Statistics::mean(&block_sizes),
+                        Statistics::std_dev(&block_sizes)
                     );
 
                     mcmc::McmcSharedParams::new(

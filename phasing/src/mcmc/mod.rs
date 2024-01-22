@@ -113,6 +113,55 @@ impl<'a> Mcmc<'a> {
                 }
             });
 
+        println!(
+            "Emission: {:?} ms",
+            crate::rss_hmm::reduced_obliv::EMISS
+                .with(|v| *v.borrow())
+                .as_millis()
+        );
+
+        println!(
+            "Transition: {:?} ms",
+            crate::rss_hmm::reduced_obliv::TRANS
+                .with(|v| *v.borrow())
+                .as_millis()
+        );
+
+        println!(
+            "Collapse: {:?} ms",
+            crate::rss_hmm::reduced_obliv::COLL
+                .with(|v| *v.borrow())
+                .as_millis()
+        );
+
+        println!(
+            "Combine 1: {:?} ms",
+            crate::rss_hmm::reduced_obliv::COMB1
+                .with(|v| *v.borrow())
+                .as_millis()
+        );
+
+        println!(
+            "Combine 2: {:?} ms",
+            crate::rss_hmm::reduced_obliv::COMB2
+                .with(|v| *v.borrow())
+                .as_millis()
+        );
+
+        println!(
+            "Expand: {:?} ms",
+            crate::rss_hmm::reduced_obliv::EXPAND
+                .with(|v| *v.borrow())
+                .as_millis()
+        );
+
+        println!(
+            "Block Transition: {:?} ms",
+            crate::rss_hmm::reduced_obliv::BLOCK
+                .with(|v| *v.borrow())
+                .as_millis()
+        );
+
         mcmc.phased_ind = viterbi::viterbi(mcmc.tprobs.view(), mcmc.genotype_graph.graph.view());
 
         mcmc.genotype_graph
@@ -341,6 +390,7 @@ impl<'a> Mcmc<'a> {
         let mut sum_window_size = 0;
         let n_windows = windows.len();
         let mut ks = Vec::new();
+        let mut max_ks = Vec::new();
         let mut tprob_pairs = Array2::<Real>::zeros((P, P));
 
         let mut i = 0;
@@ -361,6 +411,11 @@ impl<'a> Mcmc<'a> {
             let rprobs_w = rprobs.slice(start_w, end_w);
 
             let neighbors_w = &neighbors[start_w..end_w];
+            let max_k = neighbors_w
+                .iter()
+                .filter_map(|v| v.as_ref().map(|v| v.len()))
+                .sum::<usize>();
+            max_ks.push(max_k as f64);
 
             //{
             //let mut n_set = std::collections::HashSet::new();
@@ -390,6 +445,7 @@ impl<'a> Mcmc<'a> {
             //}
 
             let (full_filter, k) = find_nn_bitmap(neighbors_w, params_w.ref_panel.n_haps);
+
             #[cfg(feature = "obliv")]
             {
                 ks.push(k.expose() as f64);
@@ -422,37 +478,36 @@ impl<'a> Mcmc<'a> {
                 Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(false, bool)).view(),
             );
 
+            //let filtered_blocks = params_w
+            //.ref_panel
+            //.blocks
+            //.iter()
+            //.map(|b| {
+            //crate::rss_hmm::filtered_block::FilteredBlockSlice::from_block_slice(
+            //b,
+            //&full_filter,
+            //)
+            //})
+            //.collect::<Vec<_>>();
+
+            //let fwbw_out = crate::rss_hmm::HmmReduced::fwbw(
+            //&filtered_blocks,
+            //params_w.ref_panel.n_sites,
+            //genotype_graph_w.graph.view(),
+            //self.params.hmm_params.eprob,
+            //&rprobs_w,
+            //Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(false, bool)).view(),
+            //);
+
             #[cfg(feature = "obliv")]
             let (first_tprobs, first_tprobs_e, tprobs, tprobs_e) = fwbw_out;
 
             #[cfg(not(feature = "obliv"))]
             let (first_tprobs, tprobs) = fwbw_out;
 
-            let mut tprobs_window = Array3::<Real>::zeros(((end_w - start_w), P, P));
-
+            let mut tprobs_window = tprobs;
             #[cfg(feature = "obliv")]
-            let mut tprobs_window_e =
-                Array3::<TpI16>::from_elem(((end_w - start_w), P, P), TpI16::protect(0));
-
-            let mut j = 0;
-            Zip::indexed(tprobs_window.outer_iter_mut())
-                .and(&genotype_graph_w.graph)
-                .for_each(|_i, mut t, g| {
-                    #[cfg(feature = "obliv")]
-                    if g.is_segment_marker().expose() {
-                        t.assign(&tprobs.slice(s![j, .., ..]));
-                        tprobs_window_e
-                            .slice_mut(s![_i, .., ..])
-                            .assign(&tprobs_e.slice(s![j, .., ..]));
-                        j += 1;
-                    }
-
-                    #[cfg(not(feature = "obliv"))]
-                    if g.is_segment_marker() {
-                        t.assign(&tprobs.slice(s![j, .., ..]));
-                        j += 1;
-                    }
-                });
+            let mut tprobs_window_e = tprobs_e;
 
             if is_first_window {
                 Zip::from(tprobs_window.slice_mut(s![0, .., ..]).rows_mut())
@@ -688,6 +743,11 @@ impl<'a> Mcmc<'a> {
             "K: {:.3}+/-{:.3}",
             Statistics::mean(&ks),
             Statistics::std_dev(&ks)
+        );
+        println!(
+            "Max K: {:.3}+/-{:.3}",
+            Statistics::mean(&max_ks),
+            Statistics::std_dev(&max_ks)
         );
 
         println!(
