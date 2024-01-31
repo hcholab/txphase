@@ -4,10 +4,10 @@
 #![feature(int_roundings)]
 
 pub mod bitmap;
-pub mod cmov;
-pub mod min_heap;
 pub mod bitonic_sort;
+pub mod cmov;
+pub mod cond_copy;
+pub mod min_heap;
 pub mod top_s;
 pub mod utils;
 pub mod vec;
-

@@ -251,11 +251,9 @@ impl<const F: usize> TpFixed64<F> {
         assert_eq!(a.len(), b.len());
         let a_128 = a.map(|v| Into::<TpI128>::into(v.inner));
         let b_128 = b.map(|v| Into::<TpI128>::into(v.inner));
-        new_self!((Zip::from(&a_128)
-            .and(&b_128)
-            .fold(TpI128::protect(0), |accu, &a, &b| accu + a * b)
-            >> F as u32)
-            .into())
+        new_self!(
+            (TpI128::dot(a_128.as_slice().unwrap(), b_128.as_slice().unwrap()) >> F as u32).into()
+        )
     }
 
     pub fn matmul(a: ArrayView2<Self>, b: ArrayView2<Self>, mut c: ArrayViewMut2<Self>) {

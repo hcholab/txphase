@@ -138,20 +138,19 @@ pub fn sum_scale_by_column(
     probs: ArrayView2<Real>,
     probs_e: ArrayView1<TpI16>,
 ) -> (Array1<Real>, TpI16) {
-    let mut sum_e = max_e(probs_e);
-
     let mut probs = probs.to_owned();
     let mut probs_e = probs_e.to_owned();
-    Zip::from(probs.rows_mut())
-        .and(&mut probs_e)
-        .for_each(|p, e| {
-            match_scale_row(sum_e, p, e);
-        });
+    sum_scale_by_column_mut(probs.view_mut(), probs_e.view_mut())
+}
 
+pub fn sum_scale_by_column_mut(
+    mut probs: ArrayViewMut2<Real>,
+    mut probs_e: ArrayViewMut1<TpI16>,
+) -> (Array1<Real>, TpI16) {
+    let mut sum_e = max_e(probs_e.view());
+    match_scale(sum_e, probs.view_mut(), probs_e.view_mut());
     let mut sum = Zip::from(probs.columns()).map_collect(|c| c.sum());
-
     renorm_scale_row(sum.view_mut(), &mut sum_e);
-
     (sum, sum_e)
 }
 

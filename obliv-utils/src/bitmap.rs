@@ -14,6 +14,10 @@ impl OblivBitmap {
         }
     }
 
+    pub fn from_inner(inner: OblivVec<TpU64>, size_bits: usize) -> Self {
+        Self { inner, size_bits }
+    }
+
     //pub fn remap_compressed(&self, members: &[Vec<usize>]) -> Vec<TpBool> {
     //let mut compressed_map = vec![TpBool::protect(false); members.len()];
     //for (m, c) in members.into_iter().zip(compressed_map.iter_mut()) {

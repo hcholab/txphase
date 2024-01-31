@@ -22,7 +22,7 @@ use tp_fixedpoint::Dot;
 use ndarray::linalg::Dot;
 
 #[cfg(not(feature = "obliv"))]
-const RENORM_THESHOLD: f64 = 1e-20;
+const RENORM_THRESHOLD: f64 = 1e-20;
 
 use std::time::{Duration, Instant};
 
@@ -45,18 +45,20 @@ pub struct ProbBlock {
     pub alpha_pre: Array2<Real>,
     pub alpha_post: Array1<Real>,
     pub is_pre: Array1<bool>,
+    pub save_alpha_post_cnr: Array2<Real>,
 }
 
 impl ProbBlock {
-    pub fn new(n_segments: usize, n_unique: usize, n_haps: usize) -> Self {
+    pub fn new(n_sites: usize, n_unique: usize, n_haps: usize) -> Self {
         Self {
-            c_prob: Array3::<Real>::zeros((n_segments, P, n_unique)),
-            cnr_prob: Array3::<Real>::zeros((n_segments, P, n_unique)),
+            c_prob: Array3::<Real>::zeros((n_sites, P, n_unique)),
+            cnr_prob: Array3::<Real>::zeros((n_sites, P, n_unique)),
             #[cfg(feature = "obliv")]
-            prob_e: Array2::<TpI16>::from_elem((n_segments, P), TpI16::protect(0)),
+            prob_e: Array2::<TpI16>::from_elem((n_sites, P), TpI16::protect(0)),
             alpha_pre: Array2::<Real>::zeros((n_haps, P)),
             alpha_post: Array1::<Real>::zeros(n_haps),
-            is_pre: Array1::from_elem(n_segments, true),
+            is_pre: Array1::from_elem(n_sites, true),
+            save_alpha_post_cnr: Array2::<Real>::zeros((P, n_unique)),
         }
     }
 
@@ -189,6 +191,7 @@ impl HmmReduced {
 
             cur_c_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
             cur_cnr_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
+
             #[cfg(feature = "obliv")]
             {
                 cur_c_prob_e = Array1::from_elem(P, TpI16::protect(0));
@@ -279,6 +282,7 @@ impl HmmReduced {
                     cur_block_prob.alpha_pre.view_mut(),
                     cur_block_prob.alpha_post.view_mut(),
                     fprobs_save,
+                    cur_block_prob.save_alpha_post_cnr.view_mut(),
                 );
 
                 #[cfg(feature = "obliv")]
@@ -350,6 +354,7 @@ impl HmmReduced {
                     cur_cnr_prob_e.view_mut(),
                     cur_block_prob.alpha_post.view_mut(),
                     fprobs_save,
+                    cur_block_prob.save_alpha_post_cnr.view_mut(),
                 );
 
                 if do_collapse {
@@ -419,7 +424,6 @@ impl HmmReduced {
 
             let mut cur_block_prob =
                 ProbBlock::new(block_n_sites, block_n_unique_haps, n_full_haps);
-
             {
                 let cur_c_prob = cur_block_prob
                     .c_prob
@@ -456,6 +460,7 @@ impl HmmReduced {
 
                     let prev_c_prob = prev_block_prob.c_prob.slice(s![0, .., ..]);
                     let prev_cnr_prob = prev_block_prob.cnr_prob.slice(s![0, .., ..]);
+                    let prev_save_alpha_post_cnr = prev_block_prob.save_alpha_post_cnr.view_mut();
 
                     #[cfg(feature = "obliv")]
                     let prev_c_prob_e = prev_block_prob.prob_e.row(0);
@@ -503,6 +508,7 @@ impl HmmReduced {
                         cur_alpha_pre,
                         cur_alpha_post,
                         None,
+                        prev_save_alpha_post_cnr,
                     );
                 }
 
@@ -580,6 +586,7 @@ impl HmmReduced {
                     cur_cnr_prob_e.view_mut(),
                     cur_block_prob.alpha_post.view_mut(),
                     None,
+                    cur_block_prob.save_alpha_post_cnr.view_mut(),
                 );
 
                 if do_collapse {
@@ -695,6 +702,7 @@ impl HmmReduced {
         #[cfg(feature = "obliv")] mut cur_cnr_prob_e: ArrayViewMut1<TpI16>,
         mut alpha_post: ArrayViewMut1<Real>,
         fprob_save: Option<ForwardProbSave<'b>>,
+        save_cnr_prob: ArrayViewMut2<Real>,
     ) {
         let index_map = block.index_map.view();
         let weights = block.weights.view();
@@ -742,6 +750,7 @@ impl HmmReduced {
                 cur_cnr_prob.view_mut(),
                 #[cfg(feature = "obliv")]
                 cur_cnr_prob_e.view_mut(),
+                save_cnr_prob,
             );
         }
 
@@ -791,6 +800,7 @@ impl HmmReduced {
         mut cur_alpha_pre: ArrayViewMut2<Real>,
         mut cur_alpha_post: ArrayViewMut1<Real>,
         fprob_save: Option<ForwardProbSave<'b>>,
+        save_cnr_prob: ArrayViewMut2<Real>,
     ) {
         let prev_weights = prev_block.weights.view();
 
@@ -952,6 +962,7 @@ impl HmmReduced {
                     cur_c_prob_e.view_mut(),
                     cur_cnr_prob.view_mut(),
                     cur_cnr_prob_e.view_mut(),
+                    save_cnr_prob,
                 );
             }
 
@@ -997,6 +1008,7 @@ impl HmmReduced {
                     trans_c_prob_e.view_mut(),
                     trans_cnr_prob.view_mut(),
                     trans_cnr_prob_e.view_mut(),
+                    save_cnr_prob,
                 );
 
                 is_first_segment = false;
@@ -1194,7 +1206,7 @@ impl HmmReduced {
         #[cfg(not(feature = "obliv"))]
         {
             let sum = cur_c_prob.sum();
-            if sum < RENORM_THESHOLD {
+            if sum < RENORM_THRESHOLD {
                 cur_c_prob *= 1. / sum;
                 cur_cnr_prob *= 1. / sum;
             }
@@ -1208,15 +1220,23 @@ impl HmmReduced {
 
     fn collapse(
         index_map: ArrayView1<u16>,
-        is_first_segment: bool,
+        do_compute_alpha_post: bool,
         alpha_pre: ArrayView2<Real>,
         alpha_post: ArrayViewMut1<Real>,
         mut cur_c_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_c_prob_e: ArrayViewMut1<TpI16>,
         mut cur_cnr_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_cnr_prob_e: ArrayViewMut1<TpI16>,
+        mut save_cnr_prob: ArrayViewMut2<Real>,
     ) {
         let t = Instant::now();
+
+        #[cfg(feature = "obliv")]
+        let (sum_c, sum_c_e) =
+            sum_scale_by_column_mut(cur_c_prob.view_mut(), cur_c_prob_e.view_mut());
+
+        #[cfg(not(feature = "obliv"))]
+        let mut sum_c = Zip::from(cur_c_prob.columns()).map_collect(|c| c.sum());
 
         #[cfg(feature = "obliv")]
         let mut sum_cnr_e = max_e(cur_cnr_prob_e.view());
@@ -1228,15 +1248,9 @@ impl HmmReduced {
             cur_cnr_prob_e.view_mut(),
         );
 
-        #[cfg(feature = "obliv")]
-        let (sum_c, sum_c_e) = sum_scale_by_column(cur_c_prob.view(), cur_c_prob_e.view());
-
-        #[cfg(not(feature = "obliv"))]
-        let mut sum_c = Zip::from(cur_c_prob.columns()).map_collect(|c| c.sum());
-
         let mut sum_cnr = Zip::from(cur_cnr_prob.columns()).map_collect(|c| c.sum());
 
-        if is_first_segment {
+        if do_compute_alpha_post {
             Self::compute_alpha_post(
                 sum_cnr.view(),
                 cur_cnr_prob.view(),
@@ -1244,12 +1258,14 @@ impl HmmReduced {
                 index_map,
                 alpha_post,
             );
+
+            save_cnr_prob.assign(&cur_cnr_prob);
         }
 
         #[cfg(not(feature = "obliv"))]
         {
             let sum = sum_c.sum();
-            if sum < RENORM_THESHOLD {
+            if sum < RENORM_THRESHOLD {
                 sum_c *= 1. / sum;
                 sum_cnr *= 1. / sum;
             }
@@ -1457,6 +1473,38 @@ impl HmmReduced {
         mut tprobs: ArrayViewMut3<Real>,
         #[cfg(feature = "obliv")] mut tprobs_e: ArrayViewMut3<TpI16>,
     ) {
+        {
+            let forward_sum_cnr =
+                Zip::from(forward.save_alpha_post_cnr.columns()).map_collect(|c| c.sum());
+            let mut forward_test_alpha_post =
+                Array1::from_elem(forward.alpha_post.dim(), Real::ZERO);
+            Self::compute_alpha_post(
+                forward_sum_cnr.view(),
+                forward.save_alpha_post_cnr.view(),
+                forward.alpha_pre.view(),
+                block.index_map.view(),
+                forward_test_alpha_post.view_mut(),
+            );
+            Zip::from(&forward.alpha_post)
+                .and(&forward_test_alpha_post)
+                .for_each(|a, b| assert_eq!(a.expose_into_f32(), b.expose_into_f32()));
+
+            let backward_sum_cnr =
+                Zip::from(backward.save_alpha_post_cnr.columns()).map_collect(|c| c.sum());
+            let mut backward_test_alpha_post =
+                Array1::from_elem(backward.alpha_post.dim(), Real::ZERO);
+            Self::compute_alpha_post(
+                backward_sum_cnr.view(),
+                backward.save_alpha_post_cnr.view(),
+                backward.alpha_pre.view(),
+                block.index_map.view(),
+                backward_test_alpha_post.view_mut(),
+            );
+            Zip::from(&backward.alpha_post)
+                .and(&backward_test_alpha_post)
+                .for_each(|a, b| assert_eq!(a.expose_into_f32(), b.expose_into_f32()));
+        }
+
         let t = Instant::now();
 
         let inv_weights = block.inv_weights.view();

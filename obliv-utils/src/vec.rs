@@ -48,12 +48,12 @@ where
         self.len as usize
     }
 
-    pub fn push(&mut self, rank: T) {
+    pub fn push(&mut self, item: T) {
         if self.last_len as usize == rl_cap::<T>() {
             self.last_len = 0;
             self.inner.push(Aligned::<T>::default());
         }
-        self.inner.last_mut().unwrap().0[self.last_len as usize] = rank;
+        self.inner.last_mut().unwrap().0[self.last_len as usize] = item;
         self.last_len += 1;
         self.len += 1;
     }
@@ -164,7 +164,7 @@ where
         let n_aligned = len.div_ceil(rl_cap::<T>());
         Self {
             inner: vec![Aligned::<T>::default(); n_aligned],
-            len: len as u32, 
+            len: len as u32,
             last_len: (len % rl_cap::<T>()) as u8,
         }
     }
@@ -267,17 +267,17 @@ where
         if index >= self.len() {
             panic!();
         }
-        &mut self.inner[index/rl_cap::<T>()].0[index%rl_cap::<T>()]
+        &mut self.inner[index / rl_cap::<T>()].0[index % rl_cap::<T>()]
     }
 }
 
 //impl<T> std::ops::Index<usize> for OblivVec<T>
 //where
-    //[(); rl_cap::<T>()]:,
+//[(); rl_cap::<T>()]:,
 //{
-    //fn index(&self, index: usize) -> &T {
-        //&mut self.inner[index/rl_cap::<T>()].0[index%rl_cap::<T>()]
-    //}
+//fn index(&self, index: usize) -> &T {
+//&mut self.inner[index/rl_cap::<T>()].0[index%rl_cap::<T>()]
+//}
 //}
 
 impl<T> Extend<T> for OblivVec<T>
@@ -309,7 +309,7 @@ where
 }
 #[repr(C, align(64))]
 #[derive(Clone)]
-struct Aligned<T>([T; rl_cap::<T>()])
+pub struct Aligned<T>([T; rl_cap::<T>()])
 where
     [(); rl_cap::<T>()]:;
 

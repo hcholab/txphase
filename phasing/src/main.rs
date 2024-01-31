@@ -93,14 +93,14 @@ fn main() {
     let bps: Vec<u32> = bincode::deserialize_from(&mut host_stream).unwrap();
     let genotypes: Vec<Vec<i8>> = bincode::deserialize_from(&mut host_stream).unwrap();
     let iterations = [
-        IterOption::Burnin(5),
-        IterOption::Pruning(1),
-        IterOption::Burnin(1),
-        IterOption::Pruning(1),
-        IterOption::Burnin(1),
-        IterOption::Pruning(1),
-        IterOption::Main(5),
-        //IterOption::Main(1),
+        //IterOption::Burnin(5),
+        //IterOption::Pruning(1),
+        //IterOption::Burnin(1),
+        //IterOption::Pruning(1),
+        //IterOption::Burnin(1),
+        //IterOption::Pruning(1),
+        //IterOption::Main(5),
+        IterOption::Main(1),
     ];
 
     let pbwt_depth = ((9. - ((ref_panel_meta.n_haps / 2) as f64).log10()).round() as usize)
@@ -114,10 +114,11 @@ fn main() {
     println!("pbwt-depth = {pbwt_depth}");
     println!("pbwt-modulo = {:.3}", pbwt_modulo);
 
-    let phase_single = false;
+    let phase_single = true;
 
     if phase_single {
-        let seed = rand::thread_rng().next_u64();
+        //let seed = rand::thread_rng().next_u64();
+        let seed = 12727004758508603152;
         println!("seed: {seed}");
         let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
 
@@ -187,6 +188,31 @@ fn main() {
 
             let (ref_panel_new, afreqs) =
                 common::ref_panel::m3vcf_scan(&ref_panel_meta, &ref_panel_blocks, &sites_bitmask);
+
+            use statrs::statistics::Statistics;
+            let block_n_unique_haps = ref_panel_new
+                .blocks
+                .iter()
+                .map(|b| b.n_unique() as f64)
+                .collect::<Vec<_>>();
+
+            let block_n_sites = ref_panel_new
+                .blocks
+                .iter()
+                .map(|b| b.n_sites() as f64)
+                .collect::<Vec<_>>();
+
+            println!(
+                "# block unique haplotypes: {:.3}+/-{:.3}",
+                Statistics::mean(&block_n_unique_haps),
+                Statistics::std_dev(&block_n_unique_haps)
+            );
+
+            println!(
+                "# block sites: {:.3}+/-{:.3}",
+                Statistics::mean(&block_n_sites),
+                Statistics::std_dev(&block_n_sites)
+            );
 
             mcmc::McmcSharedParams::new(
                 ref_panel_new,

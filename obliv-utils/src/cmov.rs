@@ -20,73 +20,22 @@
 
 use core::arch::asm;
 
-//// CMov for blocks aligned to 8-byte boundary
-//#[inline]
-//pub fn cmov_a8_bytes<N: ArrayLength<u8>>(condition: bool, src: &A8Bytes<N>, dest: &mut A8Bytes<N>) {
-//// This test is expected to be optimized away but avoids UB if N == 0.
-//if N::USIZE != 0 {
-//// View the A8Bytes ref as pointers to u64.
-//// Note that rust code is never actually dereferencing this pointer,
-//// it is being fed to asm which will use it in assembly operands directly.
-//// So no type-based alias analysis rules, or similar, can be relevant here.
-//let count = (N::USIZE / 8) + (if 0 == N::USIZE % 8 { 0 } else { 1 });
-//unsafe {
-//cmov_byte_slice_a8(
-//condition,
-//src as *const A8Bytes<N> as *const u64,
-//dest as *mut A8Bytes<N> as *mut u64,
-//count,
-//)
-//};
-//}
-//}
-
-//// CMov for blocks aligned to 64-byte boundary
-//// Without avx2, fallback to cmov_byte_slice_a8
-//#[cfg(not(target_feature = "avx2"))]
-//#[inline]
-//pub fn cmov_a64_bytes<N: ArrayLength<u8>>(
-//condition: bool,
-//src: &A64Bytes<N>,
-//dest: &mut A64Bytes<N>,
-//) {
-//if N::USIZE != 0 {
-//let count = (N::USIZE / 8) + (if 0 == N::USIZE % 8 { 0 } else { 1 });
-//unsafe {
-//cmov_byte_slice_a8(
-//condition,
-//src as *const A64Bytes<N> as *const u64,
-//dest as *mut A64Bytes<N> as *mut u64,
-//count,
-//)
-//};
-//}
-//}
-
-//// If we have avx2 then we can use cmov_byte_slice_a64 implementation
-//#[cfg(target_feature = "avx2")]
-//#[inline]
-//pub fn cmov_a64_bytes<N: ArrayLength<u8>>(
-//condition: bool,
-//src: &A64Bytes<N>,
-//dest: &mut A64Bytes<N>,
-//) {
-//if N::USIZE != 0 {
-//let count = (N::USIZE / 64) + (if 0 == N::USIZE % 64 { 0 } else { 1 });
-//unsafe {
-//// Note! API for count is different from with cmov_byte_slice_a8,
-//// because in the `[BASE + INDEX * SCALE + DISPLACEMENT]` syntax,
-//// scale > 8 not allowed in x86-64, here the scale would need to be 64.
-//// In cmov_byte_slice_a64, the 4th parameter is the number of bytes to copy.
-//cmov_byte_slice_a64(
-//condition,
-//src as *const A64Bytes<N> as *const u64,
-//dest as *mut A64Bytes<N> as *mut u64,
-//count * 64,
-//)
-//};
-//}
-//}
+// CMov for u64 values
+#[inline]
+pub fn cmov_u64(condition: bool, src: &u64, dest: &mut u64) {
+    unsafe {
+        asm!(
+            // Set ZF if cond==0
+            "test {0}, {0}",
+            // Conditionally move src into dest (based on ZF)
+            "cmovnz {2}, {1}",
+            in(reg_byte) condition as u8,
+            in(reg) *src,
+            // inout since we might not write, so we need the existing value.
+            inout(reg) *dest,
+        );
+    }
+}
 
 // Should be a constant time function equivalent to:
 // if condition { memcpy(dest, src, count * 8) }

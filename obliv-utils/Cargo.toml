@@ -10,3 +10,8 @@ timing-shield = "0.3.0"
 
 [dev-dependencies]
 rand = "0.8"
+criterion = { version = "0.5.1", features = ["real_blackbox"] }
+
+[[bench]]
+name = "obliv_vec"
+harness = false

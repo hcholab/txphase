@@ -71,8 +71,7 @@ impl std::ops::Add<Self> for TpI128 {
     type Output = Self;
     #[inline]
     fn add(self, rhs: Self) -> Self::Output {
-        Self(self.0 + rhs.0)
-        //Self(self.0.wrapping_add(rhs.0))
+        Self(self.0.wrapping_add(rhs.0))
     }
 }
 
@@ -80,8 +79,7 @@ impl std::ops::Sub<Self> for TpI128 {
     type Output = Self;
     #[inline]
     fn sub(self, rhs: Self) -> Self::Output {
-        //Self(self.0.wrapping_sub(rhs.0))
-        Self(self.0 - rhs.0)
+        Self(self.0.wrapping_sub(rhs.0))
     }
 }
 
@@ -89,8 +87,7 @@ impl std::ops::Mul<Self> for TpI128 {
     type Output = Self;
     #[inline]
     fn mul(self, rhs: Self) -> Self::Output {
-        //Self(self.0.wrapping_mul(rhs.0))
-        Self(self.0 * rhs.0)
+        Self(self.0.wrapping_mul(rhs.0))
     }
 }
 
