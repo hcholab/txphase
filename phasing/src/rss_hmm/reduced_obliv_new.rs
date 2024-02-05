@@ -63,9 +63,39 @@ impl ProbBlock {
         }
     }
 
-    pub fn n_sites(&self) -> usize {
-        self.is_pre.len()
-    }
+    //pub fn expand(
+    //&self,
+    //index_map: ArrayView1<u16>,
+    //inv_weights: ArrayView1<Real>,
+    //) -> Array3<Real> {
+    //let mut expanded = Array3::<Real>::zeros((
+    //self.n_segments(),
+    //self.alpha_pre.dim().0,
+    //self.alpha_pre.dim().1,
+    //));
+    //let cr_prob = &self.c_prob - &self.cnr_prob;
+    //Zip::from(expanded.outer_iter_mut())
+    //.and(cr_prob.outer_iter())
+    //.and(self.cnr_prob.outer_iter())
+    //.and(&self.is_pre)
+    //.map_collect(|exp, cr, cnr, &is_pre| {
+    //HmmReduced::expand_prob(
+    //index_map,
+    //inv_weights,
+    //cr,
+    //cnr,
+    //self.alpha_pre.view(),
+    //self.alpha_post.view(),
+    //is_pre,
+    //exp,
+    //);
+    //});
+    //expanded
+    //}
+
+    //pub fn n_sites(&self) -> usize {
+    //self.is_pre.len()
+    //}
 }
 
 pub struct ForwardProbSave<'a> {
@@ -131,26 +161,6 @@ impl HmmReduced {
         let mut site_i = 0;
         let mut is_first_segment = true;
 
-        let mut cur_c_prob;
-
-        #[cfg(feature = "obliv")]
-        let mut cur_c_prob_e;
-
-        let mut cur_cnr_prob;
-
-        #[cfg(feature = "obliv")]
-        let mut cur_cnr_prob_e;
-
-        let mut prev_c_prob = Array2::<Real>::zeros((0, 0));
-
-        #[cfg(feature = "obliv")]
-        let mut prev_c_prob_e = Array1::from_elem(P, TpI16::protect(0));
-
-        let mut prev_cnr_prob = Array2::<Real>::zeros((0, 0));
-
-        #[cfg(feature = "obliv")]
-        let mut prev_cnr_prob_e = Array1::from_elem(P, TpI16::protect(0));
-
         let mut full_trans_prob = Array2::<Real>::zeros((n_full_haps, P));
 
         #[cfg(feature = "obliv")]
@@ -162,20 +172,24 @@ impl HmmReduced {
             let block_n_sites = block.n_sites();
             let block_n_unique_haps = block.n_unique_haps();
 
-            cur_c_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
-            cur_cnr_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
-
-            #[cfg(feature = "obliv")]
-            {
-                cur_c_prob_e = Array1::from_elem(P, TpI16::protect(0));
-                cur_cnr_prob_e = Array1::from_elem(P, TpI16::protect(0));
-            }
-
             let mut cur_block_prob =
-                ProbBlock::new(block_n_sites, block_n_unique_haps, n_full_haps);
+                ProbBlock::new(block_n_sites + 1, block_n_unique_haps, n_full_haps);
 
             if block_i == 0 {
-                Self::init(
+                let (mut cur_c_prob, mut next_c_prob) = cur_block_prob
+                    .c_prob
+                    .multi_slice_mut((s![0, .., ..], s![1, .., ..]));
+
+                #[cfg(feature = "obliv")]
+                let (mut cur_c_prob_e, mut next_c_prob_e) = cur_block_prob
+                    .prob_e
+                    .multi_slice_mut((s![0, ..], s![1, ..]));
+
+                let (mut cur_cnr_prob, mut next_cnr_prob) = cur_block_prob
+                    .cnr_prob
+                    .multi_slice_mut((s![0, .., ..], s![1, .., ..]));
+
+                Self::init_c_prob(
                     true,
                     block,
                     genotype_graph[0],
@@ -185,74 +199,34 @@ impl HmmReduced {
                     cur_c_prob_e.view_mut(),
                     cur_block_prob.alpha_pre.view_mut(),
                 );
-
                 cur_cnr_prob.assign(&cur_c_prob);
-                #[cfg(feature = "obliv")]
-                cur_cnr_prob_e.assign(&cur_c_prob_e);
 
-                cur_block_prob
-                    .c_prob
-                    .slice_mut(s![0, .., ..])
-                    .assign(&cur_c_prob);
-                cur_block_prob
-                    .cnr_prob
-                    .slice_mut(s![0, .., ..])
-                    .assign(&cur_c_prob);
+                next_c_prob.assign(&cur_c_prob);
+                next_cnr_prob.assign(&cur_cnr_prob);
 
                 #[cfg(feature = "obliv")]
-                cur_block_prob
-                    .prob_e
-                    .slice_mut(s![0, ..])
-                    .assign(&cur_c_prob_e);
+                next_c_prob_e.assign(&cur_c_prob_e);
             } else {
                 let mut prev_block_prob = prev_block_prob.unwrap();
                 let prev_block = &blocks[block_i - 1];
                 let rprob = rprobs_iter.next().unwrap();
 
-                let (prev_alpha_pre, prev_alpha_post) = (
-                    prev_block_prob.alpha_pre.view_mut(),
-                    prev_block_prob.alpha_post.view_mut(),
-                );
-
-                let fprobs_save = Some(ForwardProbSave {
-                    c: cur_block_prob.c_prob.slice_mut(s![0, .., ..]),
-                    cnr: cur_block_prob.cnr_prob.slice_mut(s![0, .., ..]),
-                    #[cfg(feature = "obliv")]
-                    e: cur_block_prob.prob_e.slice_mut(s![0, ..]),
-                });
-
                 let do_collapse = genotype_graph[site_i].is_segment_marker();
 
-                Self::block_transition(
-                    prev_c_prob.view(),
-                    #[cfg(feature = "obliv")]
-                    prev_c_prob_e.view(),
-                    prev_cnr_prob.view(),
-                    #[cfg(feature = "obliv")]
-                    prev_cnr_prob_e.view(),
-                    prev_block,
-                    block,
+                Self::block_transition_forward(
+                    &mut prev_block_prob,
+                    &mut cur_block_prob,
+                    &prev_block,
+                    &block,
                     genotype_graph[site_i],
                     do_collapse,
                     #[cfg(not(feature = "obliv"))]
                     eprob,
                     rprob,
-                    prev_alpha_pre.view(),
-                    prev_alpha_post,
                     is_first_segment,
                     full_trans_prob.view_mut(),
                     #[cfg(feature = "obliv")]
                     full_trans_prob_e.view_mut(),
-                    cur_c_prob.view_mut(),
-                    #[cfg(feature = "obliv")]
-                    cur_c_prob_e.view_mut(),
-                    cur_cnr_prob.view_mut(),
-                    #[cfg(feature = "obliv")]
-                    cur_cnr_prob_e.view_mut(),
-                    cur_block_prob.alpha_pre.view_mut(),
-                    cur_block_prob.alpha_post.view_mut(),
-                    fprobs_save,
-                    cur_block_prob.save_alpha_post_cnr.view_mut(),
                 );
 
                 #[cfg(feature = "obliv")]
@@ -269,33 +243,28 @@ impl HmmReduced {
             cur_block_prob.is_pre[0] = true;
 
             site_i += 1;
-            prev_c_prob = cur_c_prob;
-            prev_cnr_prob = cur_cnr_prob;
-            #[cfg(feature = "obliv")]
-            {
-                prev_c_prob_e = cur_c_prob_e;
-                prev_cnr_prob_e = cur_cnr_prob_e;
-            }
 
-            for block_site_i in 1..block_n_sites {
-                cur_c_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
-                cur_cnr_prob = Array2::<Real>::zeros((P, block_n_unique_haps));
+            for block_site_i in 2..block_n_sites + 1 {
+                let (mut prev_c_prob, mut cur_c_prob) = cur_block_prob
+                    .c_prob
+                    .multi_slice_mut((s![block_site_i - 1, .., ..], s![block_site_i, .., ..]));
+
+                let (mut prev_cnr_prob, mut cur_cnr_prob) = cur_block_prob
+                    .cnr_prob
+                    .multi_slice_mut((s![block_site_i - 1, .., ..], s![block_site_i, .., ..]));
+
                 #[cfg(feature = "obliv")]
-                {
-                    cur_c_prob_e = Array1::from_elem(P, TpI16::protect(0));
-                    cur_cnr_prob_e = Array1::from_elem(P, TpI16::protect(0));
-                }
+                let (mut prev_c_prob_e, mut cur_c_prob_e) = cur_block_prob
+                    .prob_e
+                    .multi_slice_mut((s![block_site_i - 1, ..], s![block_site_i, ..]));
+
+                #[cfg(feature = "obliv")]
+                let mut prev_cnr_prob_e = prev_c_prob_e.to_owned();
+                #[cfg(feature = "obliv")]
+                let mut cur_cnr_prob_e = cur_c_prob_e.to_owned();
 
                 let rprob = rprobs_iter.next().unwrap();
-
-                let fprobs_save = Some(ForwardProbSave {
-                    c: cur_block_prob.c_prob.slice_mut(s![block_site_i, .., ..]),
-                    cnr: cur_block_prob.cnr_prob.slice_mut(s![block_site_i, .., ..]),
-                    #[cfg(feature = "obliv")]
-                    e: cur_block_prob.prob_e.row_mut(block_site_i),
-                });
-
-                cur_block_prob.is_pre[block_site_i] = is_first_segment;
+                cur_block_prob.is_pre[block_site_i - 1] = is_first_segment;
 
                 #[cfg(feature = "obliv")]
                 let do_collapse = genotype_graph[site_i].is_segment_marker().expose();
@@ -303,13 +272,13 @@ impl HmmReduced {
                 #[cfg(not(feature = "obliv"))]
                 let do_collapse = genotype_graph[site_i].is_segment_marker();
 
-                Self::nonblock_transition(
-                    prev_c_prob.view(),
+                Self::nonblock_transition_forward(
+                    prev_c_prob.view_mut(),
                     #[cfg(feature = "obliv")]
-                    prev_c_prob_e.view(),
-                    prev_cnr_prob.view(),
+                    prev_c_prob_e.view_mut(),
+                    prev_cnr_prob.view_mut(),
                     #[cfg(feature = "obliv")]
-                    prev_cnr_prob_e.view(),
+                    prev_cnr_prob_e.view_mut(),
                     block,
                     genotype_graph[site_i],
                     do_collapse,
@@ -317,7 +286,7 @@ impl HmmReduced {
                     eprob,
                     rprob,
                     cur_block_prob.alpha_pre.view(),
-                    block_site_i,
+                    block_site_i - 1,
                     is_first_segment,
                     cur_c_prob.view_mut(),
                     #[cfg(feature = "obliv")]
@@ -326,7 +295,6 @@ impl HmmReduced {
                     #[cfg(feature = "obliv")]
                     cur_cnr_prob_e.view_mut(),
                     cur_block_prob.alpha_post.view_mut(),
-                    fprobs_save,
                     cur_block_prob.save_alpha_post_cnr.view_mut(),
                 );
 
@@ -335,16 +303,18 @@ impl HmmReduced {
                 }
 
                 site_i += 1;
-                prev_c_prob = cur_c_prob;
-                prev_cnr_prob = cur_cnr_prob;
+
                 #[cfg(feature = "obliv")]
                 {
-                    prev_c_prob_e = cur_c_prob_e;
-                    prev_cnr_prob_e = cur_cnr_prob_e;
+                    Zip::from(&cur_c_prob_e)
+                        .and(cur_cnr_prob.rows_mut())
+                        .and(&mut cur_cnr_prob_e)
+                        .for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
                 }
             }
 
             fprobs.push(cur_block_prob.clone());
+
             Self::combine_block(
                 block,
                 &cur_block_prob,
@@ -418,7 +388,7 @@ impl HmmReduced {
                             .cnr_prob
                             .slice_mut(s![block_n_sites - 1, .., ..]);
 
-                    Self::init(
+                    Self::init_c_prob(
                         false,
                         block,
                         genotype_graph[site_i],
@@ -474,16 +444,14 @@ impl HmmReduced {
                     .multi_slice_mut((s![block_site_i + 1, .., ..], s![block_site_i, .., ..]));
 
                 #[cfg(feature = "obliv")]
-                let prev_c_prob_e = cur_block_prob.prob_e.row(block_site_i + 1);
+                let (prev_c_prob_e, mut cur_c_prob_e) = cur_block_prob
+                    .prob_e
+                    .multi_slice_mut((s![block_site_i + 1, ..], s![block_site_i, ..]));
 
                 #[cfg(feature = "obliv")]
-                let prev_cnr_prob_e = prev_c_prob_e.clone();
-
+                let prev_cnr_prob_e = prev_c_prob_e.to_owned();
                 #[cfg(feature = "obliv")]
-                let mut cur_c_prob_e = Array1::from_elem(P, TpI16::protect(0));
-
-                #[cfg(feature = "obliv")]
-                let mut cur_cnr_prob_e = Array1::from_elem(P, TpI16::protect(0));
+                let mut cur_cnr_prob_e = cur_c_prob_e.to_owned();
 
                 let rprob = rprobs_iter.next().unwrap();
 
@@ -493,7 +461,7 @@ impl HmmReduced {
                 #[cfg(not(feature = "obliv"))]
                 let do_collapse = genotype_graph[site_i + 1].is_segment_marker();
 
-                Self::nonblock_transition(
+                Self::nonblock_transition_backward(
                     prev_c_prob.view(),
                     #[cfg(feature = "obliv")]
                     prev_c_prob_e.view(),
@@ -532,10 +500,6 @@ impl HmmReduced {
                         .and(cur_cnr_prob.rows_mut())
                         .and(&mut cur_cnr_prob_e)
                         .for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
-                    cur_block_prob
-                        .prob_e
-                        .slice_mut(s![block_site_i, ..])
-                        .assign(&cur_c_prob_e);
                 }
 
                 if site_i > 0 {
@@ -549,7 +513,7 @@ impl HmmReduced {
         all_prob_blocks
     }
 
-    fn init<'a>(
+    fn init_c_prob<'a>(
         is_forward: bool,
         block: &FilteredBlockSliceObliv<'a>,
         graph_pos: G,
@@ -608,7 +572,100 @@ impl HmmReduced {
             });
     }
 
-    fn nonblock_transition<'a, 'b>(
+    fn nonblock_transition_forward<'a, 'b>(
+        mut prev_c_prob: ArrayViewMut2<Real>,
+        #[cfg(feature = "obliv")] mut prev_c_prob_e: ArrayViewMut1<TpI16>,
+        mut prev_cnr_prob: ArrayViewMut2<Real>,
+        #[cfg(feature = "obliv")] mut prev_cnr_prob_e: ArrayViewMut1<TpI16>,
+        block: &FilteredBlockSliceObliv<'a>,
+        graph_pos: G,
+        do_collapse: bool,
+        #[cfg(not(feature = "obliv"))] eprob: Real,
+        rprob: Real,
+        alpha_pre: ArrayView2<Real>,
+        block_site_i: usize,
+        is_first_segment: bool,
+        mut cur_c_prob: ArrayViewMut2<Real>,
+        #[cfg(feature = "obliv")] mut cur_c_prob_e: ArrayViewMut1<TpI16>,
+        mut cur_cnr_prob: ArrayViewMut2<Real>,
+        #[cfg(feature = "obliv")] mut cur_cnr_prob_e: ArrayViewMut1<TpI16>,
+        mut alpha_post: ArrayViewMut1<Real>,
+        save_cnr_prob: ArrayViewMut2<Real>,
+    ) {
+        let index_map = block.index_map.view();
+        let weights = block.weights.view();
+
+        let rprobs = &weights * rprob;
+
+        Self::transition(
+            rprobs.view(),
+            prev_c_prob.view(),
+            #[cfg(feature = "obliv")]
+            prev_c_prob_e.view(),
+            prev_cnr_prob.view(),
+            #[cfg(feature = "obliv")]
+            prev_cnr_prob_e.view(),
+            cur_c_prob.view_mut(),
+            #[cfg(feature = "obliv")]
+            cur_c_prob_e.view_mut(),
+            cur_cnr_prob.view_mut(),
+            #[cfg(feature = "obliv")]
+            cur_cnr_prob_e.view_mut(),
+        );
+
+        prev_c_prob.assign(&cur_c_prob);
+        prev_cnr_prob.assign(&cur_cnr_prob);
+
+        #[cfg(feature = "obliv")]
+        {
+            prev_c_prob_e.assign(&cur_c_prob_e);
+            prev_cnr_prob_e.assign(&cur_cnr_prob_e);
+            Zip::from(&prev_c_prob_e)
+                .and(prev_cnr_prob.rows_mut())
+                .and(&mut prev_cnr_prob_e)
+                .for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
+        }
+
+        if do_collapse {
+            Self::collapse(
+                index_map.view(),
+                is_first_segment,
+                alpha_pre.view(),
+                alpha_post.view_mut(),
+                cur_c_prob.view_mut(),
+                #[cfg(feature = "obliv")]
+                cur_c_prob_e.view_mut(),
+                cur_cnr_prob.view_mut(),
+                #[cfg(feature = "obliv")]
+                cur_cnr_prob_e.view_mut(),
+                save_cnr_prob,
+            );
+        }
+
+        let cur_ref_panel_pos = block.expand_pos(block_site_i);
+
+        Self::emission(
+            cur_ref_panel_pos.view(),
+            graph_pos,
+            #[cfg(not(feature = "obliv"))]
+            eprob,
+            cur_c_prob.view_mut(),
+            #[cfg(feature = "obliv")]
+            cur_c_prob_e.view_mut(),
+        );
+
+        Self::emission(
+            cur_ref_panel_pos.view(),
+            graph_pos,
+            #[cfg(not(feature = "obliv"))]
+            eprob,
+            cur_cnr_prob.view_mut(),
+            #[cfg(feature = "obliv")]
+            cur_cnr_prob_e.view_mut(),
+        );
+    }
+
+    fn nonblock_transition_backward<'a, 'b>(
         prev_c_prob: ArrayView2<Real>,
         #[cfg(feature = "obliv")] prev_c_prob_e: ArrayView1<TpI16>,
         prev_cnr_prob: ArrayView2<Real>,
@@ -703,7 +760,7 @@ impl HmmReduced {
     }
 
     fn block_transition_backward<'a, 'b>(
-        prev_prob_block: &mut ProbBlock,
+        prev_block_prob: &mut ProbBlock,
         cur_prob_block: &mut ProbBlock,
         prev_block: &FilteredBlockSliceObliv<'a>,
         cur_block: &FilteredBlockSliceObliv<'a>,
@@ -720,18 +777,18 @@ impl HmmReduced {
         let prev_index_map = prev_block.index_map.view();
         let prev_full_filter = prev_block.full_filter.view();
 
-        let prev_c_prob = prev_prob_block.c_prob.slice(s![0, .., ..]);
-        let prev_cnr_prob = prev_prob_block.cnr_prob.slice(s![0, .., ..]);
+        let prev_c_prob = prev_block_prob.c_prob.slice(s![0, .., ..]);
+        let prev_cnr_prob = prev_block_prob.cnr_prob.slice(s![0, .., ..]);
 
         #[cfg(feature = "obliv")]
-        let prev_c_prob_e = prev_prob_block.prob_e.row(0);
+        let prev_c_prob_e = prev_block_prob.prob_e.row(0);
         #[cfg(feature = "obliv")]
-        let prev_cnr_prob_e = prev_prob_block.prob_e.row(0);
+        let prev_cnr_prob_e = prev_block_prob.prob_e.row(0);
 
-        let prev_alpha_pre = prev_prob_block.alpha_pre.view();
-        let mut prev_alpha_post = prev_prob_block.alpha_post.view_mut();
+        let prev_alpha_pre = prev_block_prob.alpha_pre.view();
+        let mut prev_alpha_post = prev_block_prob.alpha_post.view_mut();
 
-        let cur_block_n_sites = cur_prob_block.n_sites();
+        let cur_block_n_sites = cur_block.n_sites();
 
         let mut cur_c_prob = cur_prob_block
             .c_prob
@@ -783,7 +840,7 @@ impl HmmReduced {
                 trans_c_prob_e.view_mut(),
                 trans_cnr_prob.view_mut(),
                 trans_cnr_prob_e.view_mut(),
-                prev_prob_block.save_alpha_post_cnr.view_mut(),
+                prev_block_prob.save_alpha_post_cnr.view_mut(),
             );
 
             is_first_segment = false;
@@ -798,7 +855,7 @@ impl HmmReduced {
                 prev_alpha_post.view_mut(),
                 trans_c_prob.view_mut(),
                 trans_cnr_prob.view_mut(),
-                prev_prob_block.save_alpha_post_cnr.view_mut(),
+                prev_block_prob.save_alpha_post_cnr.view_mut(),
             );
 
             is_first_segment = false;
@@ -912,47 +969,42 @@ impl HmmReduced {
     }
 
     fn block_transition_forward<'a, 'b>(
-        prev_c_prob: ArrayView2<Real>,
-        #[cfg(feature = "obliv")] prev_c_prob_e: ArrayView1<TpI16>,
-        prev_cnr_prob: ArrayView2<Real>,
-        #[cfg(feature = "obliv")] prev_cnr_prob_e: ArrayView1<TpI16>,
+        prev_block_prob: &mut ProbBlock,
+        cur_prob_block: &mut ProbBlock,
         prev_block: &FilteredBlockSliceObliv<'a>,
         cur_block: &FilteredBlockSliceObliv<'a>,
         cur_graph_pos: G,
         do_collapse: Bool,
         #[cfg(not(feature = "obliv"))] eprob: Real,
         rprob: Real,
-        prev_alpha_pre: ArrayView2<Real>,
-        prev_alpha_post: ArrayViewMut1<Real>,
         is_first_segment: bool,
         mut full_trans_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut full_trans_prob_e: ArrayViewMut1<TpI16>,
-        mut cur_c_prob: ArrayViewMut2<Real>,
-        #[cfg(feature = "obliv")] mut cur_c_prob_e: ArrayViewMut1<TpI16>,
-        mut cur_cnr_prob: ArrayViewMut2<Real>,
-        #[cfg(feature = "obliv")] mut cur_cnr_prob_e: ArrayViewMut1<TpI16>,
-        mut cur_alpha_pre: ArrayViewMut2<Real>,
-        mut cur_alpha_post: ArrayViewMut1<Real>,
-        mut fprob_save: ForwardProbSave<'b>,
-        save_cnr_prob: ArrayViewMut2<Real>,
     ) {
         let prev_weights = prev_block.weights.view();
-
         let prev_inv_weights = prev_block.inv_weights.view();
-
         let prev_index_map = prev_block.index_map.view();
         let prev_full_filter = prev_block.full_filter.view();
+
+        let prev_block_n_sites = prev_block.n_sites();
+
+        let prev_c_prob = prev_block_prob.c_prob.slice(s![prev_block_n_sites, .., ..]);
+        let prev_cnr_prob = prev_block_prob
+            .cnr_prob
+            .slice(s![prev_block_n_sites, .., ..]);
+
+        #[cfg(feature = "obliv")]
+        let prev_c_prob_e = prev_block_prob.prob_e.row(prev_block_n_sites);
+
         let cur_index_map = cur_block.index_map.view();
 
         let rprobs = &prev_weights * rprob;
 
         let mut trans_c_prob = Array2::<Real>::zeros(prev_c_prob.raw_dim());
+        let mut trans_cnr_prob = Array2::<Real>::zeros(prev_cnr_prob.raw_dim());
 
         #[cfg(feature = "obliv")]
         let mut trans_c_prob_e = Array1::<TpI16>::from_elem(prev_c_prob.nrows(), TpI16::protect(0));
-
-        let mut trans_cnr_prob = Array2::<Real>::zeros(prev_cnr_prob.raw_dim());
-
         #[cfg(feature = "obliv")]
         let mut trans_cnr_prob_e =
             Array1::<TpI16>::from_elem(prev_cnr_prob.nrows(), TpI16::protect(0));
@@ -964,7 +1016,7 @@ impl HmmReduced {
             prev_c_prob_e.view(),
             prev_cnr_prob.view(),
             #[cfg(feature = "obliv")]
-            prev_cnr_prob_e.view(),
+            prev_c_prob_e.view(),
             trans_c_prob.view_mut(),
             #[cfg(feature = "obliv")]
             trans_c_prob_e.view_mut(),
@@ -1000,13 +1052,35 @@ impl HmmReduced {
             trans_cnr_prob.view(),
             #[cfg(feature = "obliv")]
             trans_cnr_prob_e.view(),
-            prev_alpha_pre.view(),
-            prev_alpha_post.view(),
+            prev_block_prob.alpha_pre.view(),
+            prev_block_prob.alpha_post.view(),
             is_first_segment,
             full_trans_prob.view_mut(),
             #[cfg(feature = "obliv")]
             full_trans_prob_e.view_mut(),
         );
+
+        let (mut cur_c_prob, mut next_c_prob) = cur_prob_block
+            .c_prob
+            .multi_slice_mut((s![0, .., ..], s![1, .., ..]));
+
+        #[cfg(feature = "obliv")]
+        let (mut cur_c_prob_e, mut next_c_prob_e) = cur_prob_block
+            .prob_e
+            .multi_slice_mut((s![0, ..], s![1, ..]));
+
+        let (mut cur_cnr_prob, mut next_cnr_prob) = cur_prob_block
+            .cnr_prob
+            .multi_slice_mut((s![0, .., ..], s![1, .., ..]));
+
+        //let mut cur_c_prob = cur_prob_block.c_prob.slice_mut(s![0, .., ..]);
+        //let mut cur_cnr_prob = cur_prob_block.cnr_prob.slice_mut(s![0, .., ..]);
+
+        //#[cfg(feature = "obliv")]
+        //let mut cur_c_prob_e = cur_prob_block.prob_e.row_mut(0);
+
+        //#[cfg(feature = "obliv")]
+        //let mut cur_cnr_prob_e = cur_c_prob_e.to_owned();
 
         let t = Instant::now();
         let mut cur_c_prob_ = Array::from_shape_vec(
@@ -1030,16 +1104,15 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         renorm_scale(cur_c_prob.view_mut(), cur_c_prob_e.view_mut());
 
-        #[cfg(feature = "obliv")]
-        {
-            Zip::from(&cur_c_prob_e)
-                .and(cur_cnr_prob.rows_mut())
-                .and(&mut cur_cnr_prob_e)
-                .for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
-            fprob_save.e.assign(&cur_cnr_prob_e);
-        }
-        fprob_save.c.assign(&cur_c_prob);
-        fprob_save.cnr.assign(&cur_c_prob);
+        cur_cnr_prob.assign(&cur_c_prob);
+
+        //#[cfg(feature = "obliv")]
+        //cur_cnr_prob_e.assign(&cur_c_prob_e);
+
+        //Zip::from(&cur_c_prob_e)
+        //.and(cur_cnr_prob.rows_mut())
+        //.and(&mut cur_cnr_prob_e)
+        //.for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
 
         #[cfg(feature = "obliv")]
         let (div_cur_c_prob_, div_cur_c_prob_e) = {
@@ -1060,7 +1133,7 @@ impl HmmReduced {
         #[cfg(not(feature = "obliv"))]
         let div_cur_c_prob_ = cur_c_prob_.map(|&v| if v == 0. { 0. } else { 1. / v });
 
-        Zip::from(cur_alpha_pre.rows_mut())
+        Zip::from(cur_prob_block.alpha_pre.rows_mut())
             .and(full_trans_prob.rows())
             .and(&cur_index_map)
             .for_each(|mut a, l, &i| {
@@ -1074,10 +1147,23 @@ impl HmmReduced {
                 }
             });
 
-        cur_cnr_prob.assign(&cur_c_prob);
+        //let mut next_c_prob = cur_prob_block.c_prob.slice_mut(s![1, .., ..]);
+        //let mut next_cnr_prob = cur_prob_block.cnr_prob.slice_mut(s![1, .., ..]);
+
+        //#[cfg(feature = "obliv")]
+        //let mut next_c_prob_e = cur_prob_block.prob_e.row_mut(1);
+
+        //#[cfg(feature = "obliv")]
+        //let mut next_cnr_prob_e = next_c_prob_e.to_owned();
+
+        next_c_prob.assign(&cur_c_prob);
+        next_cnr_prob.assign(&cur_cnr_prob);
 
         #[cfg(feature = "obliv")]
-        cur_cnr_prob_e.assign(&cur_c_prob_e);
+        next_c_prob_e.assign(&cur_c_prob_e);
+
+        #[cfg(feature = "obliv")]
+        let mut next_cnr_prob_e = next_c_prob_e.to_owned();
 
         BLOCK.with(|v| {
             let mut v = v.borrow_mut();
@@ -1089,13 +1175,13 @@ impl HmmReduced {
             Self::collapse(
                 cur_index_map,
                 true,
-                cur_alpha_pre.view(),
-                cur_alpha_post.view_mut(),
-                cur_c_prob.view_mut(),
-                cur_c_prob_e.view_mut(),
-                cur_cnr_prob.view_mut(),
-                cur_cnr_prob_e.view_mut(),
-                save_cnr_prob,
+                cur_prob_block.alpha_pre.view(),
+                cur_prob_block.alpha_post.view_mut(),
+                next_c_prob.view_mut(),
+                next_c_prob_e.view_mut(),
+                next_cnr_prob.view_mut(),
+                next_cnr_prob_e.view_mut(),
+                cur_prob_block.save_alpha_post_cnr.view_mut(),
             );
         }
 
@@ -1104,398 +1190,37 @@ impl HmmReduced {
             Self::collapse(
                 cur_index_map,
                 true,
-                cur_alpha_pre.view(),
-                cur_alpha_post.view_mut(),
-                cur_c_prob.view_mut(),
-                cur_cnr_prob.view_mut(),
-                save_cnr_prob,
+                cur_prob_block.alpha_pre.view(),
+                cur_prob_block.alpha_post.view_mut(),
+                next_c_prob.view_mut(),
+                next_cnr_prob.view_mut(),
+                cur_prob_block.save_alpha_post_cnr.view_mut(),
             );
         }
-        let cur_block_site = 0;
         Self::emission(
-            cur_block.expand_pos(cur_block_site).view(),
+            cur_block.expand_pos(0).view(),
             cur_graph_pos,
             #[cfg(not(feature = "obliv"))]
             eprob,
-            cur_c_prob.view_mut(),
+            next_c_prob.view_mut(),
             #[cfg(feature = "obliv")]
-            cur_c_prob_e.view_mut(),
+            next_c_prob_e.view_mut(),
         );
         Self::emission(
-            cur_block.expand_pos(cur_block_site).view(),
+            cur_block.expand_pos(0).view(),
             cur_graph_pos,
             #[cfg(not(feature = "obliv"))]
             eprob,
-            cur_cnr_prob.view_mut(),
+            next_cnr_prob.view_mut(),
             #[cfg(feature = "obliv")]
-            cur_cnr_prob_e.view_mut(),
-        );
-    }
-
-    fn block_transition<'a, 'b>(
-        prev_c_prob: ArrayView2<Real>,
-        #[cfg(feature = "obliv")] prev_c_prob_e: ArrayView1<TpI16>,
-        prev_cnr_prob: ArrayView2<Real>,
-        #[cfg(feature = "obliv")] prev_cnr_prob_e: ArrayView1<TpI16>,
-        prev_block: &FilteredBlockSliceObliv<'a>,
-        cur_block: &FilteredBlockSliceObliv<'a>,
-        cur_graph_pos: G,
-        do_collapse: Bool,
-        #[cfg(not(feature = "obliv"))] eprob: Real,
-        rprob: Real,
-        prev_alpha_pre: ArrayView2<Real>,
-        mut prev_alpha_post: ArrayViewMut1<Real>,
-        mut is_first_segment: bool,
-        mut full_trans_prob: ArrayViewMut2<Real>,
-        #[cfg(feature = "obliv")] mut full_trans_prob_e: ArrayViewMut1<TpI16>,
-        mut cur_c_prob: ArrayViewMut2<Real>,
-        #[cfg(feature = "obliv")] mut cur_c_prob_e: ArrayViewMut1<TpI16>,
-        mut cur_cnr_prob: ArrayViewMut2<Real>,
-        #[cfg(feature = "obliv")] mut cur_cnr_prob_e: ArrayViewMut1<TpI16>,
-        mut cur_alpha_pre: ArrayViewMut2<Real>,
-        mut cur_alpha_post: ArrayViewMut1<Real>,
-        fprob_save: Option<ForwardProbSave<'b>>,
-        save_cnr_prob: ArrayViewMut2<Real>,
-    ) {
-        let prev_weights = prev_block.weights.view();
-
-        let prev_inv_weights = prev_block.inv_weights.view();
-
-        let prev_index_map = prev_block.index_map.view();
-        let prev_full_filter = prev_block.full_filter.view();
-        let cur_index_map = cur_block.index_map.view();
-
-        let rprobs = &prev_weights * rprob;
-
-        let mut trans_c_prob = Array2::<Real>::zeros(prev_c_prob.raw_dim());
-
-        #[cfg(feature = "obliv")]
-        let mut trans_c_prob_e = Array1::<TpI16>::from_elem(prev_c_prob.nrows(), TpI16::protect(0));
-
-        let mut trans_cnr_prob = Array2::<Real>::zeros(prev_cnr_prob.raw_dim());
-
-        #[cfg(feature = "obliv")]
-        let mut trans_cnr_prob_e =
-            Array1::<TpI16>::from_elem(prev_cnr_prob.nrows(), TpI16::protect(0));
-
-        Self::transition(
-            rprobs.view(),
-            prev_c_prob.view(),
-            #[cfg(feature = "obliv")]
-            prev_c_prob_e.view(),
-            prev_cnr_prob.view(),
-            #[cfg(feature = "obliv")]
-            prev_cnr_prob_e.view(),
-            trans_c_prob.view_mut(),
-            #[cfg(feature = "obliv")]
-            trans_c_prob_e.view_mut(),
-            trans_cnr_prob.view_mut(),
-            #[cfg(feature = "obliv")]
-            trans_cnr_prob_e.view_mut(),
+            next_cnr_prob_e.view_mut(),
         );
 
-        if let Some(mut fprob_save) = fprob_save {
-            let t = Instant::now();
-            #[cfg(feature = "obliv")]
-            Zip::from(&trans_c_prob_e)
-                .and(trans_cnr_prob.rows_mut())
-                .and(&mut trans_cnr_prob_e)
-                .for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
-
-            let trans_cr_prob = &trans_c_prob - &trans_cnr_prob;
-
-            #[cfg(feature = "obliv")]
-            let trans_cr_prob_e = trans_c_prob_e.clone();
-
-            BLOCK.with(|v| {
-                let mut v = v.borrow_mut();
-                *v += t.elapsed();
-            });
-
-            Self::expand_prob(
-                prev_index_map,
-                prev_full_filter,
-                prev_inv_weights.view(),
-                trans_cr_prob.view(),
-                #[cfg(feature = "obliv")]
-                trans_cr_prob_e.view(),
-                trans_cnr_prob.view(),
-                #[cfg(feature = "obliv")]
-                trans_cnr_prob_e.view(),
-                prev_alpha_pre.view(),
-                prev_alpha_post.view(),
-                is_first_segment,
-                full_trans_prob.view_mut(),
-                #[cfg(feature = "obliv")]
-                full_trans_prob_e.view_mut(),
-            );
-
-            let t = Instant::now();
-            let mut cur_c_prob_ = Array::from_shape_vec(
-                cur_c_prob.t().raw_dim(),
-                cur_c_prob.t().iter().cloned().collect(),
-            )
-            .unwrap();
-
-            Zip::from(full_trans_prob.rows())
-                .and(&cur_index_map)
-                .for_each(|p, &i| {
-                    let mut c = cur_c_prob_.row_mut(i as usize);
-                    c += &p;
-                });
-
-            cur_c_prob.assign(&cur_c_prob_.t());
-
-            #[cfg(feature = "obliv")]
-            cur_c_prob_e.assign(&trans_c_prob_e);
-
-            #[cfg(feature = "obliv")]
-            renorm_scale(cur_c_prob.view_mut(), cur_c_prob_e.view_mut());
-
-            #[cfg(feature = "obliv")]
-            {
-                Zip::from(&cur_c_prob_e)
-                    .and(cur_cnr_prob.rows_mut())
-                    .and(&mut cur_cnr_prob_e)
-                    .for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
-                fprob_save.e.assign(&cur_cnr_prob_e);
-            }
-            fprob_save.c.assign(&cur_c_prob);
-            fprob_save.cnr.assign(&cur_c_prob);
-
-            #[cfg(feature = "obliv")]
-            let (div_cur_c_prob_, div_cur_c_prob_e) = {
-                let mut div_cur_c_prob_e =
-                    Array2::<TpI16>::from_elem(cur_c_prob_.raw_dim(), TpI16::protect(0));
-                Zip::from(&mut cur_c_prob_)
-                    .and(&mut div_cur_c_prob_e)
-                    .for_each(|p, e| renorm_scale_single(p, e));
-                (
-                    cur_c_prob_.map(|&v| {
-                        v.tp_eq(&Real::ZERO)
-                            .select(Real::ZERO, Real::protect_i64(1) / v)
-                    }),
-                    div_cur_c_prob_e,
-                )
-            };
-
-            #[cfg(not(feature = "obliv"))]
-            let div_cur_c_prob_ = cur_c_prob_.map(|&v| if v == 0. { 0. } else { 1. / v });
-
-            Zip::from(cur_alpha_pre.rows_mut())
-                .and(full_trans_prob.rows())
-                .and(&cur_index_map)
-                .for_each(|mut a, l, &i| {
-                    a.assign(&(&l * &div_cur_c_prob_.row(i as usize)));
-                    #[cfg(feature = "obliv")]
-                    {
-                        let mut _e = TpI16::protect(0);
-                        Zip::from(&mut a)
-                            .and(&div_cur_c_prob_e.row(i as usize))
-                            .for_each(|p, &e| adjust_scale_single(e, p, &mut _e));
-                    }
-                });
-
-            cur_cnr_prob.assign(&cur_c_prob);
-
-            #[cfg(feature = "obliv")]
-            cur_cnr_prob_e.assign(&cur_c_prob_e);
-
-            BLOCK.with(|v| {
-                let mut v = v.borrow_mut();
-                *v += t.elapsed();
-            });
-
-            #[cfg(feature = "obliv")]
-            if do_collapse.expose() {
-                Self::collapse(
-                    cur_index_map,
-                    true,
-                    cur_alpha_pre.view(),
-                    cur_alpha_post.view_mut(),
-                    cur_c_prob.view_mut(),
-                    cur_c_prob_e.view_mut(),
-                    cur_cnr_prob.view_mut(),
-                    cur_cnr_prob_e.view_mut(),
-                    save_cnr_prob,
-                );
-            }
-
-            #[cfg(not(feature = "obliv"))]
-            if do_collapse {
-                Self::collapse(
-                    cur_index_map,
-                    true,
-                    cur_alpha_pre.view(),
-                    cur_alpha_post.view_mut(),
-                    cur_c_prob.view_mut(),
-                    cur_cnr_prob.view_mut(),
-                    save_cnr_prob,
-                );
-            }
-            let cur_block_site = 0;
-            Self::emission(
-                cur_block.expand_pos(cur_block_site).view(),
-                cur_graph_pos,
-                #[cfg(not(feature = "obliv"))]
-                eprob,
-                cur_c_prob.view_mut(),
-                #[cfg(feature = "obliv")]
-                cur_c_prob_e.view_mut(),
-            );
-            Self::emission(
-                cur_block.expand_pos(cur_block_site).view(),
-                cur_graph_pos,
-                #[cfg(not(feature = "obliv"))]
-                eprob,
-                cur_cnr_prob.view_mut(),
-                #[cfg(feature = "obliv")]
-                cur_cnr_prob_e.view_mut(),
-            );
-        } else {
-            #[cfg(feature = "obliv")]
-            if do_collapse.expose() {
-                Self::collapse(
-                    prev_index_map,
-                    is_first_segment,
-                    prev_alpha_pre.view(),
-                    prev_alpha_post.view_mut(),
-                    trans_c_prob.view_mut(),
-                    trans_c_prob_e.view_mut(),
-                    trans_cnr_prob.view_mut(),
-                    trans_cnr_prob_e.view_mut(),
-                    save_cnr_prob,
-                );
-
-                is_first_segment = false;
-            }
-
-            #[cfg(not(feature = "obliv"))]
-            if do_collapse {
-                Self::collapse(
-                    prev_index_map,
-                    is_first_segment,
-                    prev_alpha_pre.view(),
-                    prev_alpha_post.view_mut(),
-                    trans_c_prob.view_mut(),
-                    trans_cnr_prob.view_mut(),
-                    save_cnr_prob,
-                );
-
-                is_first_segment = false;
-            }
-
-            let t = Instant::now();
-            #[cfg(feature = "obliv")]
-            Zip::from(&trans_c_prob_e)
-                .and(trans_cnr_prob.rows_mut())
-                .and(&mut trans_cnr_prob_e)
-                .for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
-
-            let trans_cr_prob = &trans_c_prob - &trans_cnr_prob;
-
-            #[cfg(feature = "obliv")]
-            let trans_cr_prob_e = trans_c_prob_e.clone();
-
-            BLOCK.with(|v| {
-                let mut v = v.borrow_mut();
-                *v += t.elapsed();
-            });
-
-            Self::expand_prob(
-                prev_index_map,
-                prev_full_filter,
-                prev_inv_weights.view(),
-                trans_cr_prob.view(),
-                #[cfg(feature = "obliv")]
-                trans_cr_prob_e.view(),
-                trans_cnr_prob.view(),
-                #[cfg(feature = "obliv")]
-                trans_cnr_prob_e.view(),
-                prev_alpha_pre.view(),
-                prev_alpha_post.view(),
-                is_first_segment,
-                full_trans_prob.view_mut(),
-                #[cfg(feature = "obliv")]
-                full_trans_prob_e.view_mut(),
-            );
-
-            let t = Instant::now();
-            let mut cur_c_prob_ = Array::from_shape_vec(
-                cur_c_prob.t().raw_dim(),
-                cur_c_prob.t().iter().cloned().collect(),
-            )
-            .unwrap();
-            Zip::from(full_trans_prob.rows())
-                .and(&cur_index_map)
-                .for_each(|p, &i| {
-                    let mut c = cur_c_prob_.row_mut(i as usize);
-                    c += &p;
-                });
-
-            #[cfg(feature = "obliv")]
-            let (div_cur_c_prob_, div_cur_c_prob_e) = {
-                let mut div_cur_c_prob_e =
-                    Array2::<TpI16>::from_elem(cur_c_prob_.raw_dim(), TpI16::protect(0));
-                let mut div_cur_c_prob_ = cur_c_prob_.clone();
-                Zip::from(&mut div_cur_c_prob_)
-                    .and(&mut div_cur_c_prob_e)
-                    .for_each(|p, e| renorm_scale_single(p, e));
-                div_cur_c_prob_.map_mut(|v| {
-                    *v = v
-                        .tp_eq(&Real::ZERO)
-                        .select(Real::ZERO, Real::protect_i64(1) / *v)
-                });
-                (div_cur_c_prob_, div_cur_c_prob_e)
-            };
-
-            #[cfg(not(feature = "obliv"))]
-            let div_cur_c_prob_ = cur_c_prob_.map(|&v| if v == 0. { 0. } else { 1. / v });
-
-            Zip::from(cur_alpha_pre.rows_mut())
-                .and(full_trans_prob.rows())
-                .and(&cur_index_map)
-                .for_each(|mut a, l, &i| {
-                    a.assign(&(&l * &div_cur_c_prob_.row(i as usize)));
-                    #[cfg(feature = "obliv")]
-                    {
-                        let mut _e = TpI16::protect(0);
-                        Zip::from(&mut a)
-                            .and(&div_cur_c_prob_e.row(i as usize))
-                            .for_each(|p, &e| adjust_scale_single(e, p, &mut _e));
-                    }
-                });
-
-            let cur_block_site = cur_block.n_sites() - 1;
-
-            cur_c_prob.assign(&cur_c_prob_.t());
-
-            #[cfg(feature = "obliv")]
-            cur_c_prob_e.assign(&trans_c_prob_e);
-
-            #[cfg(feature = "obliv")]
-            renorm_scale(cur_c_prob.view_mut(), cur_c_prob_e.view_mut());
-
-            BLOCK.with(|v| {
-                let mut v = v.borrow_mut();
-                *v += t.elapsed();
-            });
-
-            Self::emission(
-                cur_block.expand_pos(cur_block_site).view(),
-                cur_graph_pos,
-                #[cfg(not(feature = "obliv"))]
-                eprob,
-                cur_c_prob.view_mut(),
-                #[cfg(feature = "obliv")]
-                cur_c_prob_e.view_mut(),
-            );
-
-            cur_cnr_prob.assign(&cur_c_prob);
-
-            #[cfg(feature = "obliv")]
-            cur_cnr_prob_e.assign(&cur_c_prob_e);
-        }
+        #[cfg(feature = "obliv")]
+        Zip::from(&next_c_prob_e)
+            .and(next_cnr_prob.rows_mut())
+            .and(&mut next_cnr_prob_e)
+            .for_each(|&e_to_match, r, e| match_scale_row(e_to_match, r, e));
     }
 
     fn emission(
@@ -1918,8 +1643,18 @@ impl HmmReduced {
         let t = Instant::now();
 
         Zip::indexed(tprobs.outer_iter_mut())
-            .and(forward.c_prob.outer_iter())
-            .and(forward.cnr_prob.outer_iter())
+            .and(
+                forward
+                    .c_prob
+                    .slice(s![..block.n_sites(), .., ..])
+                    .outer_iter(),
+            )
+            .and(
+                forward
+                    .cnr_prob
+                    .slice(s![..block.n_sites(), .., ..])
+                    .outer_iter(),
+            )
             .and(backward.c_prob.outer_iter())
             .and(backward.cnr_prob.outer_iter())
             .for_each(|i, mut t, fc, fcnr, bc, bcnr| {

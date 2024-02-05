@@ -608,10 +608,68 @@ impl<'a> Mcmc<'a> {
             //);
 
             #[cfg(feature = "obliv")]
-            let (first_tprobs, first_tprobs_e, tprobs, tprobs_e) = fwbw_out;
+            let ((first_tprobs, first_tprobs_e, tprobs, tprobs_e), bprobs, fprobs) = fwbw_out;
 
             #[cfg(not(feature = "obliv"))]
-            let (first_tprobs, tprobs) = fwbw_out;
+            let ((first_tprobs, tprobs), _, _) = fwbw_out;
+
+            //let fwbw_out_new = crate::rss_hmm::reduced_obliv_new::HmmReduced::fwbw(
+            //&filtered_blocks,
+            //params_w.ref_panel.n_sites,
+            //k,
+            //params_w.ref_panel.n_haps,
+            //genotype_graph_w.graph.view(),
+            //self.params.hmm_params.eprob,
+            //&rprobs_w,
+            //Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(false, bool)).view(),
+            //);
+            //let (_, bprobs_new, fprobs_new) = fwbw_out_new;
+
+            //use crate::dynamic_fixed::*;
+
+            //for (a_block, b_block) in bprobs.iter().zip(bprobs_new.iter()).rev() {
+            //Zip::from(a_block.c_prob.outer_iter())
+            //.and(a_block.prob_e.outer_iter())
+            //.and(b_block.c_prob.outer_iter())
+            //.and(b_block.prob_e.outer_iter())
+            //.for_each(|a, a_e, b, b_e| {
+            //assert_eq!(debug_expose_array(a, a_e), debug_expose_array(b, b_e));
+            //});
+            //}
+
+            //for (a_block, b_block) in bprobs.iter().zip(bprobs_new.iter()).rev() {
+            //Zip::from(a_block.cnr_prob.outer_iter())
+            //.and(a_block.prob_e.outer_iter())
+            //.and(b_block.cnr_prob.outer_iter())
+            //.and(b_block.prob_e.outer_iter())
+            //.for_each(|a, a_e, b, b_e| {
+            //assert_eq!(debug_expose_array(a, a_e), debug_expose_array(b, b_e));
+            //});
+            //}
+
+            //for (a_block, b_block) in fprobs.iter().zip(fprobs_new.iter()) {
+            //Zip::from(a_block.c_prob.outer_iter())
+            //.and(a_block.prob_e.outer_iter())
+            //.and(b_block.c_prob.slice(s![..a_block.is_pre.len(), .., ..]).outer_iter())
+            //.and(b_block.prob_e.slice(s![..a_block.is_pre.len(), ..]).outer_iter())
+            //.for_each(|a, a_e, b, b_e| {
+            //assert_eq!(debug_expose_array(a, a_e), debug_expose_array(b, b_e));
+            //});
+            //}
+
+            //for (a_block, b_block) in fprobs.into_iter().zip(fprobs_new.into_iter()) {
+            //Zip::from(a_block.cnr_prob.outer_iter())
+            //.and(a_block.prob_e.outer_iter())
+            //.and(b_block.cnr_prob.slice(s![..a_block.is_pre.len(), .., ..]).outer_iter())
+            //.and(b_block.prob_e.slice(s![..a_block.is_pre.len(), ..]).outer_iter())
+            //.for_each(|a, a_e, b, b_e| {
+            //let a = debug_expose_array(a, a_e);
+            //let b = debug_expose_array(b, b_e);
+            //Zip::from(&a)
+            //.and(&b)
+            //.for_each(|a, b| assert_eq!(a, b));
+            //});
+            //}
 
             let mut tprobs_window = tprobs;
             #[cfg(feature = "obliv")]
@@ -1113,6 +1171,7 @@ fn find_nn_bitmap(neighbors: &[Option<Vec<Usize>>], n_haps: usize) -> (Vec<Bool>
 //(h0, h1)
 //}
 
+#[cfg(feature = "obliv")]
 fn neighbors_to_filter(neighbors: &[Option<Vec<Usize>>]) -> (Vec<Usize>, Vec<Bool>) {
     let mut neighbors = neighbors
         .into_iter()
@@ -1137,6 +1196,7 @@ fn neighbors_to_filter(neighbors: &[Option<Vec<Usize>>]) -> (Vec<Usize>, Vec<Boo
     (neighbors, filter)
 }
 
+#[cfg(feature = "obliv")]
 fn unfold_block<'a>(
     block: &common::ref_panel::BlockSlice<'a>,
     neighbors: &[Usize],
@@ -1162,6 +1222,7 @@ fn unfold_block<'a>(
         })
 }
 
+#[cfg(feature = "obliv")]
 fn unfold_haps(
     haps: ArrayView1<u8>,
     n_unique_haps: usize,

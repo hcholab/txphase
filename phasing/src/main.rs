@@ -93,14 +93,14 @@ fn main() {
     let bps: Vec<u32> = bincode::deserialize_from(&mut host_stream).unwrap();
     let genotypes: Vec<Vec<i8>> = bincode::deserialize_from(&mut host_stream).unwrap();
     let iterations = [
-        //IterOption::Burnin(5),
-        //IterOption::Pruning(1),
-        //IterOption::Burnin(1),
-        //IterOption::Pruning(1),
-        //IterOption::Burnin(1),
-        //IterOption::Pruning(1),
-        //IterOption::Main(5),
-        IterOption::Main(1),
+        IterOption::Burnin(5),
+        IterOption::Pruning(1),
+        IterOption::Burnin(1),
+        IterOption::Pruning(1),
+        IterOption::Burnin(1),
+        IterOption::Pruning(1),
+        IterOption::Main(5),
+        //IterOption::Main(1),
     ];
 
     let pbwt_depth = ((9. - ((ref_panel_meta.n_haps / 2) as f64).log10()).round() as usize)
