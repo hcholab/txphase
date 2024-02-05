@@ -56,7 +56,7 @@ pub struct ProbBlock {
     pub prob_e: Array2<TpI16>,
     pub alpha_pre: Array2<Real>,
     pub alpha_post: Option<Array1<Real>>,
-    pub is_pre: Array1<bool>,
+    pub is_pre: Array1<Bool>,
     pub save_alpha_post_cnr: Option<Array2<Real>>,
 }
 
@@ -70,6 +70,9 @@ impl ProbBlock {
             alpha_pre: Array2::<Real>::zeros((n_haps, P)),
             alpha_post: None,
             save_alpha_post_cnr: Some(Array2::<Real>::zeros((P, n_unique))),
+            #[cfg(feature = "obliv")]
+            is_pre: Array1::from_elem(n_sites, Bool::protect(true)),
+            #[cfg(not(feature = "obliv"))]
             is_pre: Array1::from_elem(n_sites, true),
         }
     }
@@ -162,11 +165,7 @@ impl HmmReduced {
 
         let mut site_i = 0;
 
-        #[cfg(feature = "obliv")]
-        let mut is_first_segment = Bool::protect(true);
-
-        #[cfg(not(feature = "obliv"))]
-        let mut is_first_segment = true;
+        let mut is_first_segment = tp_value!(true, bool);
 
         let mut full_trans_prob = Array2::<Real>::zeros((n_full_haps, P));
 
@@ -236,18 +235,10 @@ impl HmmReduced {
                     full_trans_prob_e.view_mut(),
                 );
 
-                //#[cfg(feature = "obliv")]
-                //{
                 is_first_segment = !do_collapse;
-                //}
-
-                //#[cfg(not(feature = "obliv"))]
-                //{
-                //is_first_segment = !do_collapse;
-                //}
             }
 
-            cur_block_prob.is_pre[0] = true;
+            cur_block_prob.is_pre[0] = tp_value!(true, bool);
 
             site_i += 1;
 
@@ -272,15 +263,7 @@ impl HmmReduced {
 
                 let rprob = rprobs_iter.next().unwrap();
 
-                #[cfg(feature = "obliv")]
-                {
-                    cur_block_prob.is_pre[block_site_i - 1] = is_first_segment.expose();
-                }
-
-                #[cfg(not(feature = "obliv"))]
-                {
-                    cur_block_prob.is_pre[block_site_i - 1] = is_first_segment;
-                }
+                cur_block_prob.is_pre[block_site_i - 1] = is_first_segment;
 
                 let do_collapse = genotype_graph[site_i].is_segment_marker();
 
@@ -379,11 +362,7 @@ impl HmmReduced {
 
         let mut site_i = n_sites_window - 1;
 
-        #[cfg(feature = "obliv")]
-        let mut is_first_segment = Bool::protect(true);
-
-        #[cfg(not(feature = "obliv"))]
-        let mut is_first_segment = true;
+        let mut is_first_segment = tp_value!(true, bool);
 
         let mut full_trans_prob = Array2::zeros((n_full_haps, P));
 
@@ -451,22 +430,14 @@ impl HmmReduced {
                     );
                 }
 
-                cur_block_prob.is_pre[block_n_sites - 1] = true;
+                cur_block_prob.is_pre[block_n_sites - 1] = tp_value!(true, bool);
 
                 if site_i > 0 {
                     site_i -= 1;
                 }
             }
 
-            #[cfg(feature = "obliv")]
-            {
-                is_first_segment = Bool::protect(true);
-            }
-
-            #[cfg(not(feature = "obliv"))]
-            {
-                is_first_segment = true;
-            }
+            is_first_segment = tp_value!(true, bool);
 
             for block_site_i in (0..block_n_sites - 1).rev() {
                 let (prev_c_prob, cur_c_prob) = cur_block_prob
@@ -529,15 +500,7 @@ impl HmmReduced {
                     is_first_segment = false;
                 }
 
-                #[cfg(feature = "obliv")]
-                {
-                    cur_block_prob.is_pre[block_site_i] = is_first_segment.expose();
-                }
-
-                #[cfg(not(feature = "obliv"))]
-                {
-                    cur_block_prob.is_pre[block_site_i] = is_first_segment;
-                }
+                cur_block_prob.is_pre[block_site_i] = is_first_segment;
 
                 #[cfg(feature = "obliv")]
                 {
@@ -1328,16 +1291,18 @@ impl HmmReduced {
     fn collapse(
         #[cfg(feature = "obliv")] do_collapse: Bool,
         do_save_alpha_post_cnr: Bool,
-        mut cur_c_prob: ArrayViewMut2<Real>,
-        #[cfg(feature = "obliv")] mut cur_c_prob_e: ArrayViewMut1<TpI16>,
-        mut cur_cnr_prob: ArrayViewMut2<Real>,
-        #[cfg(feature = "obliv")] mut cur_cnr_prob_e: ArrayViewMut1<TpI16>,
+        cur_c_prob: ArrayViewMut2<Real>,
+        #[cfg(feature = "obliv")] cur_c_prob_e: ArrayViewMut1<TpI16>,
+        cur_cnr_prob: ArrayViewMut2<Real>,
+        #[cfg(feature = "obliv")] cur_cnr_prob_e: ArrayViewMut1<TpI16>,
         mut save_cnr_prob: ArrayViewMut2<Real>,
     ) {
         let t = Instant::now();
 
         #[cfg(not(feature = "obliv"))]
         {
+            let mut cur_c_prob = cur_c_prob;
+            let mut cur_cnr_prob = cur_cnr_prob;
             if do_save_alpha_post_cnr {
                 save_cnr_prob.assign(&cur_cnr_prob);
             }
@@ -1375,9 +1340,7 @@ impl HmmReduced {
             );
             let mut sum_cnr = Zip::from(cur_cnr_prob.columns()).map_collect(|c| c.sum());
 
-            Zip::from(&mut save_cnr_prob)
-                .and(&cur_cnr_prob)
-                .for_each(|t, &s| *t = do_save_alpha_post_cnr.select(s, *t));
+            cond_assign_array!(do_save_alpha_post_cnr, cur_cnr_prob, save_cnr_prob);
 
             renorm_scale_row(sum_cnr.view_mut(), &mut sum_cnr_e);
             Zip::from(cur_c_prob.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_c));
@@ -1525,26 +1488,30 @@ impl HmmReduced {
         .unwrap();
 
         #[cfg(feature = "obliv")]
-        let is_pre = is_pre.expose();
+        {
+            let alpha = Self::select_alpha(is_pre, alpha_pre.view(), alpha_post.view());
+            Zip::from(expanded_prob.rows_mut())
+                .and(alpha.rows())
+                .and(&index_map)
+                .and(&full_filter)
+                .for_each(|mut p, a, &i, &b| {
+                    let i = i as usize;
+                    let cr = cr_prob.row(i);
+                    let cnr = cnr_prob.row(i);
+                    let tmp = &cr + &cnr * &a;
+                    Zip::from(&mut p).and(&tmp).for_each(|tar, &src| {
+                        *tar = b.select(src, Real::ZERO);
+                    });
+                });
+        }
 
+        #[cfg(not(feature = "obliv"))]
         if is_pre {
             Zip::from(expanded_prob.rows_mut())
                 .and(alpha_pre.rows())
                 .and(&index_map)
                 .and(&full_filter)
                 .for_each(|mut p, a, &i, &b| {
-                    #[cfg(feature = "obliv")]
-                    {
-                        let i = i as usize;
-                        let cr = cr_prob.row(i);
-                        let cnr = cnr_prob.row(i);
-                        let tmp = &cr + &cnr * &a;
-                        Zip::from(&mut p).and(&tmp).for_each(|tar, &src| {
-                            *tar = b.select(src, Real::ZERO);
-                        });
-                    }
-
-                    #[cfg(not(feature = "obliv"))]
                     if b {
                         let i = i as usize;
                         let cr = cr_prob.row(i);
@@ -1560,17 +1527,6 @@ impl HmmReduced {
                 .and(&index_map)
                 .and(&full_filter)
                 .for_each(|mut p, &a, &i, &b| {
-                    #[cfg(feature = "obliv")]
-                    {
-                        let i = i as usize;
-                        let cr = cr_prob.row(i);
-                        let cnr = cnr_prob.row(i);
-                        let tmp = &cr + &cnr * a;
-                        Zip::from(&mut p).and(&tmp).for_each(|tar, &src| {
-                            *tar = b.select(src, Real::ZERO);
-                        });
-                    }
-                    #[cfg(not(feature = "obliv"))]
                     if b {
                         let i = i as usize;
                         let cr = cr_prob.row(i);
@@ -1595,39 +1551,6 @@ impl HmmReduced {
         mut tprobs: ArrayViewMut3<Real>,
         #[cfg(feature = "obliv")] mut tprobs_e: ArrayViewMut3<TpI16>,
     ) {
-        //#[cfg(feature = "obliv")]
-        //{
-        //let forward_sum_cnr =
-        //Zip::from(forward.save_alpha_post_cnr.columns()).map_collect(|c| c.sum());
-        //let mut forward_test_alpha_post =
-        //Array1::from_elem(forward.alpha_post.dim(), Real::ZERO);
-        //Self::compute_alpha_post(
-        //forward_sum_cnr.view(),
-        //forward.save_alpha_post_cnr.view(),
-        //forward.alpha_pre.view(),
-        //block.index_map.view(),
-        //forward_test_alpha_post.view_mut(),
-        //);
-        //Zip::from(&forward.alpha_post)
-        //.and(&forward_test_alpha_post)
-        //.for_each(|a, b| assert_eq!(a.expose_into_f32(), b.expose_into_f32()));
-
-        //let backward_sum_cnr =
-        //Zip::from(backward.save_alpha_post_cnr.columns()).map_collect(|c| c.sum());
-        //let mut backward_test_alpha_post =
-        //Array1::from_elem(backward.alpha_post.dim(), Real::ZERO);
-        //Self::compute_alpha_post(
-        //backward_sum_cnr.view(),
-        //backward.save_alpha_post_cnr.view(),
-        //backward.alpha_pre.view(),
-        //block.index_map.view(),
-        //backward_test_alpha_post.view_mut(),
-        //);
-        //Zip::from(&backward.alpha_post)
-        //.and(&backward_test_alpha_post)
-        //.for_each(|a, b| assert_eq!(a.expose_into_f32(), b.expose_into_f32()));
-        //}
-
         let t = Instant::now();
 
         let inv_weights = block.inv_weights.view();
@@ -1640,19 +1563,6 @@ impl HmmReduced {
         let mut alpha_00 = Array1::<Real>::zeros(n_unique_haps);
 
         let mut arr = vec![Vec::new(); n_unique_haps];
-
-        //Self::compute_alpha_post(
-        //block.index_map.view(),
-        //forward.alpha_pre.view(),
-        //&mut forward.alpha_post,
-        //&mut forward.save_alpha_post_cnr,
-        //);
-        //Self::compute_alpha_post(
-        //block.index_map.view(),
-        //backward.alpha_pre.view(),
-        //&mut backward.alpha_post,
-        //&mut backward.save_alpha_post_cnr,
-        //);
 
         let forward_alpha_post = forward.alpha_post.as_ref().unwrap().view();
         let backward_alpha_post = backward.alpha_post.as_ref().unwrap().view();
@@ -1726,6 +1636,43 @@ impl HmmReduced {
                 let c = Dot::dot(&a, &bc.t()) - Dot::dot(&b, &bcnr.t());
 
                 // second part
+                #[cfg(feature = "obliv")]
+                {
+                    let alpha = {
+                        let alpha_backward_0 = Self::select_alpha_2(
+                            backward.is_pre[i],
+                            alpha_01.view(),
+                            alpha_00.view(),
+                        );
+
+                        let alpha_backward_1 = Self::select_alpha_3(
+                            backward.is_pre[i],
+                            alpha_11.view(),
+                            alpha_10.view(),
+                        );
+
+                        Self::select_alpha_3(
+                            forward.is_pre[i],
+                            alpha_backward_1.view(),
+                            alpha_backward_0.view(),
+                        )
+                    };
+
+                    Zip::from(alpha.outer_iter())
+                        .and(fcnr.outer_iter())
+                        .and(t.rows_mut())
+                        .for_each(|a1, f, mut t_r| {
+                            Zip::from(a1.outer_iter())
+                                .and(bcnr.outer_iter())
+                                .and(&mut t_r)
+                                .for_each(|a2, b, t_e| {
+                                    *t_e = Dot::dot(&(&a2 * &f), &b.t());
+                                });
+                        });
+                    t += &c;
+                }
+
+                #[cfg(not(feature = "obliv"))]
                 if forward.is_pre[i] == false {
                     if backward.is_pre[i] == false {
                         let mut d = fcnr.to_owned();
@@ -1780,37 +1727,37 @@ impl HmmReduced {
         });
     }
 
-    fn first_combine(
-        first_c_bprobs: ArrayView2<Real>,
-        #[cfg(feature = "obliv")] first_bprobs_e: ArrayView1<TpI16>,
-    ) -> Array1<Real> {
-        let mut init_tprobs = Zip::from(first_c_bprobs.rows()).map_collect(|r| r.sum());
+    //fn first_combine(
+    //first_c_bprobs: ArrayView2<Real>,
+    //#[cfg(feature = "obliv")] first_bprobs_e: ArrayView1<TpI16>,
+    //) -> Array1<Real> {
+    //let mut init_tprobs = Zip::from(first_c_bprobs.rows()).map_collect(|r| r.sum());
 
-        #[cfg(feature = "obliv")]
-        let mut first_bprobs_e = first_bprobs_e.to_owned();
+    //#[cfg(feature = "obliv")]
+    //let mut first_bprobs_e = first_bprobs_e.to_owned();
 
-        #[cfg(feature = "obliv")]
-        renorm_equalize_scale_arr1(init_tprobs.view_mut(), first_bprobs_e.view_mut());
+    //#[cfg(feature = "obliv")]
+    //renorm_equalize_scale_arr1(init_tprobs.view_mut(), first_bprobs_e.view_mut());
 
-        #[cfg(not(feature = "obliv"))]
-        {
-            init_tprobs *= 1. / init_tprobs.sum();
-        }
+    //#[cfg(not(feature = "obliv"))]
+    //{
+    //init_tprobs *= 1. / init_tprobs.sum();
+    //}
 
-        let mut init_tprobs_dip = &init_tprobs * &init_tprobs;
+    //let mut init_tprobs_dip = &init_tprobs * &init_tprobs;
 
-        #[cfg(feature = "obliv")]
-        {
-            init_tprobs_dip /= init_tprobs_dip.sum();
-        }
+    //#[cfg(feature = "obliv")]
+    //{
+    //init_tprobs_dip /= init_tprobs_dip.sum();
+    //}
 
-        #[cfg(not(feature = "obliv"))]
-        {
-            init_tprobs_dip *= 1. / init_tprobs_dip.sum();
-        }
+    //#[cfg(not(feature = "obliv"))]
+    //{
+    //init_tprobs_dip *= 1. / init_tprobs_dip.sum();
+    //}
 
-        init_tprobs_dip
-    }
+    //init_tprobs_dip
+    //}
 
     fn combine_dip(
         tprobs: ArrayView2<Real>,
@@ -1843,5 +1790,67 @@ impl HmmReduced {
         }
 
         tprobs_dip
+    }
+
+    #[cfg(feature = "obliv")]
+    fn select_alpha(
+        is_pre: Bool,
+        alpha_pre: ArrayView2<Real>,
+        alpha_post: ArrayView1<Real>,
+    ) -> Array2<Real> {
+        let mut alpha = Array2::from_elem(alpha_pre.dim(), Real::ZERO);
+
+        Zip::from(alpha.rows_mut())
+            .and(alpha_pre.rows())
+            .and(&alpha_post)
+            .for_each(|mut a_row, pre_row, &post| {
+                Zip::from(&mut a_row).and(&pre_row).for_each(|a, &pre| {
+                    *a = is_pre.select(pre, post);
+                });
+            });
+
+        alpha
+    }
+
+    #[cfg(feature = "obliv")]
+    fn select_alpha_2(
+        is_pre: Bool,
+        alpha_pre: ArrayView2<Real>,
+        alpha_post: ArrayView1<Real>,
+    ) -> Array2<Real> {
+        let mut alpha = Array2::from_elem(alpha_pre.dim(), Real::ZERO);
+
+        Zip::from(alpha.columns_mut())
+            .and(alpha_pre.columns())
+            .and(&alpha_post)
+            .for_each(|mut a_row, pre_row, &post| {
+                Zip::from(&mut a_row).and(&pre_row).for_each(|a, &pre| {
+                    *a = is_pre.select(pre, post);
+                });
+            });
+
+        alpha
+    }
+
+    #[cfg(feature = "obliv")]
+    fn select_alpha_3(
+        is_pre: Bool,
+        mut alpha_pre: ndarray::ArrayView3<Real>,
+        alpha_post: ArrayView2<Real>,
+    ) -> Array3<Real> {
+        let mut alpha = ndarray::Array3::from_elem(alpha_pre.dim(), Real::ZERO);
+        alpha.swap_axes(0, 1);
+        alpha_pre.swap_axes(0, 1);
+
+        Zip::from(alpha.outer_iter_mut())
+            .and(alpha_pre.outer_iter())
+            .for_each(|mut alpha, alpha_pre| {
+                Zip::from(&mut alpha)
+                    .and(&alpha_pre)
+                    .and(&alpha_post)
+                    .for_each(|a, &pre, &post| *a = is_pre.select(pre, post))
+            });
+
+        alpha
     }
 }
