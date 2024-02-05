@@ -4,7 +4,7 @@ pub use params::*;
 #[cfg(feature = "obliv")]
 use crate::dynamic_fixed::*;
 use crate::genotype_graph::{G, P};
-use crate::{Bool, Genotype, Real, Usize};
+use crate::{Bool, Genotype, Real};
 #[cfg(feature = "obliv")]
 use ndarray::{Array1, ArrayViewMut1};
 #[cfg(feature = "obliv")]

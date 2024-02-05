@@ -21,7 +21,7 @@ thread_local! {
 }
 
 #[cfg(feature = "obliv")]
-use tp_fixedpoint::timing_shield::{TpEq, TpI16, TpI8, TpOrd};
+use tp_fixedpoint::timing_shield::{TpEq, TpI8, TpOrd};
 
 use ndarray::{s, Array1, Array2, Array3, ArrayView1, Zip};
 
@@ -608,10 +608,10 @@ impl<'a> Mcmc<'a> {
             //);
 
             #[cfg(feature = "obliv")]
-            let ((first_tprobs, first_tprobs_e, tprobs, tprobs_e), bprobs, fprobs) = fwbw_out;
+            let (first_tprobs, first_tprobs_e, tprobs, tprobs_e) = fwbw_out;
 
             #[cfg(not(feature = "obliv"))]
-            let ((first_tprobs, tprobs), _, _) = fwbw_out;
+            let (first_tprobs, tprobs) = fwbw_out;
 
             //let fwbw_out_new = crate::rss_hmm::reduced_obliv_new::HmmReduced::fwbw(
             //&filtered_blocks,
