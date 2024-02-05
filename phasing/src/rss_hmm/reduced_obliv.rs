@@ -9,6 +9,9 @@ use ndarray::{
 };
 
 #[cfg(feature = "obliv")]
+use ndarray::ArrayViewMut1;
+
+#[cfg(feature = "obliv")]
 use crate::dynamic_fixed::*;
 
 #[cfg(feature = "obliv")]
@@ -34,6 +37,15 @@ thread_local! {
     pub static COMB2: RefCell<Duration> = RefCell::new(Duration::ZERO);
     pub static EXPAND: RefCell<Duration> = RefCell::new(Duration::ZERO);
     pub static BLOCK: RefCell<Duration> = RefCell::new(Duration::ZERO);
+}
+
+#[cfg(feature = "obliv")]
+macro_rules! cond_assign_array {
+    ($cond: expr, $src: expr, $tar: expr) => {
+        Zip::from(&mut $tar)
+            .and(&$src)
+            .for_each(|t, &s| *t = $cond.select(s, *t));
+    };
 }
 
 #[derive(Clone)]
@@ -149,6 +161,11 @@ impl HmmReduced {
         let mut rprobs_iter = rprobs.get_forward(n_full_states as usize);
 
         let mut site_i = 0;
+
+        #[cfg(feature = "obliv")]
+        let mut is_first_segment = Bool::protect(true);
+
+        #[cfg(not(feature = "obliv"))]
         let mut is_first_segment = true;
 
         let mut full_trans_prob = Array2::<Real>::zeros((n_full_haps, P));
@@ -219,15 +236,15 @@ impl HmmReduced {
                     full_trans_prob_e.view_mut(),
                 );
 
-                #[cfg(feature = "obliv")]
-                {
-                    is_first_segment = !do_collapse.expose();
-                }
+                //#[cfg(feature = "obliv")]
+                //{
+                is_first_segment = !do_collapse;
+                //}
 
-                #[cfg(not(feature = "obliv"))]
-                {
-                    is_first_segment = !do_collapse;
-                }
+                //#[cfg(not(feature = "obliv"))]
+                //{
+                //is_first_segment = !do_collapse;
+                //}
             }
 
             cur_block_prob.is_pre[0] = true;
@@ -254,12 +271,17 @@ impl HmmReduced {
                 let mut cur_cnr_prob_e = cur_c_prob_e.to_owned();
 
                 let rprob = rprobs_iter.next().unwrap();
-                cur_block_prob.is_pre[block_site_i - 1] = is_first_segment;
 
                 #[cfg(feature = "obliv")]
-                let do_collapse = genotype_graph[site_i].is_segment_marker().expose();
+                {
+                    cur_block_prob.is_pre[block_site_i - 1] = is_first_segment.expose();
+                }
 
                 #[cfg(not(feature = "obliv"))]
+                {
+                    cur_block_prob.is_pre[block_site_i - 1] = is_first_segment;
+                }
+
                 let do_collapse = genotype_graph[site_i].is_segment_marker();
 
                 Self::nonblock_transition_forward(
@@ -290,6 +312,12 @@ impl HmmReduced {
                         .view_mut(),
                 );
 
+                #[cfg(feature = "obliv")]
+                {
+                    is_first_segment = do_collapse.select(TpBool::protect(false), is_first_segment);
+                }
+
+                #[cfg(not(feature = "obliv"))]
                 if do_collapse {
                     is_first_segment = false;
                 }
@@ -350,6 +378,11 @@ impl HmmReduced {
         let mut rprobs_iter = rprobs.get_backward(n_full_states as usize);
 
         let mut site_i = n_sites_window - 1;
+
+        #[cfg(feature = "obliv")]
+        let mut is_first_segment = Bool::protect(true);
+
+        #[cfg(not(feature = "obliv"))]
         let mut is_first_segment = true;
 
         let mut full_trans_prob = Array2::zeros((n_full_haps, P));
@@ -425,7 +458,15 @@ impl HmmReduced {
                 }
             }
 
-            is_first_segment = true;
+            #[cfg(feature = "obliv")]
+            {
+                is_first_segment = Bool::protect(true);
+            }
+
+            #[cfg(not(feature = "obliv"))]
+            {
+                is_first_segment = true;
+            }
 
             for block_site_i in (0..block_n_sites - 1).rev() {
                 let (prev_c_prob, cur_c_prob) = cur_block_prob
@@ -448,10 +489,6 @@ impl HmmReduced {
 
                 let rprob = rprobs_iter.next().unwrap();
 
-                #[cfg(feature = "obliv")]
-                let do_collapse = genotype_graph[site_i + 1].is_segment_marker().expose();
-
-                #[cfg(not(feature = "obliv"))]
                 let do_collapse = genotype_graph[site_i + 1].is_segment_marker();
 
                 Self::nonblock_transition_backward(
@@ -482,11 +519,25 @@ impl HmmReduced {
                         .view_mut(),
                 );
 
+                #[cfg(feature = "obliv")]
+                {
+                    is_first_segment = do_collapse.select(TpBool::protect(false), is_first_segment);
+                }
+
+                #[cfg(not(feature = "obliv"))]
                 if do_collapse {
                     is_first_segment = false;
                 }
 
-                cur_block_prob.is_pre[block_site_i] = is_first_segment;
+                #[cfg(feature = "obliv")]
+                {
+                    cur_block_prob.is_pre[block_site_i] = is_first_segment.expose();
+                }
+
+                #[cfg(not(feature = "obliv"))]
+                {
+                    cur_block_prob.is_pre[block_site_i] = is_first_segment;
+                }
 
                 #[cfg(feature = "obliv")]
                 {
@@ -584,11 +635,11 @@ impl HmmReduced {
         #[cfg(feature = "obliv")] mut prev_cnr_prob_e: ArrayViewMut1<TpI16>,
         block: &FilteredBlockSliceObliv<'a>,
         graph_pos: G,
-        do_collapse: bool,
+        do_collapse: Bool,
         #[cfg(not(feature = "obliv"))] eprob: Real,
         rprob: Real,
         block_site_i: usize,
-        is_first_segment: bool,
+        is_first_segment: Bool,
         mut cur_c_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_c_prob_e: ArrayViewMut1<TpI16>,
         mut cur_cnr_prob: ArrayViewMut2<Real>,
@@ -628,15 +679,23 @@ impl HmmReduced {
                 .for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
         }
 
+        #[cfg(feature = "obliv")]
+        Self::collapse(
+            do_collapse,
+            is_first_segment,
+            cur_c_prob.view_mut(),
+            cur_c_prob_e.view_mut(),
+            cur_cnr_prob.view_mut(),
+            cur_cnr_prob_e.view_mut(),
+            save_cnr_prob,
+        );
+
+        #[cfg(not(feature = "obliv"))]
         if do_collapse {
             Self::collapse(
                 is_first_segment,
                 cur_c_prob.view_mut(),
-                #[cfg(feature = "obliv")]
-                cur_c_prob_e.view_mut(),
                 cur_cnr_prob.view_mut(),
-                #[cfg(feature = "obliv")]
-                cur_cnr_prob_e.view_mut(),
                 save_cnr_prob,
             );
         }
@@ -671,11 +730,11 @@ impl HmmReduced {
         #[cfg(feature = "obliv")] prev_cnr_prob_e: ArrayView1<TpI16>,
         block: &FilteredBlockSliceObliv<'a>,
         graph_pos: G,
-        do_collapse: bool,
+        do_collapse: Bool,
         #[cfg(not(feature = "obliv"))] eprob: Real,
         rprob: Real,
         block_site_i: usize,
-        is_first_segment: bool,
+        is_first_segment: Bool,
         mut cur_c_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_c_prob_e: ArrayViewMut1<TpI16>,
         mut cur_cnr_prob: ArrayViewMut2<Real>,
@@ -702,15 +761,23 @@ impl HmmReduced {
             cur_cnr_prob_e.view_mut(),
         );
 
+        #[cfg(feature = "obliv")]
+        Self::collapse(
+            do_collapse,
+            is_first_segment,
+            cur_c_prob.view_mut(),
+            cur_c_prob_e.view_mut(),
+            cur_cnr_prob.view_mut(),
+            cur_cnr_prob_e.view_mut(),
+            save_cnr_prob,
+        );
+
+        #[cfg(not(feature = "obliv"))]
         if do_collapse {
             Self::collapse(
                 is_first_segment,
                 cur_c_prob.view_mut(),
-                #[cfg(feature = "obliv")]
-                cur_c_prob_e.view_mut(),
                 cur_cnr_prob.view_mut(),
-                #[cfg(feature = "obliv")]
-                cur_cnr_prob_e.view_mut(),
                 save_cnr_prob,
             );
         }
@@ -747,7 +814,7 @@ impl HmmReduced {
         do_collapse: Bool,
         #[cfg(not(feature = "obliv"))] eprob: Real,
         rprob: Real,
-        mut is_first_segment: bool,
+        mut is_first_segment: Bool,
         mut full_trans_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut full_trans_prob_e: ArrayViewMut1<TpI16>,
     ) {
@@ -808,8 +875,9 @@ impl HmmReduced {
         );
 
         #[cfg(feature = "obliv")]
-        if do_collapse.expose() {
+        {
             Self::collapse(
+                do_collapse,
                 is_first_segment,
                 trans_c_prob.view_mut(),
                 trans_c_prob_e.view_mut(),
@@ -822,7 +890,7 @@ impl HmmReduced {
                     .view_mut(),
             );
 
-            is_first_segment = false;
+            is_first_segment = do_collapse.select(Bool::protect(false), is_first_segment);
         }
 
         #[cfg(not(feature = "obliv"))]
@@ -958,7 +1026,7 @@ impl HmmReduced {
         do_collapse: Bool,
         #[cfg(not(feature = "obliv"))] eprob: Real,
         rprob: Real,
-        is_first_segment: bool,
+        is_first_segment: Bool,
         mut full_trans_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut full_trans_prob_e: ArrayViewMut1<TpI16>,
     ) {
@@ -1127,20 +1195,19 @@ impl HmmReduced {
         });
 
         #[cfg(feature = "obliv")]
-        if do_collapse.expose() {
-            Self::collapse(
-                true,
-                next_c_prob.view_mut(),
-                next_c_prob_e.view_mut(),
-                next_cnr_prob.view_mut(),
-                next_cnr_prob_e.view_mut(),
-                cur_prob_block
-                    .save_alpha_post_cnr
-                    .as_mut()
-                    .unwrap()
-                    .view_mut(),
-            );
-        }
+        Self::collapse(
+            do_collapse,
+            TpBool::protect(true),
+            next_c_prob.view_mut(),
+            next_c_prob_e.view_mut(),
+            next_cnr_prob.view_mut(),
+            next_cnr_prob_e.view_mut(),
+            cur_prob_block
+                .save_alpha_post_cnr
+                .as_mut()
+                .unwrap()
+                .view_mut(),
+        );
 
         #[cfg(not(feature = "obliv"))]
         if do_collapse {
@@ -1259,7 +1326,8 @@ impl HmmReduced {
     }
 
     fn collapse(
-        do_compute_alpha_post: bool,
+        #[cfg(feature = "obliv")] do_collapse: Bool,
+        do_save_alpha_post_cnr: Bool,
         mut cur_c_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_c_prob_e: ArrayViewMut1<TpI16>,
         mut cur_cnr_prob: ArrayViewMut2<Real>,
@@ -1268,53 +1336,61 @@ impl HmmReduced {
     ) {
         let t = Instant::now();
 
-        #[cfg(feature = "obliv")]
-        let (sum_c, sum_c_e) =
-            sum_scale_by_column_mut(cur_c_prob.view_mut(), cur_c_prob_e.view_mut());
-
-        #[cfg(not(feature = "obliv"))]
-        let mut sum_c = Zip::from(cur_c_prob.columns()).map_collect(|c| c.sum());
-
-        #[cfg(feature = "obliv")]
-        let mut sum_cnr_e = max_e(cur_cnr_prob_e.view());
-
-        #[cfg(feature = "obliv")]
-        match_scale(
-            sum_cnr_e,
-            cur_cnr_prob.view_mut(),
-            cur_cnr_prob_e.view_mut(),
-        );
-
-        let mut sum_cnr = Zip::from(cur_cnr_prob.columns()).map_collect(|c| c.sum());
-
-        if do_compute_alpha_post {
-            save_cnr_prob.assign(&cur_cnr_prob);
-        }
-
         #[cfg(not(feature = "obliv"))]
         {
+            if do_save_alpha_post_cnr {
+                save_cnr_prob.assign(&cur_cnr_prob);
+            }
+            let mut sum_c = Zip::from(cur_c_prob.columns()).map_collect(|c| c.sum());
+            let mut sum_cnr = Zip::from(cur_cnr_prob.columns()).map_collect(|c| c.sum());
             let sum = sum_c.sum();
             if sum < RENORM_THRESHOLD {
                 sum_c *= 1. / sum;
                 sum_cnr *= 1. / sum;
             }
+            Zip::from(cur_c_prob.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_c));
+            Zip::from(cur_cnr_prob.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_cnr));
         }
+
         #[cfg(feature = "obliv")]
         {
+            let mut cur_c_prob_ = cur_c_prob;
+            let mut cur_c_prob_e_ = cur_c_prob_e;
+            let mut cur_cnr_prob_ = cur_cnr_prob;
+            let mut cur_cnr_prob_e_ = cur_cnr_prob_e;
+
+            let mut cur_c_prob = cur_c_prob_.to_owned();
+            let mut cur_c_prob_e = cur_c_prob_e_.to_owned();
+            let mut cur_cnr_prob = cur_cnr_prob_.to_owned();
+            let mut cur_cnr_prob_e = cur_cnr_prob_e_.to_owned();
+
+            let (sum_c, sum_c_e) =
+                sum_scale_by_column_mut(cur_c_prob.view_mut(), cur_c_prob_e.view_mut());
+
+            let mut sum_cnr_e = max_e(cur_cnr_prob_e.view());
+            match_scale(
+                sum_cnr_e,
+                cur_cnr_prob.view_mut(),
+                cur_cnr_prob_e.view_mut(),
+            );
+            let mut sum_cnr = Zip::from(cur_cnr_prob.columns()).map_collect(|c| c.sum());
+
+            Zip::from(&mut save_cnr_prob)
+                .and(&cur_cnr_prob)
+                .for_each(|t, &s| *t = do_save_alpha_post_cnr.select(s, *t));
+
             renorm_scale_row(sum_cnr.view_mut(), &mut sum_cnr_e);
-        }
-
-        Zip::from(cur_c_prob.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_c));
-        Zip::from(cur_cnr_prob.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_cnr));
-
-        #[cfg(feature = "obliv")]
-        {
+            Zip::from(cur_c_prob.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_c));
+            Zip::from(cur_cnr_prob.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_cnr));
             cur_c_prob_e.fill(sum_c_e);
             cur_cnr_prob_e.fill(sum_cnr_e);
-        }
+            renorm_e_pair(cur_c_prob_e.view_mut(), cur_cnr_prob_e.view_mut());
 
-        #[cfg(feature = "obliv")]
-        renorm_e_pair(cur_c_prob_e.view_mut(), cur_cnr_prob_e.view_mut());
+            cond_assign_array!(do_collapse, cur_c_prob, cur_c_prob_);
+            cond_assign_array!(do_collapse, cur_c_prob_e, cur_c_prob_e_);
+            cond_assign_array!(do_collapse, cur_cnr_prob, cur_cnr_prob_);
+            cond_assign_array!(do_collapse, cur_cnr_prob_e, cur_cnr_prob_e_);
+        }
 
         COLL.with(|v| {
             let mut v = v.borrow_mut();
@@ -1399,7 +1475,7 @@ impl HmmReduced {
         alpha_pre: ArrayView2<Real>,
         alpha_post: &mut Option<Array1<Real>>,
         save_cnr_prob: &mut Option<Array2<Real>>,
-        is_pre: bool,
+        is_pre: Bool,
         mut expanded_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut expanded_prob_e: ArrayViewMut1<TpI16>,
     ) {
@@ -1447,6 +1523,9 @@ impl HmmReduced {
             cnr_prob.t().iter().cloned().collect(),
         )
         .unwrap();
+
+        #[cfg(feature = "obliv")]
+        let is_pre = is_pre.expose();
 
         if is_pre {
             Zip::from(expanded_prob.rows_mut())
