@@ -77,39 +77,53 @@ impl ProbBlock {
         }
     }
 
-    //pub fn expand(
-    //&self,
-    //index_map: ArrayView1<u16>,
-    //inv_weights: ArrayView1<Real>,
-    //) -> Array3<Real> {
-    //let mut expanded = Array3::<Real>::zeros((
-    //self.n_segments(),
-    //self.alpha_pre.dim().0,
-    //self.alpha_pre.dim().1,
-    //));
-    //let cr_prob = &self.c_prob - &self.cnr_prob;
-    //Zip::from(expanded.outer_iter_mut())
-    //.and(cr_prob.outer_iter())
-    //.and(self.cnr_prob.outer_iter())
-    //.and(&self.is_pre)
-    //.map_collect(|exp, cr, cnr, &is_pre| {
-    //HmmReduced::expand_prob(
-    //index_map,
-    //inv_weights,
-    //cr,
-    //cnr,
-    //self.alpha_pre.view(),
-    //self.alpha_post.view(),
-    //is_pre,
-    //exp,
-    //);
-    //});
-    //expanded
-    //}
+    pub fn expand(
+        &self,
+        index_map: ArrayView1<u16>,
+        full_filter: ArrayView1<Bool>,
+        inv_weights: ArrayView1<Real>,
+    ) -> (Array3<Real>, Array2<TpI16>) {
+        let mut expanded = Array3::<Real>::from_elem(
+            (
+                self.n_sites(),
+                self.alpha_pre.dim().0,
+                self.alpha_pre.dim().1,
+            ),
+            Real::ZERO,
+        );
+        let mut expanded_e =
+            Array2::<TpI16>::from_elem((self.n_sites(), self.alpha_pre.dim().1), TpI16::protect(0));
 
-    //pub fn n_sites(&self) -> usize {
-    //self.is_pre.len()
-    //}
+        let cr_prob = &self.c_prob - &self.cnr_prob;
+        Zip::from(expanded.outer_iter_mut())
+            .and(expanded_e.outer_iter_mut())
+            .and(cr_prob.outer_iter())
+            .and(self.cnr_prob.outer_iter())
+            .and(self.prob_e.outer_iter())
+            .and(&self.is_pre)
+            .for_each(|mut exp, mut exp_e, cr, cnr, e, &is_pre| {
+                HmmReduced::expand_prob(
+                    index_map,
+                    full_filter,
+                    inv_weights,
+                    cr,
+                    e,
+                    cnr,
+                    e,
+                    self.alpha_pre.view(),
+                    self.alpha_post.as_ref().unwrap().view(),
+                    is_pre,
+                    exp.view_mut(),
+                    exp_e.view_mut(),
+                );
+                renorm_scale(exp.reversed_axes(), exp_e);
+            });
+        (expanded, expanded_e)
+    }
+
+    pub fn n_sites(&self) -> usize {
+        self.is_pre.len()
+    }
 }
 
 pub struct HmmReduced {}
@@ -262,6 +276,9 @@ impl HmmReduced {
                 let mut cur_cnr_prob_e = cur_c_prob_e.to_owned();
 
                 let rprob = rprobs_iter.next().unwrap();
+                //if site_i==2 {
+                //println!("full rprob: {:?}", rprob.expose_into_f32());
+                //}
 
                 cur_block_prob.is_pre[block_site_i - 1] = is_first_segment;
 
@@ -322,6 +339,64 @@ impl HmmReduced {
                 &mut cur_block_prob.alpha_post,
                 &mut cur_block_prob.save_alpha_post_cnr,
             );
+
+            //if block_i == 0 {
+            ////let block = blocks.first().unwrap();
+
+            //let (expanded, expanded_e) = cur_block_prob.expand(
+            //block.index_map.view(),
+            //block.full_filter.view(),
+            //block.inv_weights.view(),
+            //);
+
+            //let mut filtered_expanded = Array3::<Real>::from_elem(
+            //(
+            //expanded.dim().0,
+            //n_full_states.expose() as usize,
+            //expanded.dim().2,
+            //),
+            //Real::ZERO,
+            //);
+
+            //Zip::from(expanded.outer_iter())
+            //.and(filtered_expanded.outer_iter_mut())
+            //.for_each(|expanded, mut filtered_expanded| {
+            //let mut j = 0;
+            //Zip::from(expanded.rows())
+            //.and(&block.full_filter)
+            //.for_each(|r, b| {
+            //if b.expose() {
+            //filtered_expanded.row_mut(j).assign(&r);
+            //j += 1;
+            //}
+            //});
+            //});
+
+            //let i = 2;
+            //let mut filtered_expanded =
+            //filtered_expanded.slice(s![i, .., ..]);
+            //filtered_expanded.swap_axes(0, 1);
+            //let filtered_expanded_e = expanded_e.slice(s![i, ..]);
+            //let filtered_expanded_exposed =
+            //debug_expose_array(filtered_expanded, filtered_expanded_e);
+
+            //let filtered_expanded_exposed =
+            //&filtered_expanded_exposed / filtered_expanded_exposed.sum();
+
+            //println!("rss");
+            //println!("{:#?}", filtered_expanded_exposed.row(0));
+            //println!("rss");
+            //println!(
+            //"{:#?}",
+            //filtered_expanded.row(0).map(|v| v.expose_into_f32())
+            //);
+            //println!("rss");
+            //println!(
+            //"{:#?}",
+            //filtered_expanded_e.map(|v| v.expose())
+            //);
+
+            //}
 
             Self::combine_block(
                 block,
@@ -528,6 +603,64 @@ impl HmmReduced {
         }
 
         all_prob_blocks.reverse();
+
+        //{
+        //let block = blocks.first().unwrap();
+
+        //let (expanded, expanded_e) = all_prob_blocks.first().unwrap().expand(
+        //block.index_map.view(),
+        //block.full_filter.view(),
+        //block.inv_weights.view(),
+        //);
+
+        //let mut filtered_expanded = Array3::<Real>::from_elem(
+        //(
+        //expanded.dim().0,
+        //n_full_states.expose() as usize,
+        //expanded.dim().2,
+        //),
+        //Real::ZERO,
+        //);
+
+        //Zip::from(expanded.outer_iter())
+        //.and(filtered_expanded.outer_iter_mut())
+        //.for_each(|expanded, mut filtered_expanded| {
+        //let mut j = 0;
+        //Zip::from(expanded.rows())
+        //.and(&block.full_filter)
+        //.for_each(|r, b| {
+        //if b.expose() {
+        //filtered_expanded.row_mut(j).assign(&r);
+        //j += 1;
+        //}
+        //});
+        //});
+
+        //let i = 15;
+        //let mut filtered_expanded =
+        //filtered_expanded.slice(s![i, .., ..]);
+        //filtered_expanded.swap_axes(0, 1);
+        //let filtered_expanded_e = expanded_e.slice(s![i, ..]);
+        //let filtered_expanded_exposed =
+        //debug_expose_array(filtered_expanded, filtered_expanded_e);
+
+        //let filtered_expanded_exposed =
+        //&filtered_expanded_exposed / filtered_expanded_exposed.sum();
+
+        //println!("rss");
+        //println!("{:#?}", filtered_expanded_exposed.row(0));
+        //println!("rss");
+        //println!(
+        //"{:#?}",
+        //filtered_expanded.row(0).map(|v| v.expose_into_f32())
+        //);
+        //println!("rss");
+        //println!(
+        //"{:#?}",
+        //filtered_expanded_e.map(|v| v.expose())
+        //);
+
+        //}
 
         all_prob_blocks
     }
@@ -884,6 +1017,13 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         let trans_cr_prob_e = trans_c_prob_e.clone();
 
+        Self::compute_alpha_post(
+            prev_index_map,
+            prev_alpha_pre.view(),
+            &mut prev_block_prob.alpha_post,
+            &mut prev_block_prob.save_alpha_post_cnr,
+        );
+
         BLOCK.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -900,8 +1040,7 @@ impl HmmReduced {
             #[cfg(feature = "obliv")]
             trans_cnr_prob_e.view(),
             prev_alpha_pre.view(),
-            &mut prev_block_prob.alpha_post,
-            &mut prev_block_prob.save_alpha_post_cnr,
+            prev_block_prob.alpha_post.as_ref().unwrap().view(),
             is_first_segment,
             full_trans_prob.view_mut(),
             #[cfg(feature = "obliv")]
@@ -1049,6 +1188,13 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         let trans_cr_prob_e = trans_c_prob_e.clone();
 
+        Self::compute_alpha_post(
+            prev_index_map,
+            prev_block_prob.alpha_pre.view(),
+            &mut prev_block_prob.alpha_post,
+            &mut prev_block_prob.save_alpha_post_cnr,
+        );
+
         BLOCK.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -1065,8 +1211,7 @@ impl HmmReduced {
             #[cfg(feature = "obliv")]
             trans_cnr_prob_e.view(),
             prev_block_prob.alpha_pre.view(),
-            &mut prev_block_prob.alpha_post,
-            &mut prev_block_prob.save_alpha_post_cnr,
+            prev_block_prob.alpha_post.as_ref().unwrap().view(),
             is_first_segment,
             full_trans_prob.view_mut(),
             #[cfg(feature = "obliv")]
@@ -1436,21 +1581,12 @@ impl HmmReduced {
         cnr_prob: ArrayView2<Real>,
         #[cfg(feature = "obliv")] cnr_prob_e: ArrayView1<TpI16>,
         alpha_pre: ArrayView2<Real>,
-        alpha_post: &mut Option<Array1<Real>>,
-        save_cnr_prob: &mut Option<Array2<Real>>,
+        alpha_post: ArrayView1<Real>,
         is_pre: Bool,
         mut expanded_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut expanded_prob_e: ArrayViewMut1<TpI16>,
     ) {
         let t = Instant::now();
-
-        Self::compute_alpha_post(
-            index_map.view(),
-            alpha_pre.view(),
-            alpha_post,
-            save_cnr_prob,
-        );
-        let alpha_post = alpha_post.as_ref().unwrap().view();
 
         #[cfg(feature = "obliv")]
         let mut cr_prob = cr_prob.to_owned();

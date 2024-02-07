@@ -93,14 +93,14 @@ fn main() {
     let bps: Vec<u32> = bincode::deserialize_from(&mut host_stream).unwrap();
     let genotypes: Vec<Vec<i8>> = bincode::deserialize_from(&mut host_stream).unwrap();
     let iterations = [
-        IterOption::Burnin(5),
-        IterOption::Pruning(1),
-        IterOption::Burnin(1),
-        IterOption::Pruning(1),
-        IterOption::Burnin(1),
-        IterOption::Pruning(1),
-        IterOption::Main(5),
-        //IterOption::Main(1),
+        //IterOption::Burnin(5),
+        //IterOption::Pruning(1),
+        //IterOption::Burnin(1),
+        //IterOption::Pruning(1),
+        //IterOption::Burnin(1),
+        //IterOption::Pruning(1),
+        //IterOption::Main(5),
+        IterOption::Main(1),
     ];
 
     let pbwt_depth = ((9. - ((ref_panel_meta.n_haps / 2) as f64).log10()).round() as usize)
@@ -201,6 +201,8 @@ fn main() {
                 .iter()
                 .map(|b| b.n_sites() as f64)
                 .collect::<Vec<_>>();
+
+            println!("# blocks: {}", ref_panel_new.blocks.len());
 
             println!(
                 "# block unique haplotypes: {:.3}+/-{:.3}",
@@ -331,16 +333,29 @@ fn main() {
                         &sites_bitmask,
                     );
 
-                    let block_sizes = ref_panel_new
+                    use statrs::statistics::Statistics;
+                    let block_n_unique_haps = ref_panel_new
                         .blocks
                         .iter()
                         .map(|b| b.n_unique() as f64)
                         .collect::<Vec<_>>();
-                    use statrs::statistics::Statistics;
+
+                    let block_n_sites = ref_panel_new
+                        .blocks
+                        .iter()
+                        .map(|b| b.n_sites() as f64)
+                        .collect::<Vec<_>>();
+
                     println!(
-                        "Block sizes: {:.3}+/-{:.3}",
-                        Statistics::mean(&block_sizes),
-                        Statistics::std_dev(&block_sizes)
+                        "# block unique haplotypes: {:.3}+/-{:.3}",
+                        Statistics::mean(&block_n_unique_haps),
+                        Statistics::std_dev(&block_n_unique_haps)
+                    );
+
+                    println!(
+                        "# block sites: {:.3}+/-{:.3}",
+                        Statistics::mean(&block_n_sites),
+                        Statistics::std_dev(&block_n_sites)
                     );
 
                     mcmc::McmcSharedParams::new(

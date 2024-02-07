@@ -178,6 +178,17 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
+                "RSS HMM: {:?} ms",
+                REDFWBW
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+            println!();
+            println!(
                 "Filter Ref Panel: {:?} ms",
                 FILTER
                     .with(|v| {
@@ -198,17 +209,7 @@ impl<'a> Mcmc<'a> {
                     })
                     .as_millis()
             );
-
-            println!(
-                "RSS HMM: {:?} ms",
-                REDFWBW
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
+            println!();
         }
 
         #[cfg(feature = "obliv")]
@@ -455,19 +456,20 @@ impl<'a> Mcmc<'a> {
         let n_windows = windows.len();
         let mut ks = Vec::new();
         let mut max_ks = Vec::new();
+        let mut window_sizes = Vec::new();
         let mut tprob_pairs = Array2::<Real>::zeros((P, P));
 
         let mut i = 0;
-        let mut is_first_window = true;
 
         let rprobs = self.params.hmm_params.get_rprobs(
             self.ignored_sites.view(),
             &self.genotype_graph,
             self.params.variants.view(),
         );
-        //let mut windows_count = 0;
 
-        for ((start_w, end_w), (start_write_w, end_write_w)) in windows.into_iter() {
+        for (window_i, ((start_w, end_w), (start_write_w, end_write_w))) in
+            windows.into_iter().enumerate()
+        {
             sum_window_size +=
                 self.params.variants[end_w - 1].bp - self.params.variants[start_w].bp;
             let genotype_graph_w = self.genotype_graph.slice(start_w, end_w);
@@ -481,81 +483,16 @@ impl<'a> Mcmc<'a> {
                 .filter_map(|v| v.as_ref().map(|v| v.len()))
                 .sum::<usize>();
             max_ks.push(max_k as f64);
-
-            //{
-            //let mut n_set = std::collections::HashSet::new();
-            //for n in neighbors_w {
-            //if let Some(n) = n.as_ref() {
-            //for j in n {
-            //n_set.insert(j);
-            //}
-            //}
-            //}
-            //let mut n_list = n_set.into_iter().collect::<Vec<_>>();
-            //n_list.sort();
-
-            //use std::io::Write;
-            //crate::DEBUG_FILE.with(|f| {
-            //let mut f = f.borrow_mut();
-            //if windows_count == 0 {
-            //writeln!(*f, "## kstates ##").unwrap();
-            //}
-            //writeln!(*f, "window {windows_count}").unwrap();
-            //for j in n_list {
-            //writeln!(*f, "{}", j + 2).unwrap();
-            //}
-            //});
-
-            //windows_count += 1;
-            //}
+            window_sizes.push((end_w - start_w) as f64);
 
             let (full_filter, k) = find_nn_bitmap(neighbors_w, params_w.ref_panel.n_haps);
-
-            #[cfg(feature = "obliv")]
-            {
-                ks.push(k.expose() as f64);
-            }
-            #[cfg(not(feature = "obliv"))]
-            {
-                ks.push(k as f64);
-            }
-
+            //#[cfg(feature = "obliv")]
             //{
-            //let t = Instant::now();
-            //let (max_k_neighbors, _filter) = neighbors_to_filter(&neighbors);
-            //let mut unfolded = Array2::from_elem(
-            //(end_w - start_w, max_k_neighbors.len()),
-            //Genotype::protect(0),
-            //);
-
-            //let mut start_slice = 0;
-            //for block in &params_w.ref_panel.blocks {
-            //unfold_block(
-            //block,
-            //&max_k_neighbors,
-            //unfolded.slice_mut(s![start_slice..start_slice + block.n_sites(), ..]),
-            //);
-            //start_slice += block.n_sites();
+            //ks.push(k.expose() as f64);
             //}
-            //FILTER.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-            //});
-
-            //let t = Instant::now();
-            //let mut hmm = crate::hmm::Hmm::new();
-            //hmm.forward_backward(
-            //unfolded.view(),
-            //genotype_graph_w.graph.view(),
-            //&self.params.hmm_params,
-            //&rprobs_w,
-            //Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(false, bool)).view(),
-            //start_w == 0,
-            //);
-            //FULLFWBW.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-            //});
+            //#[cfg(not(feature = "obliv"))]
+            //{
+            //ks.push(k as f64);
             //}
 
             let t = Instant::now();
@@ -586,96 +523,17 @@ impl<'a> Mcmc<'a> {
                 *v += t.elapsed();
             });
 
-            //let filtered_blocks = params_w
-            //.ref_panel
-            //.blocks
-            //.iter()
-            //.map(|b| {
-            //crate::rss_hmm::filtered_block::FilteredBlockSlice::from_block_slice(
-            //b,
-            //&full_filter,
-            //)
-            //})
-            //.collect::<Vec<_>>();
-
-            //let fwbw_out = crate::rss_hmm::HmmReduced::fwbw(
-            //&filtered_blocks,
-            //params_w.ref_panel.n_sites,
-            //genotype_graph_w.graph.view(),
-            //self.params.hmm_params.eprob,
-            //&rprobs_w,
-            //Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(false, bool)).view(),
-            //);
-
             #[cfg(feature = "obliv")]
             let (first_tprobs, first_tprobs_e, tprobs, tprobs_e) = fwbw_out;
 
             #[cfg(not(feature = "obliv"))]
             let (first_tprobs, tprobs) = fwbw_out;
 
-            //let fwbw_out_new = crate::rss_hmm::reduced_obliv_new::HmmReduced::fwbw(
-            //&filtered_blocks,
-            //params_w.ref_panel.n_sites,
-            //k,
-            //params_w.ref_panel.n_haps,
-            //genotype_graph_w.graph.view(),
-            //self.params.hmm_params.eprob,
-            //&rprobs_w,
-            //Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(false, bool)).view(),
-            //);
-            //let (_, bprobs_new, fprobs_new) = fwbw_out_new;
-
-            //use crate::dynamic_fixed::*;
-
-            //for (a_block, b_block) in bprobs.iter().zip(bprobs_new.iter()).rev() {
-            //Zip::from(a_block.c_prob.outer_iter())
-            //.and(a_block.prob_e.outer_iter())
-            //.and(b_block.c_prob.outer_iter())
-            //.and(b_block.prob_e.outer_iter())
-            //.for_each(|a, a_e, b, b_e| {
-            //assert_eq!(debug_expose_array(a, a_e), debug_expose_array(b, b_e));
-            //});
-            //}
-
-            //for (a_block, b_block) in bprobs.iter().zip(bprobs_new.iter()).rev() {
-            //Zip::from(a_block.cnr_prob.outer_iter())
-            //.and(a_block.prob_e.outer_iter())
-            //.and(b_block.cnr_prob.outer_iter())
-            //.and(b_block.prob_e.outer_iter())
-            //.for_each(|a, a_e, b, b_e| {
-            //assert_eq!(debug_expose_array(a, a_e), debug_expose_array(b, b_e));
-            //});
-            //}
-
-            //for (a_block, b_block) in fprobs.iter().zip(fprobs_new.iter()) {
-            //Zip::from(a_block.c_prob.outer_iter())
-            //.and(a_block.prob_e.outer_iter())
-            //.and(b_block.c_prob.slice(s![..a_block.is_pre.len(), .., ..]).outer_iter())
-            //.and(b_block.prob_e.slice(s![..a_block.is_pre.len(), ..]).outer_iter())
-            //.for_each(|a, a_e, b, b_e| {
-            //assert_eq!(debug_expose_array(a, a_e), debug_expose_array(b, b_e));
-            //});
-            //}
-
-            //for (a_block, b_block) in fprobs.into_iter().zip(fprobs_new.into_iter()) {
-            //Zip::from(a_block.cnr_prob.outer_iter())
-            //.and(a_block.prob_e.outer_iter())
-            //.and(b_block.cnr_prob.slice(s![..a_block.is_pre.len(), .., ..]).outer_iter())
-            //.and(b_block.prob_e.slice(s![..a_block.is_pre.len(), ..]).outer_iter())
-            //.for_each(|a, a_e, b, b_e| {
-            //let a = debug_expose_array(a, a_e);
-            //let b = debug_expose_array(b, b_e);
-            //Zip::from(&a)
-            //.and(&b)
-            //.for_each(|a, b| assert_eq!(a, b));
-            //});
-            //}
-
             let mut tprobs_window = tprobs;
             #[cfg(feature = "obliv")]
             let mut tprobs_window_e = tprobs_e;
 
-            if is_first_window {
+            if window_i == 0 {
                 Zip::from(tprobs_window.slice_mut(s![0, .., ..]).rows_mut())
                     .for_each(|mut r| r.assign(&first_tprobs));
 
@@ -683,6 +541,102 @@ impl<'a> Mcmc<'a> {
                 Zip::from(tprobs_window_e.slice_mut(s![0, .., ..]).rows_mut())
                     .for_each(|mut r| r.assign(&first_tprobs_e));
             }
+
+            {
+                let t = Instant::now();
+                let (max_k_neighbors, filter, n_full_states) = neighbors_to_filter(&neighbors_w);
+                ks.push(n_full_states.expose() as f64);
+                let mut unfolded = Array2::from_elem(
+                    (end_w - start_w, max_k_neighbors.len()),
+                    Genotype::protect(0),
+                );
+
+                let mut start_slice = 0;
+                for block in &params_w.ref_panel.blocks {
+                    unfold_block(
+                        block,
+                        &max_k_neighbors,
+                        unfolded.slice_mut(s![start_slice..start_slice + block.n_sites(), ..]),
+                    );
+                    start_slice += block.n_sites();
+                }
+                FILTER.with(|v| {
+                    let mut v = v.borrow_mut();
+                    *v += t.elapsed();
+                });
+
+                //for (h, u) in params_w.ref_panel.iter().zip(unfolded.rows().into_iter()).skip(1) {
+                //assert_eq!(
+                //max_k_neighbors
+                //.iter()
+                //.map(|&v| h[v.expose() as usize])
+                //.collect::<Vec<_>>(),
+                //u.map(|v| v.expose()).as_slice().unwrap()
+                //);
+                //}
+
+                let t = Instant::now();
+                let mut hmm = crate::hmm::Hmm::new();
+
+                //{
+                //let set = max_k_neighbors
+                //.iter()
+                //.zip(filter.iter())
+                //.filter_map(|(v, b)| if b.expose() { Some(v.expose()) } else { None })
+                //.collect::<Vec<_>>();
+                //println!("neighbors full: {:?}", set);
+                //assert_eq!(set.len(), k.expose() as usize);
+                //}
+
+                let filter = Array1::from_vec(filter);
+                //let tprobs_window = hmm.forward_backward(
+                let tprobs_window_full = hmm.forward_backward(
+                    unfolded.view(),
+                    filter.view(),
+                    n_full_states,
+                    genotype_graph_w.graph.view(),
+                    &self.params.hmm_params,
+                    &rprobs_w,
+                    Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
+                    start_w == 0,
+                );
+                let tprobs_window_e_full = hmm.tprobs_e;
+                //let tprobs_window_e = hmm.tprobs_e;
+                FULLFWBW.with(|v| {
+                    let mut v = v.borrow_mut();
+                    *v += t.elapsed();
+                });
+
+                use crate::dynamic_fixed::*;
+                Zip::indexed(tprobs_window.outer_iter())
+                    .and(tprobs_window_e.outer_iter())
+                    .and(tprobs_window_full.outer_iter())
+                    .and(tprobs_window_e_full.outer_iter())
+                    .and(&genotype_graph_w.graph)
+                    .for_each(|i, a, a_e, b, b_e, g| {
+                        if (i == 0 && window_i == 0) || g.is_segment_marker().expose() {
+                            //println!("{i}");
+                            let a_conv = debug_expose_array_ext(a, a_e);
+                            let a_conv = &a_conv / a_conv.sum();
+                            let b_conv = debug_expose_array_ext(b, b_e);
+                            let b_conv = &b_conv / b_conv.sum();
+                            if !a_conv.relative_eq(&b_conv, f64::EPSILON, 0.5) {
+                                println!("{i}:");
+                                println!("{:#?}", a_conv);
+                                println!("{:#?}", b_conv);
+                                println!();
+                                println!("{:#?}", debug_expose_s(a));
+                                println!("{:#?}", debug_expose_s(b));
+                                println!();
+                                println!("{:#?}", a_e.map(|v| v.expose()));
+                                println!("{:#?}", b_e.map(|v| v.expose()));
+
+                                panic!();
+                            }
+                        }
+                    });
+            }
+            //panic!("end window");
 
             #[cfg(feature = "obliv")]
             let tprobs_window_src = tprobs_window.view();
@@ -804,7 +758,7 @@ impl<'a> Mcmc<'a> {
                 tprobs_window.view(),
                 tprobs_window_src_e.view(),
                 genotype_graph_w.graph.view(),
-                is_first_window,
+                window_i == 0,
                 start_write_w - start_w as u64,
                 &mut rng,
             );
@@ -853,7 +807,6 @@ impl<'a> Mcmc<'a> {
                     phased_ind_window[[phased_ind_window.nrows() - 1, 1]],
                 );
             }
-            is_first_window = false;
         }
 
         //{
@@ -915,9 +868,14 @@ impl<'a> Mcmc<'a> {
             Statistics::mean(&max_ks),
             Statistics::std_dev(&max_ks)
         );
+        println!(
+            "Window sizes (#sites): {:.3}+/-{:.3}",
+            Statistics::mean(&window_sizes),
+            Statistics::std_dev(&window_sizes)
+        );
 
         println!(
-            "Window size: {:.2} Mb",
+            "Total window size (Mb): {:.2} Mb",
             sum_window_size as f64 / n_windows as f64 / 1e6
         );
         println!("Elapsed: {} ms", (Instant::now() - now).as_millis());
@@ -1172,7 +1130,7 @@ fn find_nn_bitmap(neighbors: &[Option<Vec<Usize>>], n_haps: usize) -> (Vec<Bool>
 //}
 
 #[cfg(feature = "obliv")]
-fn neighbors_to_filter(neighbors: &[Option<Vec<Usize>>]) -> (Vec<Usize>, Vec<Bool>) {
+fn neighbors_to_filter(neighbors: &[Option<Vec<Usize>>]) -> (Vec<Usize>, Vec<Bool>, Usize) {
     let mut neighbors = neighbors
         .into_iter()
         .filter_map(|v| v.as_ref())
@@ -1180,6 +1138,8 @@ fn neighbors_to_filter(neighbors: &[Option<Vec<Usize>>]) -> (Vec<Usize>, Vec<Boo
         .cloned()
         .collect::<Vec<Usize>>();
     obliv_utils::bitonic_sort::bitonic_sort(&mut neighbors, true);
+
+    let mut n_full_states = Usize::protect(1);
 
     let filter = {
         let mut filter = vec![Bool::protect(false); neighbors.len()];
@@ -1190,10 +1150,29 @@ fn neighbors_to_filter(neighbors: &[Option<Vec<Usize>>]) -> (Vec<Usize>, Vec<Boo
             let cond = prev.tp_not_eq(n);
             *f = cond;
             prev = *n;
+            n_full_states = cond.select(n_full_states + 1, n_full_states);
         }
         filter
     };
-    (neighbors, filter)
+
+    //TODO remove this part
+    neighbors.iter_mut().zip(filter.iter()).for_each(|(n, &b)| {
+        *n |= (!b).as_u64() << 63;
+    });
+    obliv_utils::bitonic_sort::bitonic_sort(&mut neighbors, true);
+    let mut filter = Vec::with_capacity(neighbors.len());
+    let mask = !(1 << 63);
+    for n in &mut neighbors {
+        let b = (*n >> 63).tp_eq(&1);
+        filter.push(!b);
+        *n &= mask;
+    }
+
+    //println!("{:?}", neighbors.iter().map(|v| v.expose()).collect::<Vec<_>>());
+    //println!("{:?}", filter.iter().map(|v| v.expose()).collect::<Vec<_>>());
+    //panic!();
+
+    (neighbors, filter, n_full_states)
 }
 
 #[cfg(feature = "obliv")]
@@ -1212,9 +1191,17 @@ fn unfold_block<'a>(
         obliv_utils::vec::OblivVec::from_iter(block.index_map.iter().map(|&v| TpU16::protect(v)));
 
     let unique_neighbors = neighbors
-        .into_iter()
+        .iter()
         .map(|&v| obliv_index_map.get(v.as_u32()))
         .collect::<Vec<_>>();
+
+    //{
+    //let test = unique_neighbors.iter().map(|v| v.expose()).collect::<Vec<_>>();
+    //let reff = neighbors.iter().map(|&v| block.index_map[v.expose() as usize]).collect::<Vec<_>>();
+    //assert_eq!(test, reff);
+
+    //}
+
     Zip::from(block.haplotypes.rows())
         .and(unfolded.rows_mut())
         .for_each(|h, u| {
@@ -1235,7 +1222,7 @@ fn unfold_haps(
     let haps = haps.as_slice().unwrap();
     for chunk in haps.chunks(8) {
         let mut new_u64 = 0u64;
-        for &i in chunk {
+        for &i in chunk.iter().rev() {
             new_u64 <<= 8;
             new_u64 |= i as u64;
         }
