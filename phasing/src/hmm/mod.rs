@@ -71,58 +71,26 @@ pub fn combine_dips(
         tprobs_dips /= tprobs_dips.sum();
     }
 }
+#[cfg(feature = "obliv")]
+type Backward = (Array3<Real>, Array2<TpI16>);
 
 #[cfg(not(feature = "obliv"))]
-pub struct Hmm {}
+type Backward = Array3<Real>;
 
 #[cfg(feature = "obliv")]
-pub struct Hmm {
-    pub bprobs_e: Array2<TpI16>,
-    cur_fprobs_e: Array1<TpI16>,
-    prev_fprobs_e: Array1<TpI16>,
-    pub tprobs_e: Array3<TpI16>,
-    pub cur_i: usize,
-    is_backward: bool,
-}
+type Tprobs = (Array3<Real>, Array3<TpI16>);
+
+#[cfg(not(feature = "obliv"))]
+type Tprobs = Array3<Real>;
+
+pub struct Hmm {}
 
 impl Hmm {
-    #[cfg(feature = "obliv")]
-    pub fn new() -> Self {
-        Self {
-            bprobs_e: Array2::from_elem((0, 0), TpI16::protect(0)),
-            cur_fprobs_e: Array1::from_elem(P, TpI16::protect(0)),
-            prev_fprobs_e: Array1::from_elem(P, TpI16::protect(0)),
-            tprobs_e: Array3::from_elem((0, 0, 0), TpI16::protect(0)),
-            cur_i: 0,
-            is_backward: true,
-        }
-    }
-    #[cfg(feature = "obliv")]
-    pub fn get_cur_probs_e(&mut self) -> ArrayViewMut1<TpI16> {
-        if self.is_backward {
-            self.bprobs_e.slice_mut(s![self.cur_i, ..])
-        } else {
-            self.cur_fprobs_e.view_mut()
-        }
-    }
-
-    #[cfg(feature = "obliv")]
-    pub fn get_probs_e(&mut self) -> (ArrayViewMut1<TpI16>, ArrayViewMut1<TpI16>) {
-        if self.is_backward {
-            self.bprobs_e
-                .multi_slice_mut((s![self.cur_i, ..], s![self.cur_i + 1, ..]))
-        } else {
-            (self.cur_fprobs_e.view_mut(), self.prev_fprobs_e.view_mut())
-        }
-    }
-
-    #[cfg(not(feature = "obliv"))]
     pub fn new() -> Self {
         Self {}
     }
 
     pub fn forward_backward(
-        &mut self,
         ref_panel: ArrayView2<Genotype>,
         ref_panel_filter: ArrayView1<Bool>,
         n_full_states: Usize,
@@ -131,12 +99,24 @@ impl Hmm {
         rprobs: &RprobsSlice,
         _ignored_sites: ArrayView1<Bool>,
         is_first_window: bool,
-    ) -> Array3<Real> {
+    ) -> Tprobs {
         let m = ref_panel.nrows();
         let k = ref_panel.ncols();
 
         let mut rprobs_iter = rprobs.get_forward(n_full_states);
 
+        #[cfg(feature = "obliv")]
+        let (bprobs, bprobs_e) = Self::backward(
+            ref_panel,
+            ref_panel_filter,
+            n_full_states,
+            genograph,
+            hmm_params,
+            rprobs,
+            _ignored_sites,
+        );
+
+        #[cfg(not(feature = "obliv"))]
         let bprobs = self.backward(
             ref_panel,
             ref_panel_filter,
@@ -147,31 +127,30 @@ impl Hmm {
             _ignored_sites,
         );
 
-        #[cfg(feature = "obliv")]
-        {
-            self.is_backward = false;
-        }
-
         let mut tprobs = Array3::<Real>::zeros((m, P, P));
 
         #[cfg(feature = "obliv")]
-        {
-            self.tprobs_e = Array3::<TpI16>::from_elem((m, P, P), TpI16::protect(0));
-        }
+        let mut tprobs_e = Array3::<TpI16>::from_elem((m, P, P), TpI16::protect(0));
 
         let mut prev_fprobs = Array2::<Real>::zeros((P, k));
         let mut cur_fprobs = Array2::<Real>::zeros((P, k));
+        #[cfg(feature = "obliv")]
+        let mut cur_fprobs_e = Array1::from_elem(P, TpI16::protect(0));
+        #[cfg(feature = "obliv")]
+        let mut prev_fprobs_e = Array1::from_elem(P, TpI16::protect(0));
 
-        self.init(
+        Self::init(
             ref_panel.slice(s![0, ..]),
             ref_panel_filter.view(),
             genograph[0],
             hmm_params,
             prev_fprobs.view_mut(),
+            #[cfg(feature = "obliv")]
+            prev_fprobs_e.view_mut(),
         );
 
         #[cfg(feature = "obliv")]
-        self.prev_fprobs_e.assign(&self.cur_fprobs_e);
+        prev_fprobs_e.assign(&cur_fprobs_e);
 
         #[cfg(feature = "obliv")]
         let mut tprobs_3x = Array3::<Real>::zeros((m.div_ceil(3), P, P));
@@ -180,11 +159,11 @@ impl Hmm {
         #[cfg(feature = "obliv")]
         let mut tprobs_3x_fwd = prev_fprobs.clone();
         #[cfg(feature = "obliv")]
-        let mut tprobs_3x_fwd_e = self.prev_fprobs_e.clone();
+        let mut tprobs_3x_fwd_e = prev_fprobs_e.clone();
         #[cfg(feature = "obliv")]
         let mut tprobs_3x_bwd = bprobs.slice(s![0, .., ..]).to_owned();
         #[cfg(feature = "obliv")]
-        let mut tprobs_3x_bwd_e = self.bprobs_e.row(0).to_owned();
+        let mut tprobs_3x_bwd_e = bprobs_e.row(0).to_owned();
 
         #[cfg(feature = "obliv")]
         {
@@ -193,25 +172,25 @@ impl Hmm {
                 .and(&prev_fprobs)
                 .for_each(|t, &f| *t = cond.select(f, *t));
             Zip::from(&mut tprobs_3x_fwd_e)
-                .and(&self.prev_fprobs_e)
+                .and(&prev_fprobs_e)
                 .for_each(|t, &f| *t = cond.select(f, *t));
             Zip::from(&mut tprobs_3x_bwd)
                 .and(&bprobs.slice(s![0, .., ..]))
                 .for_each(|t, &b| *t = cond.select(b, *t));
             Zip::from(&mut tprobs_3x_bwd_e)
-                .and(&self.bprobs_e.slice(s![0, ..]))
+                .and(&bprobs_e.slice(s![0, ..]))
                 .for_each(|t, &b| *t = cond.select(b, *t));
 
             let tmp = prev_fprobs.to_owned();
-            let tmp_e = self.prev_fprobs_e.to_owned();
-            self.collapse(prev_fprobs.view_mut());
+            let tmp_e = prev_fprobs_e.to_owned();
+            Self::collapse(prev_fprobs.view_mut(), prev_fprobs_e.view_mut());
 
             Zip::from(&tmp)
                 .and(&mut prev_fprobs)
                 .for_each(|t, c| *c = cond.select(*c, *t));
 
             Zip::from(&tmp_e)
-                .and(&mut self.prev_fprobs_e)
+                .and(&mut prev_fprobs_e)
                 .for_each(|t, c| *c = cond.select(*c, *t));
         }
 
@@ -227,40 +206,29 @@ impl Hmm {
 
         for i in 1..m {
             let rprobs = rprobs_iter.next().unwrap();
-            //if i==2 {
-            //println!("full rprob: {:?}", rprobs.expose_into_f32());
-            //}
 
             //#[cfg(not(feature = "obliv"))]
             //if ignored_sites[i] {
             //continue;
             //}
 
-            #[cfg(feature = "obliv")]
-            {
-                self.cur_i = i;
-            }
-            //if i==2 {
-            //println!("full_1 :{:?}", cur_fprobs.map(|v| v.expose_into_f32()));
-            //}
-
-            self.transition(
+            Self::transition(
                 rprobs,
                 ref_panel_filter.view(),
                 prev_fprobs.view(),
+                #[cfg(feature = "obliv")]
+                prev_fprobs_e.view(),
                 cur_fprobs.view_mut(),
+                #[cfg(feature = "obliv")]
+                cur_fprobs_e.view_mut(),
             );
-
-            //if i==2 {
-            //println!("full_2 :{:?}", cur_fprobs.map(|v| v.expose_into_f32()));
-            //}
 
             #[cfg(feature = "obliv")]
             {
                 let cond = genograph[i].is_segment_marker();
 
-                let bprobs_e = self.bprobs_e.slice_mut(s![i, ..]);
-                let fprobs_e = self.cur_fprobs_e.view_mut();
+                let bprobs_e = bprobs_e.slice(s![i, ..]);
+                let fprobs_e = cur_fprobs_e.view_mut();
 
                 Zip::from(&mut tprobs_3x_fwd)
                     .and(&cur_fprobs)
@@ -290,15 +258,15 @@ impl Hmm {
                 };
 
                 let tmp = cur_fprobs.clone();
-                let tmp_e = self.cur_fprobs_e.clone();
-                self.collapse(cur_fprobs.view_mut());
+                let tmp_e = cur_fprobs_e.clone();
+                Self::collapse(cur_fprobs.view_mut(), cur_fprobs_e.view_mut());
 
                 Zip::from(&tmp)
                     .and(&mut cur_fprobs)
                     .for_each(|t, c| *c = cond.select(*c, *t));
 
                 Zip::from(&tmp_e)
-                    .and(&mut self.cur_fprobs_e)
+                    .and(&mut cur_fprobs_e)
                     .for_each(|t, c| *c = cond.select(*c, *t));
             }
 
@@ -312,16 +280,17 @@ impl Hmm {
                 self.collapse(cur_fprobs.view_mut());
             }
 
-            self.emission(
+            Self::emission(
                 ref_panel.slice(s![i, ..]),
                 genograph[i],
                 #[cfg(not(feature = "obliv"))]
                 hmm_params,
                 cur_fprobs.view_mut(),
+                cur_fprobs_e.view_mut(),
             );
 
             #[cfg(feature = "obliv")]
-            renorm_e(self.get_cur_probs_e());
+            renorm_e(cur_fprobs_e.view_mut());
 
             //#[cfg(feature = "obliv")]
             //{
@@ -353,7 +322,7 @@ impl Hmm {
             prev_fprobs.assign(&cur_fprobs);
 
             #[cfg(feature = "obliv")]
-            self.prev_fprobs_e.assign(&self.cur_fprobs_e);
+            prev_fprobs_e.assign(&cur_fprobs_e);
         }
 
         #[cfg(feature = "obliv")]
@@ -361,7 +330,7 @@ impl Hmm {
             tprobs
                 .slice_mut(s![i, .., ..])
                 .assign(&tprobs_3x.slice(s![i / 3, .., ..]));
-            self.tprobs_e
+            tprobs_e
                 .slice_mut(s![i, .., ..])
                 .assign(&tprobs_3x_e.slice(s![i / 3, .., ..]));
         }
@@ -369,17 +338,20 @@ impl Hmm {
         if is_first_window {
             Self::first_combine(
                 bprobs.slice(s![0, .., ..]),
-                self.bprobs_e.slice(s![0, ..]),
+                bprobs_e.slice(s![0, ..]),
                 tprobs.slice_mut(s![0, .., ..]),
-                self.tprobs_e.slice_mut(s![0, .., ..]),
+                tprobs_e.slice_mut(s![0, .., ..]),
             );
         }
 
-        tprobs
+        #[cfg(feature = "obliv")]
+        return (tprobs, tprobs_e);
+
+        #[cfg(not(feature = "obliv"))]
+        return tprobs;
     }
 
     fn backward(
-        &mut self,
         ref_panel: ArrayView2<Genotype>,
         ref_panel_filter: ArrayView1<Bool>,
         n_full_states: Usize,
@@ -387,7 +359,7 @@ impl Hmm {
         hmm_params: &HmmParams,
         rprobs: &RprobsSlice,
         _ignored_sites: ArrayView1<Bool>,
-    ) -> Array3<Real> {
+    ) -> Backward {
         let m = ref_panel.nrows();
         let n = ref_panel.ncols();
 
@@ -395,23 +367,24 @@ impl Hmm {
         let mut bprobs = Array3::<Real>::zeros((m, P, n));
 
         #[cfg(feature = "obliv")]
-        {
-            self.bprobs_e = Array2::<TpI16>::from_elem((m, P), TpI16::protect(0));
-            self.cur_i = m - 1;
-        }
+        let mut bprobs_e = Array2::<TpI16>::from_elem((m, P), TpI16::protect(0));
 
-        self.init(
+        Self::init(
             ref_panel.row(m - 1),
             ref_panel_filter.view(),
             genograph[m - 1],
             hmm_params,
             bprobs.slice_mut(s![m - 1, .., ..]),
+            bprobs_e.slice_mut(s![m - 1, ..]),
         );
 
         for i in (0..m - 1).rev() {
             let rprobs = rprobs_iter.next().unwrap();
             let (mut cur_bprob, prev_bprob) =
                 bprobs.multi_slice_mut((s![i, .., ..], s![i + 1, .., ..]));
+            #[cfg(feature = "obliv")]
+            let (mut cur_bprob_e, prev_bprob_e) =
+                bprobs_e.multi_slice_mut((s![i, ..], s![i + 1, ..]));
 
             //#[cfg(not(feature = "obliv"))]
             //if ignored_sites[i] && !genograph[i + 1].is_segment_marker() {
@@ -419,30 +392,29 @@ impl Hmm {
             //continue;
             //}
 
-            #[cfg(feature = "obliv")]
-            {
-                self.cur_i = i;
-            }
-
-            self.transition(
+            Self::transition(
                 rprobs,
                 ref_panel_filter.view(),
                 prev_bprob.view(),
+                #[cfg(feature = "obliv")]
+                prev_bprob_e.view(),
                 cur_bprob.view_mut(),
+                #[cfg(feature = "obliv")]
+                cur_bprob_e.view_mut(),
             );
 
             #[cfg(feature = "obliv")]
             {
                 let cond = genograph[i + 1].is_segment_marker();
                 let tmp = cur_bprob.to_owned();
-                let tmp_e = self.get_cur_probs_e().to_owned();
-                self.collapse(cur_bprob.view_mut());
+                let tmp_e = cur_bprob_e.to_owned();
+                Self::collapse(cur_bprob.view_mut(), cur_bprob_e.view_mut());
                 Zip::from(&tmp)
                     .and(&mut cur_bprob)
                     .for_each(|t, c| *c = cond.select(*c, *t));
 
                 Zip::from(&tmp_e)
-                    .and(&mut self.get_cur_probs_e())
+                    .and(&mut cur_bprob_e)
                     .for_each(|t, c| *c = cond.select(*c, *t));
             }
 
@@ -451,16 +423,18 @@ impl Hmm {
                 self.collapse(cur_bprob.view_mut());
             }
 
-            self.emission(
+            Self::emission(
                 ref_panel.row(i),
                 genograph[i],
                 #[cfg(not(feature = "obliv"))]
                 hmm_params,
                 cur_bprob.view_mut(),
+                #[cfg(feature = "obliv")]
+                cur_bprob_e.view_mut(),
             );
 
             #[cfg(feature = "obliv")]
-            renorm_e(self.get_cur_probs_e());
+            renorm_e(cur_bprob_e);
 
             //#[cfg(feature = "obliv")]
             //{
@@ -505,16 +479,20 @@ impl Hmm {
         //println!("full \n{:#?}", bprobs_e.map(|v| v.expose()));
         //}
 
-        bprobs
+        #[cfg(feature = "obliv")]
+        return (bprobs, bprobs_e);
+
+        #[cfg(not(feature = "obliv"))]
+        return bprobs;
     }
 
     fn init(
-        &mut self,
         cond_haps: ArrayView1<Genotype>,
         filter: ArrayView1<Bool>,
         graph_col: G,
         hmm_params: &HmmParams,
         mut probs: ArrayViewMut2<Real>,
+        #[cfg(feature = "obliv")] probs_e: ArrayViewMut1<TpI16>,
     ) {
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row)
@@ -544,15 +522,15 @@ impl Hmm {
         });
 
         #[cfg(feature = "obliv")]
-        renorm_scale(probs, self.get_cur_probs_e());
+        renorm_scale(probs, probs_e);
     }
 
     fn emission(
-        &mut self,
         cond_haps: ArrayView1<Genotype>,
         graph_col: G,
         #[cfg(not(feature = "obliv"))] hmm_params: &HmmParams,
         mut probs: ArrayViewMut2<Real>,
+        #[cfg(feature = "obliv")] probs_e: ArrayViewMut1<TpI16>,
     ) {
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row).and(cond_haps).for_each(|p, &z| {
@@ -571,19 +549,17 @@ impl Hmm {
         });
 
         #[cfg(feature = "obliv")]
-        renorm_scale(probs, self.get_cur_probs_e());
+        renorm_scale(probs, probs_e);
     }
 
     fn transition(
-        &mut self,
         rprob: Real,
         filter: ArrayView1<Bool>,
         prev_probs: ArrayView2<Real>,
+        #[cfg(feature = "obliv")] prev_probs_e: ArrayView1<TpI16>,
         mut cur_probs: ArrayViewMut2<Real>,
+        #[cfg(feature = "obliv")] mut cur_probs_e: ArrayViewMut1<TpI16>,
     ) {
-        #[cfg(feature = "obliv")]
-        let (mut cur_probs_e, prev_probs_e) = self.get_probs_e();
-
         let all_sum_h = Zip::from(prev_probs.rows()).map_collect(|r| r.sum());
 
         #[cfg(feature = "obliv")]
@@ -613,9 +589,12 @@ impl Hmm {
         }
     }
 
-    fn collapse(&mut self, mut cur_probs: ArrayViewMut2<Real>) {
+    fn collapse(
+        mut cur_probs: ArrayViewMut2<Real>,
+        #[cfg(feature = "obliv")] mut cur_probs_e: ArrayViewMut1<TpI16>,
+    ) {
         #[cfg(feature = "obliv")]
-        let (sum_k, sum_k_e) = sum_scale_by_column(cur_probs.view(), self.get_cur_probs_e().view());
+        let (sum_k, sum_k_e) = sum_scale_by_column(cur_probs.view(), cur_probs_e.view());
 
         #[cfg(not(feature = "obliv"))]
         let mut sum_k = Zip::from(cur_probs.columns()).map_collect(|c| c.sum());
@@ -631,7 +610,7 @@ impl Hmm {
         }
 
         #[cfg(feature = "obliv")]
-        self.get_cur_probs_e().fill(sum_k_e);
+        cur_probs_e.fill(sum_k_e);
 
         Zip::from(cur_probs.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_k));
     }

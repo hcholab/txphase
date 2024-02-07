@@ -576,7 +576,6 @@ impl<'a> Mcmc<'a> {
                 //}
 
                 let t = Instant::now();
-                let mut hmm = crate::hmm::Hmm::new();
 
                 //{
                 //let set = max_k_neighbors
@@ -589,8 +588,7 @@ impl<'a> Mcmc<'a> {
                 //}
 
                 let filter = Array1::from_vec(filter);
-                //let tprobs_window = hmm.forward_backward(
-                let tprobs_window_full = hmm.forward_backward(
+                let (tprobs_window_full, tprobs_window_e_full) = crate::hmm::Hmm::forward_backward(
                     unfolded.view(),
                     filter.view(),
                     n_full_states,
@@ -600,8 +598,6 @@ impl<'a> Mcmc<'a> {
                     Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
                     start_w == 0,
                 );
-                let tprobs_window_e_full = hmm.tprobs_e;
-                //let tprobs_window_e = hmm.tprobs_e;
                 FULLFWBW.with(|v| {
                     let mut v = v.borrow_mut();
                     *v += t.elapsed();
