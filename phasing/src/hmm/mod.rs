@@ -47,19 +47,19 @@ pub fn combine_dips(
     #[cfg(feature = "obliv")]
     {
         renorm_equalize_scale_all(tprobs_dips.view_mut(), tprobs_dips_e_ext.view_mut());
-        //let mut tprobs_dips_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
-        //renorm_equalize_scale(
-        //tprobs_dips.view_mut(),
-        //tprobs_dips_e_ext.view_mut(),
-        //tprobs_dips_e.view_mut(),
-        //);
+        let mut tprobs_dips_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
+        renorm_equalize_scale(
+            tprobs_dips.view_mut(),
+            tprobs_dips_e_ext.view_mut(),
+            tprobs_dips_e.view_mut(),
+        );
 
-        //let (sum, sum_e) = sum_scale(tprobs_dips.view(), tprobs_dips_e.view());
-        //tprobs_dips *= Real::protect_i64(1) / sum;
-        //tprobs_dips_e.map_mut(|v| *v -= sum_e);
-        //Zip::from(tprobs_dips.rows_mut())
-        //.and(&mut tprobs_dips_e)
-        //.for_each(|t, e| match_scale_row(TpI16::protect(0), t, e));
+        let (sum, sum_e) = sum_scale(tprobs_dips.view(), tprobs_dips_e.view());
+        tprobs_dips *= Real::protect_i64(1) / sum;
+        tprobs_dips_e.map_mut(|v| *v -= sum_e);
+        Zip::from(tprobs_dips.rows_mut())
+            .and(&mut tprobs_dips_e)
+            .for_each(|t, e| match_scale_row(TpI16::protect(0), t, e));
 
         ndarray::Zip::from(&mut _tprobs_dips)
             .and(&tprobs_dips)
@@ -304,9 +304,9 @@ impl Hmm {
             //.for_each(|c, p| *p = cond.select(*c, *p));
             //}
 
-            //if i == 2 {
+            //if i == 3 {
             //let fprobs = cur_fprobs.slice(s![.., ..n_full_states.expose() as usize]);
-            //let fprobs_e = self.cur_fprobs_e.view();
+            //let fprobs_e = cur_fprobs_e.view();
 
             //let exposed = debug_expose_array(fprobs, fprobs_e);
 
@@ -316,8 +316,6 @@ impl Hmm {
             //println!("full \n{:#?}", fprobs.row(0).map(|v| v.expose_into_f32()));
             //println!("full \n{:#?}", fprobs_e.map(|v| v.expose()));
             //}
-
-            //#[cfg(not(feature = "obliv"))]
 
             prev_fprobs.assign(&cur_fprobs);
 
@@ -465,10 +463,10 @@ impl Hmm {
         }
 
         //{
-        //let i = 15;
+        //let i = 3;
 
         //let bprobs = bprobs.slice(s![i, .., ..n_full_states.expose() as usize]);
-        //let bprobs_e = self.bprobs_e.slice(s![i, ..]);
+        //let bprobs_e = bprobs_e.slice(s![i, ..]);
 
         //let exposed = debug_expose_array(bprobs, bprobs_e);
 

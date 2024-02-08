@@ -226,6 +226,48 @@ impl HmmReduced {
 
                 #[cfg(feature = "obliv")]
                 next_c_prob_e.assign(&cur_c_prob_e);
+
+                let do_collapse = genotype_graph[0].is_segment_marker();
+
+                #[cfg(feature = "obliv")]
+                let mut next_cnr_prob_e = next_c_prob_e.to_owned();
+
+                #[cfg(feature = "obliv")]
+                Self::collapse(
+                    do_collapse,
+                    is_first_segment,
+                    next_c_prob.view_mut(),
+                    next_c_prob_e.view_mut(),
+                    next_cnr_prob.view_mut(),
+                    next_cnr_prob_e.view_mut(),
+                    cur_block_prob
+                        .save_alpha_post_cnr
+                        .as_mut()
+                        .unwrap()
+                        .view_mut(),
+                );
+
+                #[cfg(feature = "obliv")]
+                Zip::from(&next_c_prob_e)
+                    .and(next_cnr_prob.rows_mut())
+                    .and(&mut next_cnr_prob_e)
+                    .for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
+
+                #[cfg(not(feature = "obliv"))]
+                if do_collapse {
+                    Self::collapse(
+                        is_first_segment,
+                        next_c_prob.view_mut(),
+                        next_cnr_prob.view_mut(),
+                        cur_block_prob
+                            .save_alpha_post_cnr
+                            .as_mut()
+                            .unwrap()
+                            .view_mut(),
+                    );
+                }
+
+                is_first_segment = !do_collapse;
             } else {
                 let mut prev_block_prob = prev_block_prob.unwrap();
                 let prev_block = &blocks[block_i - 1];
@@ -276,9 +318,6 @@ impl HmmReduced {
                 let mut cur_cnr_prob_e = cur_c_prob_e.to_owned();
 
                 let rprob = rprobs_iter.next().unwrap();
-                //if site_i==2 {
-                //println!("full rprob: {:?}", rprob.expose_into_f32());
-                //}
 
                 cur_block_prob.is_pre[block_site_i - 1] = is_first_segment;
 
@@ -341,61 +380,56 @@ impl HmmReduced {
             );
 
             //if block_i == 0 {
-            ////let block = blocks.first().unwrap();
+                ////let block = blocks.first().unwrap();
 
-            //let (expanded, expanded_e) = cur_block_prob.expand(
-            //block.index_map.view(),
-            //block.full_filter.view(),
-            //block.inv_weights.view(),
-            //);
+                //let (expanded, expanded_e) = cur_block_prob.expand(
+                    //block.index_map.view(),
+                    //block.full_filter.view(),
+                    //block.inv_weights.view(),
+                //);
 
-            //let mut filtered_expanded = Array3::<Real>::from_elem(
-            //(
-            //expanded.dim().0,
-            //n_full_states.expose() as usize,
-            //expanded.dim().2,
-            //),
-            //Real::ZERO,
-            //);
+                //let mut filtered_expanded = Array3::<Real>::from_elem(
+                    //(
+                        //expanded.dim().0,
+                        //n_full_states.expose() as usize,
+                        //expanded.dim().2,
+                    //),
+                    //Real::ZERO,
+                //);
 
-            //Zip::from(expanded.outer_iter())
-            //.and(filtered_expanded.outer_iter_mut())
-            //.for_each(|expanded, mut filtered_expanded| {
-            //let mut j = 0;
-            //Zip::from(expanded.rows())
-            //.and(&block.full_filter)
-            //.for_each(|r, b| {
-            //if b.expose() {
-            //filtered_expanded.row_mut(j).assign(&r);
-            //j += 1;
-            //}
-            //});
-            //});
+                //Zip::from(expanded.outer_iter())
+                    //.and(filtered_expanded.outer_iter_mut())
+                    //.for_each(|expanded, mut filtered_expanded| {
+                        //let mut j = 0;
+                        //Zip::from(expanded.rows())
+                            //.and(&block.full_filter)
+                            //.for_each(|r, b| {
+                                //if b.expose() {
+                                    //filtered_expanded.row_mut(j).assign(&r);
+                                    //j += 1;
+                                //}
+                            //});
+                    //});
 
-            //let i = 2;
-            //let mut filtered_expanded =
-            //filtered_expanded.slice(s![i, .., ..]);
-            //filtered_expanded.swap_axes(0, 1);
-            //let filtered_expanded_e = expanded_e.slice(s![i, ..]);
-            //let filtered_expanded_exposed =
-            //debug_expose_array(filtered_expanded, filtered_expanded_e);
+                //let i = 3;
+                //let mut filtered_expanded = filtered_expanded.slice(s![i, .., ..]);
+                //filtered_expanded.swap_axes(0, 1);
+                //let filtered_expanded_e = expanded_e.slice(s![i, ..]);
+                //let filtered_expanded_exposed =
+                    //debug_expose_array(filtered_expanded, filtered_expanded_e);
 
-            //let filtered_expanded_exposed =
-            //&filtered_expanded_exposed / filtered_expanded_exposed.sum();
+                //let filtered_expanded_exposed =
+                    //&filtered_expanded_exposed / filtered_expanded_exposed.sum();
 
-            //println!("rss");
-            //println!("{:#?}", filtered_expanded_exposed.row(0));
-            //println!("rss");
-            //println!(
-            //"{:#?}",
-            //filtered_expanded.row(0).map(|v| v.expose_into_f32())
-            //);
-            //println!("rss");
-            //println!(
-            //"{:#?}",
-            //filtered_expanded_e.map(|v| v.expose())
-            //);
-
+                //println!("rss");
+                //println!("{:#?}", filtered_expanded_exposed.row(0));
+                //println!("rss");
+                //println!(
+                    //"{:#?}",
+                    //filtered_expanded.row(0).map(|v| v.expose_into_f32())
+                //);
+                //println!("rss");
+                //println!("{:#?}", filtered_expanded_e.map(|v| v.expose()));
             //}
 
             Self::combine_block(
@@ -578,12 +612,10 @@ impl HmmReduced {
                 cur_block_prob.is_pre[block_site_i] = is_first_segment;
 
                 #[cfg(feature = "obliv")]
-                {
-                    Zip::from(&cur_c_prob_e)
-                        .and(cur_cnr_prob.rows_mut())
-                        .and(&mut cur_cnr_prob_e)
-                        .for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
-                }
+                Zip::from(&cur_c_prob_e)
+                    .and(cur_cnr_prob.rows_mut())
+                    .and(&mut cur_cnr_prob_e)
+                    .for_each(|&c_e, cnr, cnr_e| match_scale_row(c_e, cnr, cnr_e));
 
                 if site_i > 0 {
                     site_i -= 1;
@@ -636,9 +668,8 @@ impl HmmReduced {
         //});
         //});
 
-        //let i = 15;
-        //let mut filtered_expanded =
-        //filtered_expanded.slice(s![i, .., ..]);
+        //let i = 3;
+        //let mut filtered_expanded = filtered_expanded.slice(s![i, .., ..]);
         //filtered_expanded.swap_axes(0, 1);
         //let filtered_expanded_e = expanded_e.slice(s![i, ..]);
         //let filtered_expanded_exposed =
@@ -655,11 +686,7 @@ impl HmmReduced {
         //filtered_expanded.row(0).map(|v| v.expose_into_f32())
         //);
         //println!("rss");
-        //println!(
-        //"{:#?}",
-        //filtered_expanded_e.map(|v| v.expose())
-        //);
-
+        //println!("{:#?}", filtered_expanded_e.map(|v| v.expose()));
         //}
 
         all_prob_blocks

@@ -565,27 +565,8 @@ impl<'a> Mcmc<'a> {
                     *v += t.elapsed();
                 });
 
-                //for (h, u) in params_w.ref_panel.iter().zip(unfolded.rows().into_iter()).skip(1) {
-                //assert_eq!(
-                //max_k_neighbors
-                //.iter()
-                //.map(|&v| h[v.expose() as usize])
-                //.collect::<Vec<_>>(),
-                //u.map(|v| v.expose()).as_slice().unwrap()
-                //);
-                //}
 
                 let t = Instant::now();
-
-                //{
-                //let set = max_k_neighbors
-                //.iter()
-                //.zip(filter.iter())
-                //.filter_map(|(v, b)| if b.expose() { Some(v.expose()) } else { None })
-                //.collect::<Vec<_>>();
-                //println!("neighbors full: {:?}", set);
-                //assert_eq!(set.len(), k.expose() as usize);
-                //}
 
                 let filter = Array1::from_vec(filter);
                 let (tprobs_window_full, tprobs_window_e_full) = crate::hmm::Hmm::forward_backward(
@@ -617,7 +598,7 @@ impl<'a> Mcmc<'a> {
                             let b_conv = debug_expose_array_ext(b, b_e);
                             let b_conv = &b_conv / b_conv.sum();
                             if !a_conv.relative_eq(&b_conv, f64::EPSILON, 0.5) {
-                                println!("{i}:");
+                                println!("window {window_i}, site {i}:");
                                 println!("{:#?}", a_conv);
                                 println!("{:#?}", b_conv);
                                 println!();
@@ -632,7 +613,6 @@ impl<'a> Mcmc<'a> {
                         }
                     });
             }
-            //panic!("end window");
 
             #[cfg(feature = "obliv")]
             let tprobs_window_src = tprobs_window.view();
