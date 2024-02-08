@@ -16,8 +16,9 @@ use std::time::{Duration, Instant};
 use std::cell::RefCell;
 thread_local! {
     pub static FILTER: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static FULLFWBW: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static REDFWBW: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static FULLFWBW: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static REDFWBW: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static HMM: RefCell<Duration> = RefCell::new(Duration::ZERO);
 }
 
 #[cfg(feature = "obliv")]
@@ -101,115 +102,104 @@ impl<'a> Mcmc<'a> {
         for iter in iterations_iternal {
             mcmc.iteration(iter, use_rss, &mut rng, id);
 
-            println!(
-                "Emission: {:?} ms",
-                crate::rss_hmm::reduced_obliv::EMISS
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
+            //println!(
+            //"Emission: {:?} ms",
+            //crate::rss_hmm::reduced_obliv::EMISS
+            //.with(|v| {
+            //let out = *v.borrow();
+            //*v.borrow_mut() = std::time::Duration::ZERO;
+            //out
+            //})
+            //.as_millis()
+            //);
 
-            println!(
-                "Transition: {:?} ms",
-                crate::rss_hmm::reduced_obliv::TRANS
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
+            //println!(
+            //"Transition: {:?} ms",
+            //crate::rss_hmm::reduced_obliv::TRANS
+            //.with(|v| {
+            //let out = *v.borrow();
+            //*v.borrow_mut() = std::time::Duration::ZERO;
+            //out
+            //})
+            //.as_millis()
+            //);
 
-            println!(
-                "Collapse: {:?} ms",
-                crate::rss_hmm::reduced_obliv::COLL
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
+            //println!(
+            //"Collapse: {:?} ms",
+            //crate::rss_hmm::reduced_obliv::COLL
+            //.with(|v| {
+            //let out = *v.borrow();
+            //*v.borrow_mut() = std::time::Duration::ZERO;
+            //out
+            //})
+            //.as_millis()
+            //);
 
-            println!(
-                "Combine 1: {:?} ms",
-                crate::rss_hmm::reduced_obliv::COMB1
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
+            //println!(
+            //"Combine 1: {:?} ms",
+            //crate::rss_hmm::reduced_obliv::COMB1
+            //.with(|v| {
+            //let out = *v.borrow();
+            //*v.borrow_mut() = std::time::Duration::ZERO;
+            //out
+            //})
+            //.as_millis()
+            //);
 
-            println!(
-                "Combine 2: {:?} ms",
-                crate::rss_hmm::reduced_obliv::COMB2
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
+            //println!(
+            //"Combine 2: {:?} ms",
+            //crate::rss_hmm::reduced_obliv::COMB2
+            //.with(|v| {
+            //let out = *v.borrow();
+            //*v.borrow_mut() = std::time::Duration::ZERO;
+            //out
+            //})
+            //.as_millis()
+            //);
 
-            println!(
-                "Expand: {:?} ms",
-                crate::rss_hmm::reduced_obliv::EXPAND
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
+            //println!(
+            //"Expand: {:?} ms",
+            //crate::rss_hmm::reduced_obliv::EXPAND
+            //.with(|v| {
+            //let out = *v.borrow();
+            //*v.borrow_mut() = std::time::Duration::ZERO;
+            //out
+            //})
+            //.as_millis()
+            //);
 
-            println!(
-                "Block Transition: {:?} ms",
-                crate::rss_hmm::reduced_obliv::BLOCK
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
+            //println!(
+            //"Block Transition: {:?} ms",
+            //crate::rss_hmm::reduced_obliv::BLOCK
+            //.with(|v| {
+            //let out = *v.borrow();
+            //*v.borrow_mut() = std::time::Duration::ZERO;
+            //out
+            //})
+            //.as_millis()
+            //);
 
-            println!(
-                "RSS HMM: {:?} ms",
-                REDFWBW
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
-            println!();
-            println!(
-                "Filter Ref Panel: {:?} ms",
-                FILTER
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
+            //println!(
+            //"Filter Ref Panel: {:?} ms",
+            //FILTER
+            //.with(|v| {
+            //let out = *v.borrow();
+            //*v.borrow_mut() = std::time::Duration::ZERO;
+            //out
+            //})
+            //.as_millis()
+            //);
 
-            println!(
-                "Full HMM: {:?} ms",
-                FULLFWBW
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
+            //println!(
+            //"Full HMM: {:?} ms",
+            //FULLFWBW
+            //.with(|v| {
+            //let out = *v.borrow();
+            //*v.borrow_mut() = std::time::Duration::ZERO;
+            //out
+            //})
+            //.as_millis()
+            //);
             println!();
         }
 
@@ -502,9 +492,9 @@ impl<'a> Mcmc<'a> {
             //ks.push(k as f64);
             //}
 
+            let t = Instant::now();
             let (tprobs_window, tprobs_window_e) = if use_rss {
                 let (full_filter, k) = find_nn_bitmap(neighbors_w, params_w.ref_panel.n_haps);
-                let t = Instant::now();
                 let filtered_blocks = params_w
                     .ref_panel
                     .blocks
@@ -526,10 +516,6 @@ impl<'a> Mcmc<'a> {
                     &rprobs_w,
                     Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(false, bool)).view(),
                 );
-                REDFWBW.with(|v| {
-                    let mut v = v.borrow_mut();
-                    *v += t.elapsed();
-                });
 
                 #[cfg(feature = "obliv")]
                 let (first_tprobs, first_tprobs_e, tprobs, tprobs_e) = fwbw_out;
@@ -552,7 +538,7 @@ impl<'a> Mcmc<'a> {
 
                 (tprobs_window, tprobs_window_e)
             } else {
-                let t = Instant::now();
+                //let t = Instant::now();
                 let (max_k_neighbors, filter, n_full_states) = neighbors_to_filter(&neighbors_w);
                 ks.push(n_full_states.expose() as f64);
                 let mut unfolded = Array2::from_elem(
@@ -587,10 +573,10 @@ impl<'a> Mcmc<'a> {
                     Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
                     start_w == 0,
                 );
-                FULLFWBW.with(|v| {
-                    let mut v = v.borrow_mut();
-                    *v += t.elapsed();
-                });
+                //FULLFWBW.with(|v| {
+                //let mut v = v.borrow_mut();
+                //*v += t.elapsed();
+                //});
                 (tprobs_window, tprobs_window_e)
 
                 //use crate::dynamic_fixed::*;
@@ -792,6 +778,10 @@ impl<'a> Mcmc<'a> {
                     phased_ind_window[[phased_ind_window.nrows() - 1, 1]],
                 );
             }
+            HMM.with(|v| {
+                let mut v = v.borrow_mut();
+                *v += t.elapsed();
+            });
         }
 
         //{
@@ -863,8 +853,17 @@ impl<'a> Mcmc<'a> {
             "Total window size (Mb): {:.2} Mb",
             sum_window_size as f64 / n_windows as f64 / 1e6
         );
+        println!(
+            "HMM+Filter: {:?} ms",
+            HMM.with(|v| {
+                let out = *v.borrow();
+                *v.borrow_mut() = std::time::Duration::ZERO;
+                out
+            })
+            .as_millis()
+        );
         println!("Elapsed: {} ms", (Instant::now() - now).as_millis());
-        println!("",);
+        println!();
     }
 
     fn windows(&self, mut rng: impl Rng) -> Vec<((usize, usize), (Usize, Usize))> {
