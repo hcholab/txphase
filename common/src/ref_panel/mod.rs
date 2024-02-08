@@ -3,7 +3,8 @@ pub use block::*;
 
 use ndarray::Array1;
 
-const MAX_UNIQUE: usize = 800;
+////const MAX_UNIQUE: usize = 100000;
+//const MAX_UNIQUE: usize = 800;
 const MIN_UNIQUE: usize = 300;
 
 pub fn m3vcf_scan(
@@ -14,6 +15,9 @@ pub fn m3vcf_scan(
     assert_eq!(sites_bitmask.len(), meta.n_markers);
     let mut afreqs = Vec::new();
     let mut pos = 0;
+
+    let min_unique = meta.n_haps / 200;
+    let max_unique = meta.n_haps / 2;
 
     let mut blocks = Vec::new();
     //let mut transposed_blocks = Vec::new();
@@ -39,11 +43,11 @@ pub fn m3vcf_scan(
         if let Some(block) = m3vcf_block_scan(m3vcf_block, sites_bitmask_block, i == 0, &mut afreqs)
         {
             if let Some(cur_block_) = cur_block.take() {
-                if cur_block_.n_unique() < MIN_UNIQUE {
+                if cur_block_.n_unique() < MIN_UNIQUE || cur_block_.n_unique() < min_unique {
                     let merge_block = merge_blocks(&cur_block_, &block);
                     cur_block = Some(merge_block);
-                } else if cur_block_.n_unique() > MAX_UNIQUE {
-                    blocks.extend(break_block(&cur_block_, MAX_UNIQUE).into_iter());
+                } else if cur_block_.n_unique() > max_unique {
+                    blocks.extend(break_block(&cur_block_, max_unique).into_iter());
                     cur_block = Some(block);
                 } else {
                     let cur_block_ = make_unique_hap_block(&cur_block_);
@@ -60,8 +64,8 @@ pub fn m3vcf_scan(
     }
 
     if let Some(cur_block) = cur_block.take() {
-        if cur_block.n_unique() > MAX_UNIQUE {
-            blocks.extend(break_block(&cur_block, MAX_UNIQUE).into_iter());
+        if cur_block.n_unique() > max_unique {
+            blocks.extend(break_block(&cur_block, max_unique).into_iter());
         } else {
             let new_block = make_unique_hap_block(&cur_block);
             blocks.push(new_block);
