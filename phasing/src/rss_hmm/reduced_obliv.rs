@@ -380,56 +380,56 @@ impl HmmReduced {
             );
 
             //if block_i == 0 {
-                ////let block = blocks.first().unwrap();
+            ////let block = blocks.first().unwrap();
 
-                //let (expanded, expanded_e) = cur_block_prob.expand(
-                    //block.index_map.view(),
-                    //block.full_filter.view(),
-                    //block.inv_weights.view(),
-                //);
+            //let (expanded, expanded_e) = cur_block_prob.expand(
+            //block.index_map.view(),
+            //block.full_filter.view(),
+            //block.inv_weights.view(),
+            //);
 
-                //let mut filtered_expanded = Array3::<Real>::from_elem(
-                    //(
-                        //expanded.dim().0,
-                        //n_full_states.expose() as usize,
-                        //expanded.dim().2,
-                    //),
-                    //Real::ZERO,
-                //);
+            //let mut filtered_expanded = Array3::<Real>::from_elem(
+            //(
+            //expanded.dim().0,
+            //n_full_states.expose() as usize,
+            //expanded.dim().2,
+            //),
+            //Real::ZERO,
+            //);
 
-                //Zip::from(expanded.outer_iter())
-                    //.and(filtered_expanded.outer_iter_mut())
-                    //.for_each(|expanded, mut filtered_expanded| {
-                        //let mut j = 0;
-                        //Zip::from(expanded.rows())
-                            //.and(&block.full_filter)
-                            //.for_each(|r, b| {
-                                //if b.expose() {
-                                    //filtered_expanded.row_mut(j).assign(&r);
-                                    //j += 1;
-                                //}
-                            //});
-                    //});
+            //Zip::from(expanded.outer_iter())
+            //.and(filtered_expanded.outer_iter_mut())
+            //.for_each(|expanded, mut filtered_expanded| {
+            //let mut j = 0;
+            //Zip::from(expanded.rows())
+            //.and(&block.full_filter)
+            //.for_each(|r, b| {
+            //if b.expose() {
+            //filtered_expanded.row_mut(j).assign(&r);
+            //j += 1;
+            //}
+            //});
+            //});
 
-                //let i = 3;
-                //let mut filtered_expanded = filtered_expanded.slice(s![i, .., ..]);
-                //filtered_expanded.swap_axes(0, 1);
-                //let filtered_expanded_e = expanded_e.slice(s![i, ..]);
-                //let filtered_expanded_exposed =
-                    //debug_expose_array(filtered_expanded, filtered_expanded_e);
+            //let i = 3;
+            //let mut filtered_expanded = filtered_expanded.slice(s![i, .., ..]);
+            //filtered_expanded.swap_axes(0, 1);
+            //let filtered_expanded_e = expanded_e.slice(s![i, ..]);
+            //let filtered_expanded_exposed =
+            //debug_expose_array(filtered_expanded, filtered_expanded_e);
 
-                //let filtered_expanded_exposed =
-                    //&filtered_expanded_exposed / filtered_expanded_exposed.sum();
+            //let filtered_expanded_exposed =
+            //&filtered_expanded_exposed / filtered_expanded_exposed.sum();
 
-                //println!("rss");
-                //println!("{:#?}", filtered_expanded_exposed.row(0));
-                //println!("rss");
-                //println!(
-                    //"{:#?}",
-                    //filtered_expanded.row(0).map(|v| v.expose_into_f32())
-                //);
-                //println!("rss");
-                //println!("{:#?}", filtered_expanded_e.map(|v| v.expose()));
+            //println!("rss");
+            //println!("{:#?}", filtered_expanded_exposed.row(0));
+            //println!("rss");
+            //println!(
+            //"{:#?}",
+            //filtered_expanded.row(0).map(|v| v.expose_into_f32())
+            //);
+            //println!("rss");
+            //println!("{:#?}", filtered_expanded_e.map(|v| v.expose()));
             //}
 
             Self::combine_block(

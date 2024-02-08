@@ -62,6 +62,7 @@ impl<'a> Mcmc<'a> {
         params: &'a McmcSharedParams,
         genotypes: ArrayView1<Genotype>,
         iterations: &[IterOption],
+        use_rss: bool,
         mut rng: impl Rng,
         id: &str,
     ) -> Array2<Genotype> {
@@ -98,7 +99,7 @@ impl<'a> Mcmc<'a> {
         let mut mcmc = Self::initialize(&params, genotypes.view(), id);
 
         for iter in iterations_iternal {
-            mcmc.iteration(iter, &mut rng, id);
+            mcmc.iteration(iter, use_rss, &mut rng, id);
 
             println!(
                 "Emission: {:?} ms",
@@ -321,7 +322,13 @@ impl<'a> Mcmc<'a> {
         }
     }
 
-    fn iteration(&mut self, iter_option: IterOptionInternal, mut rng: impl Rng, id: &str) {
+    fn iteration(
+        &mut self,
+        iter_option: IterOptionInternal,
+        use_rss: bool,
+        mut rng: impl Rng,
+        id: &str,
+    ) {
         println!("=== {:?} Iteration ({id}) ===", iter_option);
         let now = Instant::now();
 
@@ -483,9 +490,9 @@ impl<'a> Mcmc<'a> {
                 .filter_map(|v| v.as_ref().map(|v| v.len()))
                 .sum::<usize>();
             max_ks.push(max_k as f64);
+
             window_sizes.push((end_w - start_w) as f64);
 
-            let (full_filter, k) = find_nn_bitmap(neighbors_w, params_w.ref_panel.n_haps);
             //#[cfg(feature = "obliv")]
             //{
             //ks.push(k.expose() as f64);
@@ -495,54 +502,56 @@ impl<'a> Mcmc<'a> {
             //ks.push(k as f64);
             //}
 
-            let t = Instant::now();
-            let filtered_blocks = params_w
-                .ref_panel
-                .blocks
-                .iter()
-                .map(|b| {
-                    crate::rss_hmm::filtered_block::FilteredBlockSliceObliv::from_block_slice(
-                        b,
-                        &full_filter,
-                    )
-                })
-                .collect::<Vec<_>>();
-
-            let fwbw_out = crate::rss_hmm::reduced_obliv::HmmReduced::fwbw(
-                &filtered_blocks,
-                params_w.ref_panel.n_sites,
-                k,
-                params_w.ref_panel.n_haps,
-                genotype_graph_w.graph.view(),
-                self.params.hmm_params.eprob,
-                &rprobs_w,
-                Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(false, bool)).view(),
-            );
-            REDFWBW.with(|v| {
-                let mut v = v.borrow_mut();
-                *v += t.elapsed();
-            });
-
-            #[cfg(feature = "obliv")]
-            let (first_tprobs, first_tprobs_e, tprobs, tprobs_e) = fwbw_out;
-
-            #[cfg(not(feature = "obliv"))]
-            let (first_tprobs, tprobs) = fwbw_out;
-
-            let mut tprobs_window = tprobs;
-            #[cfg(feature = "obliv")]
-            let mut tprobs_window_e = tprobs_e;
-
-            if window_i == 0 {
-                Zip::from(tprobs_window.slice_mut(s![0, .., ..]).rows_mut())
-                    .for_each(|mut r| r.assign(&first_tprobs));
+            let (tprobs_window, tprobs_window_e) = if use_rss {
+                let (full_filter, k) = find_nn_bitmap(neighbors_w, params_w.ref_panel.n_haps);
+                let t = Instant::now();
+                let filtered_blocks = params_w
+                    .ref_panel
+                    .blocks
+                    .iter()
+                    .map(|b| {
+                        crate::rss_hmm::filtered_block::FilteredBlockSliceObliv::from_block_slice(
+                            b,
+                            &full_filter,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let fwbw_out = crate::rss_hmm::reduced_obliv::HmmReduced::fwbw(
+                    &filtered_blocks,
+                    params_w.ref_panel.n_sites,
+                    k,
+                    params_w.ref_panel.n_haps,
+                    genotype_graph_w.graph.view(),
+                    self.params.hmm_params.eprob,
+                    &rprobs_w,
+                    Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(false, bool)).view(),
+                );
+                REDFWBW.with(|v| {
+                    let mut v = v.borrow_mut();
+                    *v += t.elapsed();
+                });
 
                 #[cfg(feature = "obliv")]
-                Zip::from(tprobs_window_e.slice_mut(s![0, .., ..]).rows_mut())
-                    .for_each(|mut r| r.assign(&first_tprobs_e));
-            }
+                let (first_tprobs, first_tprobs_e, tprobs, tprobs_e) = fwbw_out;
 
-            {
+                #[cfg(not(feature = "obliv"))]
+                let (first_tprobs, tprobs) = fwbw_out;
+
+                let mut tprobs_window = tprobs;
+                #[cfg(feature = "obliv")]
+                let mut tprobs_window_e = tprobs_e;
+
+                if window_i == 0 {
+                    Zip::from(tprobs_window.slice_mut(s![0, .., ..]).rows_mut())
+                        .for_each(|mut r| r.assign(&first_tprobs));
+
+                    #[cfg(feature = "obliv")]
+                    Zip::from(tprobs_window_e.slice_mut(s![0, .., ..]).rows_mut())
+                        .for_each(|mut r| r.assign(&first_tprobs_e));
+                }
+
+                (tprobs_window, tprobs_window_e)
+            } else {
                 let t = Instant::now();
                 let (max_k_neighbors, filter, n_full_states) = neighbors_to_filter(&neighbors_w);
                 ks.push(n_full_states.expose() as f64);
@@ -565,11 +574,10 @@ impl<'a> Mcmc<'a> {
                     *v += t.elapsed();
                 });
 
-
                 let t = Instant::now();
 
                 let filter = Array1::from_vec(filter);
-                let (tprobs_window_full, tprobs_window_e_full) = crate::hmm::Hmm::forward_backward(
+                let (tprobs_window, tprobs_window_e) = crate::hmm::Hmm::forward_backward(
                     unfolded.view(),
                     filter.view(),
                     n_full_states,
@@ -583,36 +591,37 @@ impl<'a> Mcmc<'a> {
                     let mut v = v.borrow_mut();
                     *v += t.elapsed();
                 });
+                (tprobs_window, tprobs_window_e)
 
-                use crate::dynamic_fixed::*;
-                Zip::indexed(tprobs_window.outer_iter())
-                    .and(tprobs_window_e.outer_iter())
-                    .and(tprobs_window_full.outer_iter())
-                    .and(tprobs_window_e_full.outer_iter())
-                    .and(&genotype_graph_w.graph)
-                    .for_each(|i, a, a_e, b, b_e, g| {
-                        if (i == 0 && window_i == 0) || g.is_segment_marker().expose() {
-                            //println!("{i}");
-                            let a_conv = debug_expose_array_ext(a, a_e);
-                            let a_conv = &a_conv / a_conv.sum();
-                            let b_conv = debug_expose_array_ext(b, b_e);
-                            let b_conv = &b_conv / b_conv.sum();
-                            if !a_conv.relative_eq(&b_conv, f64::EPSILON, 0.5) {
-                                println!("window {window_i}, site {i}:");
-                                println!("{:#?}", a_conv);
-                                println!("{:#?}", b_conv);
-                                println!();
-                                println!("{:#?}", debug_expose_s(a));
-                                println!("{:#?}", debug_expose_s(b));
-                                println!();
-                                println!("{:#?}", a_e.map(|v| v.expose()));
-                                println!("{:#?}", b_e.map(|v| v.expose()));
+                //use crate::dynamic_fixed::*;
+                //Zip::indexed(tprobs_window.outer_iter())
+                //.and(tprobs_window_e.outer_iter())
+                //.and(tprobs_window_full.outer_iter())
+                //.and(tprobs_window_e_full.outer_iter())
+                //.and(&genotype_graph_w.graph)
+                //.for_each(|i, a, a_e, b, b_e, g| {
+                //if (i == 0 && window_i == 0) || g.is_segment_marker().expose() {
+                ////println!("{i}");
+                //let a_conv = debug_expose_array_ext(a, a_e);
+                //let a_conv = &a_conv / a_conv.sum();
+                //let b_conv = debug_expose_array_ext(b, b_e);
+                //let b_conv = &b_conv / b_conv.sum();
+                //if !a_conv.relative_eq(&b_conv, f64::EPSILON, 0.5) {
+                //println!("window {window_i}, site {i}:");
+                //println!("{:#?}", a_conv);
+                //println!("{:#?}", b_conv);
+                //println!();
+                //println!("{:#?}", debug_expose_s(a));
+                //println!("{:#?}", debug_expose_s(b));
+                //println!();
+                //println!("{:#?}", a_e.map(|v| v.expose()));
+                //println!("{:#?}", b_e.map(|v| v.expose()));
 
-                                panic!();
-                            }
-                        }
-                    });
-            }
+                //panic!();
+                //}
+                //}
+                //});
+            };
 
             #[cfg(feature = "obliv")]
             let tprobs_window_src = tprobs_window.view();
@@ -1131,22 +1140,18 @@ fn neighbors_to_filter(neighbors: &[Option<Vec<Usize>>]) -> (Vec<Usize>, Vec<Boo
         filter
     };
 
-    //TODO remove this part
-    neighbors.iter_mut().zip(filter.iter()).for_each(|(n, &b)| {
-        *n |= (!b).as_u64() << 63;
-    });
-    obliv_utils::bitonic_sort::bitonic_sort(&mut neighbors, true);
-    let mut filter = Vec::with_capacity(neighbors.len());
-    let mask = !(1 << 63);
-    for n in &mut neighbors {
-        let b = (*n >> 63).tp_eq(&1);
-        filter.push(!b);
-        *n &= mask;
-    }
-
-    //println!("{:?}", neighbors.iter().map(|v| v.expose()).collect::<Vec<_>>());
-    //println!("{:?}", filter.iter().map(|v| v.expose()).collect::<Vec<_>>());
-    //panic!();
+    ////TODO remove this part
+    //neighbors.iter_mut().zip(filter.iter()).for_each(|(n, &b)| {
+    //*n |= (!b).as_u64() << 63;
+    //});
+    //obliv_utils::bitonic_sort::bitonic_sort(&mut neighbors, true);
+    //let mut filter = Vec::with_capacity(neighbors.len());
+    //let mask = !(1 << 63);
+    //for n in &mut neighbors {
+    //let b = (*n >> 63).tp_eq(&1);
+    //filter.push(!b);
+    //*n &= mask;
+    //}
 
     (neighbors, filter, n_full_states)
 }
@@ -1170,13 +1175,6 @@ fn unfold_block<'a>(
         .iter()
         .map(|&v| obliv_index_map.get(v.as_u32()))
         .collect::<Vec<_>>();
-
-    //{
-    //let test = unique_neighbors.iter().map(|v| v.expose()).collect::<Vec<_>>();
-    //let reff = neighbors.iter().map(|&v| block.index_map[v.expose() as usize]).collect::<Vec<_>>();
-    //assert_eq!(test, reff);
-
-    //}
 
     Zip::from(block.haplotypes.rows())
         .and(unfolded.rows_mut())
@@ -1213,4 +1211,56 @@ fn unfold_haps(
         .for_each(|(b, n)| {
             *b = bitmap.get(n.as_u32()).as_i8();
         });
+}
+
+#[cfg(feature = "obliv")]
+fn unfold_block_2<'a>(
+    block: &common::ref_panel::BlockSlice<'a>,
+    neighbors: &[Usize],
+    mut unfolded: ndarray::ArrayViewMut2<Genotype>,
+) {
+    assert_eq!(unfolded.nrows(), block.n_sites());
+    assert_eq!(unfolded.ncols(), neighbors.len());
+
+    use std::iter::FromIterator;
+    use tp_fixedpoint::timing_shield::TpU16;
+
+    let obliv_index_map =
+        obliv_utils::vec::OblivVec::from_iter(block.index_map.iter().map(|&v| TpU16::protect(v)));
+
+    let unique_neighbors = neighbors
+        .iter()
+        .map(|&v| obliv_index_map.get(v.as_u32()))
+        .collect::<Vec<_>>();
+
+    let transposed_block = block.transpose();
+    use tp_fixedpoint::timing_shield::TpU8;
+
+    for (u, mut unfolded_col) in unique_neighbors.iter().zip(unfolded.columns_mut()) {
+        let mut hap = Vec::with_capacity(0);
+        Zip::indexed(transposed_block.haplotypes.rows()).for_each(|i, r| {
+            if i == 0 {
+                hap = r.into_iter().map(|&v| TpU8::protect(v)).collect::<Vec<_>>();
+            } else {
+                for (j, &h) in hap.iter_mut().zip(r.into_iter()) {
+                    *j = u.tp_eq(&(i as u16)).select(TpU8::protect(h), *j);
+                }
+            }
+        });
+
+        let mut i = 0;
+        for mut h in hap {
+            for _ in 0..8 {
+                unfolded_col[i] = (h & 1).as_i8();
+                h >>= 1;
+                i += 1;
+                if i == unfolded_col.len() {
+                    break;
+                }
+            }
+            if i == unfolded_col.len() {
+                break;
+            }
+        }
+    }
 }

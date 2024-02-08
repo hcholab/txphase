@@ -50,7 +50,7 @@ use rayon::prelude::*;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::str::FromStr;
 
-const N_THREADS: usize = 40;
+const N_THREADS: usize = 48;
 
 pub fn log_template(str1: &str, str2: &str) -> String {
     format!("\t* {str1}\t: {str2}")
@@ -93,14 +93,14 @@ fn main() {
     let bps: Vec<u32> = bincode::deserialize_from(&mut host_stream).unwrap();
     let genotypes: Vec<Vec<i8>> = bincode::deserialize_from(&mut host_stream).unwrap();
     let iterations = [
-        //IterOption::Burnin(5),
-        //IterOption::Pruning(1),
-        //IterOption::Burnin(1),
-        //IterOption::Pruning(1),
-        //IterOption::Burnin(1),
-        //IterOption::Pruning(1),
-        //IterOption::Main(5),
-        IterOption::Main(1),
+        IterOption::Burnin(5),
+        IterOption::Pruning(1),
+        IterOption::Burnin(1),
+        IterOption::Pruning(1),
+        IterOption::Burnin(1),
+        IterOption::Pruning(1),
+        IterOption::Main(5),
+        //IterOption::Main(1),
     ];
 
     let pbwt_depth = ((9. - ((ref_panel_meta.n_haps / 2) as f64).log10()).round() as usize)
@@ -114,7 +114,8 @@ fn main() {
     println!("pbwt-depth = {pbwt_depth}");
     println!("pbwt-modulo = {:.3}", pbwt_modulo);
 
-    let phase_single = true;
+    let phase_single = false;
+    let use_rss = false;
 
     if phase_single {
         //let seed = rand::thread_rng().next_u64();
@@ -238,6 +239,7 @@ fn main() {
             &mcmc_params,
             filtered_genotypes.view(),
             &iterations,
+            use_rss,
             rng,
             &1.to_string(),
         );
@@ -345,6 +347,7 @@ fn main() {
                         .iter()
                         .map(|b| b.n_sites() as f64)
                         .collect::<Vec<_>>();
+                    println!("# blocks: {}", ref_panel_new.blocks.len());
 
                     println!(
                         "# block unique haplotypes: {:.3}+/-{:.3}",
@@ -374,6 +377,7 @@ fn main() {
                     &mcmc_params,
                     filtered_genotypes.view(),
                     &iterations,
+                    use_rss,
                     rng,
                     &id.to_string(),
                 );
@@ -398,11 +402,6 @@ fn main() {
                 phased_with_missing
             })
             .collect::<Vec<_>>();
-
-        //println!("Insert: {} ms", compressed_pbwt::nn::INSERT_T.lock().unwrap().as_millis());
-        //println!("Init: {} ms", compressed_pbwt::nn::INIT_T.lock().unwrap().as_millis());
-        //println!("Neighbors: {} ms", compressed_pbwt::nn::NEIGH_T.lock().unwrap().as_millis());
-        //println!("Update: {} ms", compressed_pbwt::nn::UPDATE_T.lock().unwrap().as_millis());
 
         bincode::serialize_into(&mut host_stream, &all_phased).unwrap();
     }

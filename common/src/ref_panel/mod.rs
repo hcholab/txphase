@@ -3,7 +3,7 @@ pub use block::*;
 
 use ndarray::Array1;
 
-const MAX_UNIQUE: usize = 10000;
+const MAX_UNIQUE: usize = 800;
 const MIN_UNIQUE: usize = 300;
 
 pub fn m3vcf_scan(
@@ -39,7 +39,7 @@ pub fn m3vcf_scan(
         if let Some(block) = m3vcf_block_scan(m3vcf_block, sites_bitmask_block, i == 0, &mut afreqs)
         {
             if let Some(cur_block_) = cur_block.take() {
-                if cur_block_.n_unique() < MIN_UNIQUE  {
+                if cur_block_.n_unique() < MIN_UNIQUE {
                     let merge_block = merge_blocks(&cur_block_, &block);
                     cur_block = Some(merge_block);
                 } else if cur_block_.n_unique() > MAX_UNIQUE {
@@ -71,11 +71,11 @@ pub fn m3vcf_scan(
 
     //println!("n_blocks: {}", blocks.len());
     //for block in &blocks {
-        //println!(
-            //"n_unique: {},\t n_sites: {}",
-            //block.n_unique(),
-            //block.n_sites()
-        //);
+    //println!(
+    //"n_unique: {},\t n_sites: {}",
+    //block.n_unique(),
+    //block.n_sites()
+    //);
     //}
 
     //for i in 1..blocks.len() {

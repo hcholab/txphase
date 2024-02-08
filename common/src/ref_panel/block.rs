@@ -200,8 +200,9 @@ pub fn merge_blocks(left_block: &Block, right_block: &Block) -> Block {
 
 pub fn break_block(block: &Block, max_unique: usize) -> Vec<Block> {
     let mut new_blocks = Vec::new();
-    let left_block = make_unique_hap_block_slice(&block.slice(0, block.n_sites()/2));
-    let right_block = make_unique_hap_block_slice(&block.slice(block.n_sites()/2, block.n_sites()));
+    let left_block = make_unique_hap_block_slice(&block.slice(0, block.n_sites() / 2));
+    let right_block =
+        make_unique_hap_block_slice(&block.slice(block.n_sites() / 2, block.n_sites()));
 
     if left_block.n_unique() > max_unique {
         new_blocks.extend(break_block(&left_block, max_unique).into_iter());
