@@ -398,9 +398,9 @@ pub fn m3vcf_block_scan(
         row.assign(&ref_row);
     }
 
-    Some(Block {
+    Some(make_unique_hap_block(&Block {
         index_map: block.indmap.clone(),
         haplotypes: filtered_haps,
         n_unique: block.nuniq,
-    })
+    }))
 }
