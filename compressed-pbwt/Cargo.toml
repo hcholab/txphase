@@ -1,0 +1,36 @@
+[package]
+name = "compressed-pbwt"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["obliv"]
+obliv = ["timing-shield", "obliv-utils"]
+
+[dependencies]
+timing-shield = { version = "0.3.0", optional=true }
+#rust-htslib = "0.42.0"
+serde = "1.0.163"
+anyhow = "1.0.71"
+m3vcf = { path = "../m3vcf" }
+ndarray = "0.15.6"
+bitvec = "1.0.1"
+csv = "1.2.1"
+rand = { version = "0.8.5", features = ["std_rng"] }
+common = { path = "../common" }
+obliv-utils = { path = "../obliv-utils", optional=true }
+lazy_static = "1.4.0"
+
+[dev-dependencies]
+criterion = "0.4"
+
+[[bench]]
+name = "bench"
+harness = false
+
+[profile.release]
+debug = true
+
+#[[bin]]
+#name = "mcmc_init"
+#path = "src/bin/mcmc_init.rs"
