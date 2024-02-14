@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-DATA_DIR=data
-source profiles/dataset/hrc.sh
+source data/datasets/hrc/env.sh
 
 TEST=tmp/phased.vcf.gz
 

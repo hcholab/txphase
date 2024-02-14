@@ -258,10 +258,7 @@ impl<'a> Mcmc<'a> {
 
             nn_0
         };
-        println!(
-            "Neighbors Finding: {} ms",
-            (Instant::now() - now).as_millis()
-        );
+        println!("Neighbors Finding: {} ms", now.elapsed().as_millis());
 
         let windows = self.windows(&mut rng);
 
@@ -287,6 +284,7 @@ impl<'a> Mcmc<'a> {
         for (window_i, ((start_w, end_w), (start_write_w, end_write_w))) in
             windows.into_iter().enumerate()
         {
+            let t = Instant::now();
             sum_window_size +=
                 self.params.variants[end_w - 1].bp - self.params.variants[start_w].bp;
             let genotype_graph_w = self.genotype_graph.slice(start_w, end_w);
@@ -303,8 +301,8 @@ impl<'a> Mcmc<'a> {
 
             window_sizes.push((end_w - start_w) as f64);
 
-            let t = Instant::now();
             let (tprobs_window, tprobs_window_e) = if use_rss {
+                let t = Instant::now();
                 let (full_filter, k) = find_nn_bitmap(neighbors_w, params_w.ref_panel.n_haps);
 
                 #[cfg(feature = "obliv")]
@@ -327,6 +325,12 @@ impl<'a> Mcmc<'a> {
                         )
                     })
                     .collect::<Vec<_>>();
+
+                FILTER.with(|v| {
+                    let mut v = v.borrow_mut();
+                    *v += t.elapsed();
+                });
+
                 let fwbw_out = crate::rss_hmm::reduced_obliv::HmmReduced::fwbw(
                     start_w,
                     &filtered_blocks,
@@ -378,14 +382,13 @@ impl<'a> Mcmc<'a> {
                     );
                     start_slice += block.n_sites();
                 }
+
+                let filter = Array1::from_vec(filter);
+
                 FILTER.with(|v| {
                     let mut v = v.borrow_mut();
                     *v += t.elapsed();
                 });
-
-                //let t = Instant::now();
-
-                let filter = Array1::from_vec(filter);
 
                 #[cfg(feature = "obliv")]
                 let (tprobs_window, tprobs_window_e) = crate::hmm::Hmm::forward_backward(
@@ -648,6 +651,18 @@ impl<'a> Mcmc<'a> {
             Statistics::mean(&max_ks),
             Statistics::std_dev(&max_ks)
         );
+        {
+            let ratio = ks
+                .iter()
+                .zip(max_ks.iter())
+                .map(|(k, max_k)| k / max_k * 100.)
+                .collect::<Vec<_>>();
+            println!(
+                "K/MaxK (%): {:.3}+/-{:.3}",
+                Statistics::mean(&ratio),
+                Statistics::std_dev(&ratio)
+            );
+        }
         println!(
             "Window sizes (#sites): {:.3}+/-{:.3}",
             Statistics::mean(&window_sizes),
@@ -747,10 +762,43 @@ impl<'a> Mcmc<'a> {
                     })
                     .as_millis()
             );
+        } else {
+            println!(
+                "Emission: {:?} ms",
+                crate::hmm::EMISS
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
 
             println!(
-                "Filter Ref Panel: {:?} ms",
-                FILTER
+                "Transition: {:?} ms",
+                crate::hmm::TRANS
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "Collapse: {:?} ms",
+                crate::hmm::COLL
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "Combine: {:?} ms",
+                crate::hmm::COMB
                     .with(|v| {
                         let out = *v.borrow();
                         *v.borrow_mut() = std::time::Duration::ZERO;
@@ -759,6 +807,17 @@ impl<'a> Mcmc<'a> {
                     .as_millis()
             );
         }
+
+        println!(
+            "Filter Ref Panel: {:?} ms",
+            FILTER
+                .with(|v| {
+                    let out = *v.borrow();
+                    *v.borrow_mut() = std::time::Duration::ZERO;
+                    out
+                })
+                .as_millis()
+        );
 
         println!(
             "HMM+Filter: {:?} ms",

@@ -1,3 +1,8 @@
 Cargo.lock
 target
 shapeit-bin/phase_common_static
+bin
+bin_sgx
+data
+results
+tmp

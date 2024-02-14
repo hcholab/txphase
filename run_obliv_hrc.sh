@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-./run.sh 0 0 data profiles/dataset/hrc.sh
+./run.sh 0 0 data/datasets/hrc/env.sh

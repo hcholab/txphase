@@ -2,19 +2,20 @@
 
 LITE=$1
 SGX=$2
-DATA_DIR=$3
-DATASET=$4
-PHASING_PROFILE=$5
+DATASET_ENV=$3
+PHASING_OPTIONS=$4
 
 source config.sh
-source $DATASET
-source $PHASING_PROFILE
+source $DATASET_ENV
 
 HOST_OPTIONS="\
     --ref-panel $(realpath $M3VCF_REF_PANEL) \
     --genetic-map $(realpath $GMAP) \
     --input $(realpath $INPUT) \
     --output $(realpath tmp/phased.vcf.gz)"
+
+killall host >/dev/null 2>&1
+mkdir -p tmp
 
 (
 (cd host && cargo +nightly build $PROFILE) && \

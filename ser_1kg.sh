@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-DATA_DIR=data
-source profiles/dataset/1kg.sh
+source data/datasets/1kg/env.sh
 
 TEST=tmp/phased.vcf.gz
 

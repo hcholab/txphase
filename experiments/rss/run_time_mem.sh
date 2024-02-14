@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-TAR_DIR=$1
+OUTPUT_DIR=$1
 USE_RSS=$2
 PBWT_DEPTH=$3
 
@@ -13,5 +13,5 @@ else
     PHASING_OPTIONS="--max-m3vcf-unique-haps=200 --min-m3vcf-unique-haps=100 --pbwt-depth $PBWT_DEPTH"
 fi
 
-$MAIN_DIR/experiments/nosgx/build.sh bin
-$MAIN_DIR/experiments/nosgx/run.sh bin $MAIN_DIR/profiles/dataset/1kg.sh "$PHASING_OPTIONS" $TAR_DIR $TAR_DIR | tee $TAR_DIR/log.txt
+$MAIN_DIR/experiments/nosgx/build.sh bin && \
+    $MAIN_DIR/experiments/nosgx/run.sh bin $MAIN_DIR/data/datasets/1kg/env.sh "$PHASING_OPTIONS" $OUTPUT_DIR $OUTPUT_DIR | tee $OUTPUT_DIR/log.txt

@@ -125,7 +125,7 @@ fn parse_iterations(s: &str) -> Result<Vec<IterOption>, String> {
 
 fn main() {
     let cli = Cli::parse();
-    println!("{:#?}", cli);
+    println!("{:?}", cli);
 
     let (host_stream, _host_socket) = TcpListener::bind(SocketAddr::from((
         IpAddr::from_str("127.0.0.1").unwrap(),
@@ -156,12 +156,10 @@ fn main() {
 
     let mcmc_iterations = parse_iterations(&cli.mcmc_iterations).unwrap();
 
-    //let seed = 12727004758508603152;
-    println!("Parameters:");
-    println!("pbwt-depth = {pbwt_depth}");
-    println!("pbwt-modulo = {:.3}", pbwt_modulo);
-    println!("mcmc-iterations= {}", cli.mcmc_iterations);
-    println!("seed: {}", cli.prg_seed);
+    println!("PBWT depth: {pbwt_depth}");
+    println!("PBWT modulo: {:.3}", pbwt_modulo);
+    println!("MCMC iterations: {}", cli.mcmc_iterations);
+    println!("Seed: {}", cli.prg_seed);
 
     let n_pos_window_overlap = (3. / cli.min_het_rate).ceil() as usize;
 
@@ -196,7 +194,7 @@ fn main() {
 
         let filtered_genotypes = Array1::<Genotype>::from_vec(filtered_genotypes);
 
-        println!("#sites = {}", filtered_genotypes.len());
+        println!("#Sites: {}", filtered_genotypes.len());
 
         let mcmc_params = {
             let mut sites_bitmask = sites_bitmask.clone();
@@ -254,16 +252,16 @@ fn main() {
                 .map(|b| b.n_sites() as f64)
                 .collect::<Vec<_>>();
 
-            println!("# blocks: {}", ref_panel_new.blocks.len());
+            println!("#Blocks: {}", ref_panel_new.blocks.len());
 
             println!(
-                "# block unique haplotypes: {:.3}+/-{:.3}",
+                "#Block unique haplotypes: {:.3}+/-{:.3}",
                 Statistics::mean(&block_n_unique_haps),
                 Statistics::std_dev(&block_n_unique_haps)
             );
 
             println!(
-                "# block sites: {:.3}+/-{:.3}",
+                "#Block sites: {:.3}+/-{:.3}",
                 Statistics::mean(&block_n_sites),
                 Statistics::std_dev(&block_n_sites)
             );
@@ -397,16 +395,16 @@ fn main() {
                         .iter()
                         .map(|b| b.n_sites() as f64)
                         .collect::<Vec<_>>();
-                    println!("# blocks: {}", ref_panel_new.blocks.len());
+                    println!("#Blocks: {}", ref_panel_new.blocks.len());
 
                     println!(
-                        "# block unique haplotypes: {:.3}+/-{:.3}",
+                        "#Block unique haplotypes: {:.3}+/-{:.3}",
                         Statistics::mean(&block_n_unique_haps),
                         Statistics::std_dev(&block_n_unique_haps)
                     );
 
                     println!(
-                        "# block sites: {:.3}+/-{:.3}",
+                        "#Block sites: {:.3}+/-{:.3}",
                         Statistics::mean(&block_n_sites),
                         Statistics::std_dev(&block_n_sites)
                     );
