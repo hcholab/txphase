@@ -37,6 +37,7 @@ thread_local! {
     pub static COMB2: RefCell<Duration> = RefCell::new(Duration::ZERO);
     pub static EXPAND: RefCell<Duration> = RefCell::new(Duration::ZERO);
     pub static BLOCK: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static POST: RefCell<Duration> = RefCell::new(Duration::ZERO);
 }
 
 #[cfg(feature = "obliv")]
@@ -77,6 +78,7 @@ impl ProbBlock {
         }
     }
 
+    #[cfg(feature = "obliv")]
     pub fn expand(
         &self,
         index_map: ArrayView1<u16>,
@@ -136,6 +138,7 @@ type FwbwOut = (Array1<Real>, Array3<Real>);
 
 impl HmmReduced {
     pub fn fwbw<'a>(
+        mut abs_start_site_i: usize,
         blocks: &[FilteredBlockSliceObliv<'a>],
         n_sites_window: usize,
         n_full_states: UInt,
@@ -432,7 +435,30 @@ impl HmmReduced {
             //println!("{:#?}", filtered_expanded_e.map(|v| v.expose()));
             //}
 
-            Self::combine_block(
+            //Self::combine_block(
+            //block,
+            //&cur_block_prob,
+            //&bprobs[block_i],
+            //tprobs.slice_mut(s![site_i - block_n_sites..site_i, .., ..]),
+            //#[cfg(feature = "obliv")]
+            //tprobs_e.slice_mut(s![site_i - block_n_sites..site_i, .., ..]),
+            //);
+
+            //let mut ref_tprobs = tprobs.slice(s![site_i - block_n_sites..site_i, .., ..]).to_owned();
+            //let mut ref_tprobs_e = tprobs_e.slice(s![site_i - block_n_sites..site_i, .., ..]).to_owned();
+
+            //Self::combine_block(
+            //block,
+            //&cur_block_prob,
+            //&bprobs[block_i],
+            //ref_tprobs.view_mut(),
+            //#[cfg(feature = "obliv")]
+            //ref_tprobs_e.view_mut(),
+            //);
+
+            Self::combine_block_opt(
+                abs_start_site_i,
+                genotype_graph.slice(s![site_i - block_n_sites..site_i]),
                 block,
                 &cur_block_prob,
                 &bprobs[block_i],
@@ -440,6 +466,30 @@ impl HmmReduced {
                 #[cfg(feature = "obliv")]
                 tprobs_e.slice_mut(s![site_i - block_n_sites..site_i, .., ..]),
             );
+
+            //// Test
+            //Zip::indexed(&genotype_graph.slice(s![site_i-block_n_sites..site_i]))
+            //.and(ref_tprobs.outer_iter())
+            //.and(ref_tprobs_e.outer_iter())
+            //.and(tprobs.slice(s![site_i - block_n_sites..site_i, .., ..]).outer_iter())
+            //.and(tprobs_e.slice(s![site_i - block_n_sites..site_i, .., ..]).outer_iter())
+            //.for_each(|i, g, ref_t, ref_t_e, t, t_e| {
+            //if g.is_segment_marker().expose() {
+            //println!("hi");
+            //let ref_t_exp = debug_expose_array_ext(ref_t, ref_t_e);
+            //let t_exp = debug_expose_array_ext(t, t_e);
+            //if ref_t_exp != t_exp {
+            //println!("i: {i}");
+            //println!("block_i: {block_i}");
+            //println!("abs_start_site_i: {abs_start_site_i}");
+            //println!("ref:\n{:?}", ref_t_exp);
+            //println!("t:\n{:?}", t_exp);
+            //panic!();
+            //}
+            //}
+            //});
+
+            abs_start_site_i += block_n_sites;
 
             prev_block_prob = Some(cur_block_prob);
         }
@@ -1032,7 +1082,6 @@ impl HmmReduced {
             is_first_segment = false;
         }
 
-        let t = Instant::now();
         #[cfg(feature = "obliv")]
         Zip::from(&trans_c_prob_e)
             .and(trans_cnr_prob.rows_mut())
@@ -1050,11 +1099,6 @@ impl HmmReduced {
             &mut prev_block_prob.alpha_post,
             &mut prev_block_prob.save_alpha_post_cnr,
         );
-
-        BLOCK.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
 
         Self::expand_prob(
             prev_index_map,
@@ -1075,6 +1119,7 @@ impl HmmReduced {
         );
 
         let t = Instant::now();
+
         let mut cur_c_prob_ = Array::from_shape_vec(
             cur_c_prob.t().raw_dim(),
             cur_c_prob.t().iter().cloned().collect(),
@@ -1203,7 +1248,6 @@ impl HmmReduced {
             trans_cnr_prob_e.view_mut(),
         );
 
-        let t = Instant::now();
         #[cfg(feature = "obliv")]
         Zip::from(&trans_c_prob_e)
             .and(trans_cnr_prob.rows_mut())
@@ -1221,11 +1265,6 @@ impl HmmReduced {
             &mut prev_block_prob.alpha_post,
             &mut prev_block_prob.save_alpha_post_cnr,
         );
-
-        BLOCK.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
 
         Self::expand_prob(
             prev_index_map,
@@ -1539,6 +1578,7 @@ impl HmmReduced {
         alpha_post: &mut Option<Array1<Real>>,
         save_cnr_prob: &mut Option<Array2<Real>>,
     ) {
+        let t = Instant::now();
         if let (None, Some(save_cnr_prob)) = (alpha_post.as_ref(), save_cnr_prob.take()) {
             #[cfg(feature = "obliv")]
             {
@@ -1597,6 +1637,11 @@ impl HmmReduced {
                     }
                 });
         }
+
+        POST.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
 
     fn expand_prob(
@@ -1702,6 +1747,283 @@ impl HmmReduced {
         };
 
         EXPAND.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
+    }
+    fn combine_block_opt<'a>(
+        start_site_i: usize,
+        genotype_graph: ArrayView1<G>,
+        block: &FilteredBlockSliceObliv<'a>,
+        forward: &ProbBlock,
+        backward: &ProbBlock,
+        mut tprobs: ArrayViewMut3<Real>,
+        #[cfg(feature = "obliv")] mut tprobs_e: ArrayViewMut3<TpI16>,
+    ) {
+        let t = Instant::now();
+
+        let inv_weights = block.inv_weights.view();
+
+        let n_unique_haps = block.n_unique_haps();
+
+        let mut alpha_11 = Array3::<Real>::zeros((P, P, n_unique_haps));
+        let mut alpha_10 = Array2::<Real>::zeros((P, n_unique_haps));
+        let mut alpha_01 = Array2::<Real>::zeros((P, n_unique_haps));
+        let mut alpha_00 = Array1::<Real>::zeros(n_unique_haps);
+
+        let mut arr = vec![Vec::new(); n_unique_haps];
+
+        let forward_alpha_post = forward.alpha_post.as_ref().unwrap().view();
+        let backward_alpha_post = backward.alpha_post.as_ref().unwrap().view();
+
+        Zip::from(&block.index_map)
+            .and(forward.alpha_pre.rows())
+            .and(&forward_alpha_post)
+            .and(backward.alpha_pre.rows())
+            .and(&backward_alpha_post)
+            .for_each(|&i, f_pre, &f_post, b_pre, &b_post| {
+                arr[i as usize].push((f_pre, f_post, b_pre, b_post));
+            });
+
+        for (i, u) in arr.into_iter().enumerate() {
+            let mut f_pre_arr = Array2::<Real>::zeros((P, u.len()));
+            let mut f_post_arr = Array1::<Real>::zeros(u.len());
+            let mut b_pre_arr = Array2::<Real>::zeros((P, u.len()));
+            let mut b_post_arr = Array1::<Real>::zeros(u.len());
+
+            for (j, (f_pre, f_post, b_pre, b_post)) in u.into_iter().enumerate() {
+                f_pre_arr.column_mut(j).assign(&f_pre);
+                f_post_arr[j] = f_post;
+                b_pre_arr.column_mut(j).assign(&b_pre);
+                b_post_arr[j] = b_post;
+            }
+
+            alpha_11
+                .slice_mut(s![.., .., i])
+                .assign(&Dot::dot(&f_pre_arr, &b_pre_arr.t()));
+            alpha_10
+                .slice_mut(s![.., i])
+                .assign(&Dot::dot(&f_pre_arr, &b_post_arr));
+            alpha_01
+                .slice_mut(s![.., i])
+                .assign(&Dot::dot(&b_pre_arr, &f_post_arr.t()));
+            alpha_00[i] = Dot::dot(&f_post_arr, &b_post_arr);
+        }
+
+        COMB1.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
+
+        let t = Instant::now();
+
+        #[cfg(not(feature = "obliv"))]
+        {
+            Zip::indexed(tprobs.outer_iter_mut())
+                .and(
+                    forward
+                        .c_prob
+                        .slice(s![..block.n_sites(), .., ..])
+                        .outer_iter(),
+                )
+                .and(
+                    forward
+                        .cnr_prob
+                        .slice(s![..block.n_sites(), .., ..])
+                        .outer_iter(),
+                )
+                .and(backward.c_prob.outer_iter())
+                .and(backward.cnr_prob.outer_iter())
+                .for_each(|i, mut t, fc, fcnr, bc, bcnr| {
+                    // first part
+                    let mut a = fc.to_owned();
+                    Zip::from(a.columns_mut())
+                        .and(&inv_weights)
+                        .for_each(|mut a_i, &r| a_i *= r);
+                    let mut b = fcnr.to_owned();
+                    Zip::from(b.columns_mut())
+                        .and(&inv_weights)
+                        .for_each(|mut b_i, &r| b_i *= r);
+                    let c = Dot::dot(&a, &bc.t()) - Dot::dot(&b, &bcnr.t());
+
+                    // second part
+                    if forward.is_pre[i] == false {
+                        if backward.is_pre[i] == false {
+                            let mut d = fcnr.to_owned();
+                            Zip::from(d.columns_mut())
+                                .and(&alpha_00)
+                                .for_each(|mut e_i, &a| e_i *= a);
+                            t.assign(&(c + Dot::dot(&d, &bcnr.t())));
+                        } else {
+                            let d = &bcnr * &alpha_01;
+                            t.assign(&(c + Dot::dot(&fcnr, &d.t())));
+                        }
+                    } else {
+                        if backward.is_pre[i] == false {
+                            let d = &fcnr * &alpha_10;
+                            t.assign(&(c + Dot::dot(&d, &bcnr.t())));
+                        } else {
+                            Zip::from(alpha_11.outer_iter())
+                                .and(fcnr.outer_iter())
+                                .and(t.rows_mut())
+                                .for_each(|a1, f, mut t_r| {
+                                    Zip::from(a1.outer_iter())
+                                        .and(bcnr.outer_iter())
+                                        .and(&mut t_r)
+                                        .for_each(|a2, b, t_e| {
+                                            *t_e = Dot::dot(&(&a2 * &f), &b.t());
+                                        });
+                                });
+                            t += &c;
+                        }
+                    }
+                });
+        }
+
+        #[cfg(feature = "obliv")]
+        {
+            let mut fc_save: Option<Array2<Real>> = None;
+            let mut fcnr_save: Option<Array2<Real>> = None;
+            let mut bc_save: Option<Array2<Real>> = None;
+            let mut bcnr_save: Option<Array2<Real>> = None;
+            let mut f_e_save: Option<Array1<TpI16>> = None;
+            let mut b_e_save: Option<Array1<TpI16>> = None;
+            let mut f_is_pre = Bool::protect(false);
+            let mut b_is_pre = Bool::protect(false);
+            let mut abs_site_i = start_site_i;
+
+            Zip::indexed(
+                forward
+                    .c_prob
+                    .slice(s![..block.n_sites(), .., ..])
+                    .outer_iter(),
+            )
+            .and(
+                forward
+                    .cnr_prob
+                    .slice(s![..block.n_sites(), .., ..])
+                    .outer_iter(),
+            )
+            .and(backward.c_prob.outer_iter())
+            .and(backward.cnr_prob.outer_iter())
+            .for_each(|i, fc, fcnr, bc, bcnr| {
+                let cond = genotype_graph[i].is_segment_marker();
+                if let Some(fc_save) = fc_save.as_mut() {
+                    cond_assign_array!(cond, fc, *fc_save);
+                } else {
+                    fc_save = Some(fc.to_owned());
+                }
+                if let Some(fcnr_save) = fcnr_save.as_mut() {
+                    cond_assign_array!(cond, fcnr, *fcnr_save);
+                } else {
+                    fcnr_save = Some(fcnr.to_owned());
+                }
+                if let Some(bc_save) = bc_save.as_mut() {
+                    cond_assign_array!(cond, bc, *bc_save);
+                } else {
+                    bc_save = Some(bc.to_owned());
+                }
+                if let Some(bcnr_save) = bcnr_save.as_mut() {
+                    cond_assign_array!(cond, bcnr, *bcnr_save);
+                } else {
+                    bcnr_save = Some(bcnr.to_owned());
+                }
+
+                if let Some(f_e_save) = f_e_save.as_mut() {
+                    cond_assign_array!(cond, forward.prob_e.row(i), *f_e_save);
+                } else {
+                    f_e_save = Some(forward.prob_e.row(i).to_owned());
+                }
+
+                if let Some(b_e_save) = b_e_save.as_mut() {
+                    cond_assign_array!(cond, backward.prob_e.row(i), *b_e_save);
+                } else {
+                    b_e_save = Some(backward.prob_e.row(i).to_owned());
+                }
+
+                f_is_pre = cond.select(forward.is_pre[i], f_is_pre);
+                b_is_pre = cond.select(backward.is_pre[i], b_is_pre);
+
+                if abs_site_i % 3 == 0 || i == block.n_sites() - 1 {
+                    let fc = fc_save.take().unwrap();
+                    let fcnr = fcnr_save.take().unwrap();
+                    let bc = bc_save.take().unwrap();
+                    let bcnr = bcnr_save.take().unwrap();
+                    let f_e = f_e_save.take().unwrap();
+                    let b_e = b_e_save.take().unwrap();
+
+                    // first part
+                    let mut a = fc.to_owned();
+                    Zip::from(a.columns_mut())
+                        .and(&inv_weights)
+                        .for_each(|mut a_i, &r| a_i *= r);
+                    let mut b = fcnr.to_owned();
+                    Zip::from(b.columns_mut())
+                        .and(&inv_weights)
+                        .for_each(|mut b_i, &r| b_i *= r);
+                    let c = Dot::dot(&a, &bc.t()) - Dot::dot(&b, &bcnr.t());
+
+                    // second part
+                    let alpha = {
+                        let alpha_backward_0 =
+                            Self::select_alpha_2(b_is_pre, alpha_01.view(), alpha_00.view());
+
+                        let alpha_backward_1 =
+                            Self::select_alpha_3(b_is_pre, alpha_11.view(), alpha_10.view());
+
+                        Self::select_alpha_3(
+                            f_is_pre,
+                            alpha_backward_1.view(),
+                            alpha_backward_0.view(),
+                        )
+                    };
+
+                    let mut t = tprobs.slice(s![i, .., ..]).to_owned();
+                    let mut t_e = tprobs_e.slice(s![i, .., ..]).to_owned();
+
+                    Zip::from(alpha.outer_iter())
+                        .and(fcnr.outer_iter())
+                        .and(t.rows_mut())
+                        .for_each(|a1, f, mut t_r| {
+                            Zip::from(a1.outer_iter())
+                                .and(bcnr.outer_iter())
+                                .and(&mut t_r)
+                                .for_each(|a2, b, t_i| {
+                                    *t_i = Dot::dot(&(&a2 * &f), &b.t());
+                                });
+                        });
+                    t += &c;
+
+                    Zip::from(t_e.rows_mut())
+                        .and(&f_e)
+                        .for_each(|mut t_e_row, &f_e_i| {
+                            Zip::from(&mut t_e_row).and(&b_e).for_each(|t_e, &b_e_i| {
+                                *t_e = f_e_i + b_e_i;
+                            });
+                        });
+
+                    Zip::from(&mut t)
+                        .and(&mut t_e)
+                        .for_each(|t, e| renorm_scale_single(t, e));
+
+                    let n_write_back = (i + 1).min(if abs_site_i % 3 == 0 {
+                        3
+                    } else {
+                        abs_site_i % 3
+                    });
+                    for j in 0..n_write_back {
+                        tprobs.slice_mut(s![i - j, .., ..]).assign(&t);
+                        tprobs_e.slice_mut(s![i - j, .., ..]).assign(&t_e);
+                    }
+
+                    f_is_pre = Bool::protect(false);
+                    b_is_pre = Bool::protect(false);
+                }
+                abs_site_i += 1;
+            });
+        }
+
+        COMB2.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
         });
@@ -1828,8 +2150,8 @@ impl HmmReduced {
                             Zip::from(a1.outer_iter())
                                 .and(bcnr.outer_iter())
                                 .and(&mut t_r)
-                                .for_each(|a2, b, t_e| {
-                                    *t_e = Dot::dot(&(&a2 * &f), &b.t());
+                                .for_each(|a2, b, t_i| {
+                                    *t_i = Dot::dot(&(&a2 * &f), &b.t());
                                 });
                         });
                     t += &c;

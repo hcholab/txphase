@@ -19,12 +19,14 @@ mod dynamic_fixed;
 
 #[cfg(feature = "obliv")]
 mod inner {
-    pub use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpI32, TpI8, TpU32, TpU64, TpU8};
+    pub use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpI32, TpI8, TpU16, TpU32, TpU64, TpU8};
     pub type Genotype = TpI8;
     pub type UInt = TpU32;
     pub type Usize = TpU64;
     pub type Int = TpI32;
     pub type U8 = TpU8;
+    pub type U16 = TpU16;
+    pub type U64 = TpU64;
     pub type Bool = TpBool;
     pub const F: usize = 52;
     pub type Real = tp_fixedpoint::TpFixed64<F>;
@@ -32,11 +34,14 @@ mod inner {
 
 #[cfg(not(feature = "obliv"))]
 mod inner {
+    pub type U8 = u8;
+    pub type U16 = u16;
+    pub type U32 = u32;
+    pub type U64 = u64;
+    pub type Usize = usize;
     pub type Genotype = i8;
     pub type UInt = u32;
-    pub type Usize = usize;
     pub type Int = i32;
-    pub type U8 = u8;
     pub type Bool = bool;
     pub type Real = f64;
 }
@@ -45,15 +50,13 @@ use inner::*;
 
 use crate::mcmc::IterOption;
 use ndarray::{Array1, Array2};
-use rand::{RngCore, SeedableRng};
+use rand::SeedableRng;
 use rayon::prelude::*;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::str::FromStr;
 
-const N_THREADS: usize = 48;
-
-pub fn log_template(str1: &str, str2: &str) -> String {
-    format!("\t* {str1}\t: {str2}")
+pub fn log_template(name: impl std::fmt::Display, param: impl std::fmt::Display) -> String {
+    format!("\t* {name}\t: {param}")
 }
 
 //use std::cell::RefCell;
@@ -63,65 +66,108 @@ pub fn log_template(str1: &str, str2: &str) -> String {
 //pub static DEBUG_FILE: RefCell<BufWriter<File>> = RefCell::new(BufWriter::new(File::create("debug.txt").unwrap()));
 //}
 
+use clap::{value_parser, Parser};
+
+#[derive(Parser, Debug)]
+struct Cli {
+    #[arg(long, default_value_t = 7777)]
+    host_port: u16,
+    #[arg(long, default_value_t = 4.0)]
+    min_window_len_cm: f64,
+    #[arg(long, default_value_t = 0.1)]
+    min_het_rate: f64,
+    #[arg(long)]
+    pbwt_depth: Option<usize>,
+    #[arg(long)]
+    pbwt_modulo: Option<f64>,
+    #[arg(long, default_value = "5b,1p,1b,1p,1b,1p,5m")]
+    mcmc_iterations: String,
+    #[arg(long)]
+    min_m3vcf_unique_haps: Option<usize>,
+    #[arg(long)]
+    max_m3vcf_unique_haps: Option<usize>,
+    #[arg(long)]
+    use_rss: bool,
+    #[arg(long, default_value_t = true)]
+    single_sample: bool,
+    #[arg(short, long, default_value_t = 1, value_parser = value_parser!(u16).range(1..))]
+    n_cpus: u16,
+    #[arg(short = 's', long, default_value_t = 12727004758508603152)]
+    prg_seed: u64,
+}
+
+fn parse_iterations(s: &str) -> Result<Vec<IterOption>, String> {
+    let mut iterations = Vec::new();
+    let s = s.split_terminator(',').collect::<Vec<_>>();
+    for i in s {
+        if i.len() != 2 {
+            return Err(format!("Invalid iterations"));
+        }
+        let n = i[..1].parse::<usize>().map_err(|e| format!("{e}"))?;
+        if n == 0 {
+            return Err(format!("Invalid iterations"));
+        }
+        let iteration = match i.chars().nth(1).ok_or(format!("Invalid iterations"))? {
+            'b' => IterOption::Burnin(n),
+            'p' => {
+                if n != 1 {
+                    return Err(format!("Invalid iterations"));
+                }
+                IterOption::Pruning(1)
+            }
+            'm' => IterOption::Main(n),
+            _ => return Err(format!("Invalid iterations")),
+        };
+        iterations.push(iteration);
+    }
+    Ok(iterations)
+}
+
 fn main() {
-    let args = std::env::args().collect::<Vec<_>>();
-    assert_eq!(args.len(), 2);
-    let host_port = args[1].parse::<u16>().unwrap();
-
-    let min_window_len_cm = 4.0;
-    let min_het_rate = 0.1f64;
-    let n_pos_window_overlap = (3. / min_het_rate).ceil() as usize;
-
-    println!("Parameters:");
+    let cli = Cli::parse();
+    println!("{:#?}", cli);
 
     let (host_stream, _host_socket) = TcpListener::bind(SocketAddr::from((
         IpAddr::from_str("127.0.0.1").unwrap(),
-        host_port,
+        cli.host_port,
     )))
     .unwrap()
     .accept()
     .unwrap();
-
     let mut host_stream = bufstream::BufStream::new(host_stream);
-
     let ref_panel_meta: m3vcf::RefPanelMeta = bincode::deserialize_from(&mut host_stream).unwrap();
     let ref_panel_blocks: Vec<m3vcf::Block> = bincode::deserialize_from(&mut host_stream).unwrap();
-
     let sites_bitmask: Vec<bool> = bincode::deserialize_from(&mut host_stream).unwrap();
-
     let cms: Vec<f64> = bincode::deserialize_from(&mut host_stream).unwrap();
     let bps: Vec<u32> = bincode::deserialize_from(&mut host_stream).unwrap();
     let genotypes: Vec<Vec<i8>> = bincode::deserialize_from(&mut host_stream).unwrap();
-    let iterations = [
-        IterOption::Burnin(5),
-        IterOption::Pruning(1),
-        IterOption::Burnin(1),
-        IterOption::Pruning(1),
-        IterOption::Burnin(1),
-        IterOption::Pruning(1),
-        IterOption::Main(5),
-        //IterOption::Main(1),
-    ];
 
-    let pbwt_depth = ((9. - ((ref_panel_meta.n_haps / 2) as f64).log10()).round() as usize)
-        .min(8)
-        .max(2);
+    let pbwt_depth = cli.pbwt_depth.unwrap_or(
+        ((9. - ((ref_panel_meta.n_haps / 2) as f64).log10()).round() as usize)
+            .min(8)
+            .max(2),
+    );
 
-    let pbwt_modulo = ((((ref_panel_meta.n_haps / 2) as f64).ln() - 50f64.ln() + 1.) * 0.01)
-        .min(0.15)
-        .max(0.005);
+    let pbwt_modulo = cli.pbwt_modulo.unwrap_or(
+        ((((ref_panel_meta.n_haps / 2) as f64).ln() - 50f64.ln() + 1.) * 0.01)
+            .min(0.15)
+            .max(0.005),
+    );
 
+    let mcmc_iterations = parse_iterations(&cli.mcmc_iterations).unwrap();
+
+    //let seed = 12727004758508603152;
+    println!("Parameters:");
     println!("pbwt-depth = {pbwt_depth}");
     println!("pbwt-modulo = {:.3}", pbwt_modulo);
+    println!("mcmc-iterations= {}", cli.mcmc_iterations);
+    println!("seed: {}", cli.prg_seed);
 
-    let phase_single = false;
-    let use_rss = false;
+    let n_pos_window_overlap = (3. / cli.min_het_rate).ceil() as usize;
 
-    if phase_single {
-        //let seed = rand::thread_rng().next_u64();
-        let seed = 12727004758508603152;
-        println!("seed: {seed}");
-        let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+    if cli.single_sample {
+        assert_eq!(genotypes.len(), 1);
+        let rng = rand_chacha::ChaCha8Rng::seed_from_u64(cli.prg_seed);
 
         #[cfg(feature = "obliv")]
         let genotypes = genotypes[0]
@@ -187,8 +233,13 @@ fn main() {
             //});
             //}
 
-            let (ref_panel_new, afreqs) =
-                common::ref_panel::m3vcf_scan(&ref_panel_meta, &ref_panel_blocks, &sites_bitmask);
+            let (ref_panel_new, afreqs) = common::ref_panel::m3vcf_scan(
+                &ref_panel_meta,
+                &ref_panel_blocks,
+                &sites_bitmask,
+                cli.min_m3vcf_unique_haps,
+                cli.max_m3vcf_unique_haps,
+            );
 
             use statrs::statistics::Statistics;
             let block_n_unique_haps = ref_panel_new
@@ -222,7 +273,7 @@ fn main() {
                 bps,
                 cms,
                 afreqs,
-                min_window_len_cm,
+                cli.min_window_len_cm,
                 n_pos_window_overlap,
                 pbwt_modulo,
                 pbwt_depth,
@@ -238,8 +289,8 @@ fn main() {
         let phased = mcmc::Mcmc::run(
             &mcmc_params,
             filtered_genotypes.view(),
-            &iterations,
-            use_rss,
+            &mcmc_iterations,
+            cli.use_rss,
             rng,
             &1.to_string(),
         );
@@ -264,7 +315,7 @@ fn main() {
         bincode::serialize_into(&mut host_stream, &vec![phased_with_missing]).unwrap();
     } else {
         rayon::ThreadPoolBuilder::new()
-            .num_threads(N_THREADS)
+            .num_threads(cli.n_cpus as usize)
             .build_global()
             .unwrap();
 
@@ -274,11 +325,8 @@ fn main() {
             .into_par_iter()
             .map(|genotypes| {
                 let id = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                //let seed = rand::thread_rng().next_u64();
-                let seed = 12727004758508603152;
-                println!("{}", &log_template("Seed", &format!("{seed}")));
 
-                let rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+                let rng = rand_chacha::ChaCha8Rng::seed_from_u64(cli.prg_seed);
 
                 #[cfg(feature = "obliv")]
                 let genotypes = genotypes
@@ -333,6 +381,8 @@ fn main() {
                         &ref_panel_meta,
                         &ref_panel_blocks,
                         &sites_bitmask,
+                        cli.min_m3vcf_unique_haps,
+                        cli.max_m3vcf_unique_haps,
                     );
 
                     use statrs::statistics::Statistics;
@@ -366,7 +416,7 @@ fn main() {
                         bps,
                         cms,
                         afreqs,
-                        min_window_len_cm,
+                        cli.min_window_len_cm,
                         n_pos_window_overlap,
                         pbwt_modulo,
                         pbwt_depth,
@@ -376,8 +426,8 @@ fn main() {
                 let phased = mcmc::Mcmc::run(
                     &mcmc_params,
                     filtered_genotypes.view(),
-                    &iterations,
-                    use_rss,
+                    &mcmc_iterations,
+                    cli.use_rss,
                     rng,
                     &id.to_string(),
                 );

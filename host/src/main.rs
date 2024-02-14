@@ -10,31 +10,39 @@ use rust_htslib::bcf;
 use std::collections::HashSet;
 use std::io::Write;
 use std::net::{IpAddr, SocketAddr, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use clap::{value_parser, Parser};
+
+#[derive(Parser, Debug)]
+struct Cli {
+    #[arg(long, default_value_t = 7777)]
+    sp_port: u16,
+    #[arg(long, value_parser=value_parser!(PathBuf))]
+    ref_panel: PathBuf,
+    #[arg(long, value_parser=value_parser!(PathBuf))]
+    genetic_map: PathBuf,
+    #[arg(long, value_parser=value_parser!(PathBuf))]
+    input: PathBuf,
+    #[arg(long, value_parser=value_parser!(PathBuf), default_value="phased.vcf.gz")]
+    output: PathBuf,
+}
+
 fn main() {
-    let args = std::env::args().collect::<Vec<_>>();
-    assert_eq!(args.len(), 6);
-    let sp_port = args[1].parse::<u16>().unwrap();
-    let ref_panel_path = &args[2];
-    let genetic_map_path = &args[3];
-    let input_path = &args[4];
-    let output_path = &args[5];
+    let cli = Cli::parse();
+    println!("Port: \t\t\t{}", cli.sp_port);
+    println!("Reference panel: \t{:?}", cli.ref_panel);
+    println!("Genetic map: \t\t{:?}", cli.genetic_map);
+    println!("Input: \t\t\t{:?}", cli.input);
+    println!("Output: \t\t{:?}", cli.output);
 
-    eprintln!("Port: \t\t\t{sp_port}");
-    eprintln!("Reference panel: \t{ref_panel_path}");
-    eprintln!("Genetic map: \t\t{genetic_map_path}");
-    eprintln!("Input: \t\t\t{input_path}");
-    eprintln!("Output: \t\t{output_path}");
+    let sites = m3vcf::read_sites(&cli.ref_panel);
 
-    let sites = m3vcf::read_sites(std::path::Path::new(ref_panel_path));
-
-    let (ref_panel_meta, ref_panel_block_iter) =
-        m3vcf::load_ref_panel(std::path::Path::new(ref_panel_path));
+    let (ref_panel_meta, ref_panel_block_iter) = m3vcf::load_ref_panel(&cli.ref_panel);
     let ref_panel_blocks = ref_panel_block_iter.collect::<Vec<_>>();
 
-    let genetic_map = geneticmap::genetic_map_from_csv_path(&Path::new(genetic_map_path)).unwrap();
+    let genetic_map = geneticmap::genetic_map_from_csv_path(&cli.genetic_map).unwrap();
     let bps = sites.iter().map(|s| s.pos).collect::<Vec<_>>();
     let interpolated_cms = geneticmap::interpolate_cm(&genetic_map, &sites);
 
@@ -55,8 +63,6 @@ fn main() {
         .map(|f| f.min(1. - f) > THRES)
         .collect::<Vec<_>>();
 
-    println!("count {}", afreq_filter.iter().filter(|&&b| b).count());
-
     let afreq_sites = afreq_filter
         .iter()
         .zip(sites.iter())
@@ -64,7 +70,7 @@ fn main() {
         .collect::<Vec<_>>();
 
     let (target_samples, afreq_bitmask, input_bcf_header, input_records_filtered) =
-        process_input(&Path::new(input_path), &afreq_sites);
+        process_input(&cli.input, &afreq_sites);
 
     let mut ref_sites_bitmask = vec![false; sites.len()];
 
@@ -77,10 +83,10 @@ fn main() {
 
     let mut sp_stream = bufstream::BufStream::new(tcp_keep_connecting(SocketAddr::from((
         IpAddr::from_str("127.0.0.1").unwrap(),
-        sp_port,
+        cli.sp_port,
     ))));
 
-    eprintln!("Host: connected to SP");
+    println!("Host: connected to SP");
 
     bincode::serialize_into(&mut sp_stream, &ref_panel_meta).unwrap();
     bincode::serialize_into(&mut sp_stream, &ref_panel_blocks).unwrap();
@@ -95,13 +101,13 @@ fn main() {
     println!("phased len = {}", phased.len());
 
     write_vcf(
-        &output_path,
+        &cli.output,
         &phased[..],
         &input_bcf_header,
         &input_records_filtered,
     );
 
-    eprintln!("Host: done");
+    println!("Host: done");
 }
 
 fn process_input(
@@ -180,7 +186,7 @@ fn process_input(
 }
 
 fn write_vcf(
-    file_name: &str,
+    file_name: &std::path::Path,
     phased: &[Array2<i8>],
     input_bcf_header: &bcf::header::HeaderView,
     input_records_filtered: &[bcf::record::Record],
@@ -202,7 +208,7 @@ fn write_vcf(
     }
 
     let mut out_vcf = bcf::Writer::from_path(
-        &Path::new(file_name),
+        file_name,
         &bcf::header::Header::from_template(&input_bcf_header),
         false,
         bcf::Format::Vcf,

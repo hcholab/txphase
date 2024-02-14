@@ -11,13 +11,15 @@ pub fn m3vcf_scan(
     meta: &m3vcf::RefPanelMeta,
     m3vcf_blocks: &[m3vcf::Block],
     sites_bitmask: &[bool],
+    min_unique: Option<usize>,
+    max_unique: Option<usize>,
 ) -> (RefPanel, Vec<f64>) {
     assert_eq!(sites_bitmask.len(), meta.n_markers);
     let mut afreqs = Vec::new();
     let mut pos = 0;
 
-    let min_unique = meta.n_haps / 200;
-    let max_unique = meta.n_haps / 2;
+    let min_unique = min_unique.unwrap_or(meta.n_haps / 200);
+    let max_unique = max_unique.unwrap_or(meta.n_haps / 2);
 
     let mut blocks = Vec::new();
     //let mut transposed_blocks = Vec::new();

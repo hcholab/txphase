@@ -1,7 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+LITE=${1:-0}
+SGX=${2:-0}
 
 source config.sh
-source common.sh
 
-(cd host && cargo +nightly build $PROFILE $BIN_FLAGS)
-(cd phasing && cargo +nightly build --no-default-features --features compressed-pbwt $PROFILE $BIN_FLAGS)
+(cd host && cargo +nightly build $PROFILE) && \
+    (cd phasing && cargo +nightly build $PROFILE $FEATURES $TARGET)

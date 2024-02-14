@@ -7,8 +7,7 @@ pub use params::*;
 use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::combine_dips;
 use crate::variants::{Rarity, Variant};
-use crate::{tp_value, Bool, Genotype, Real, UInt, Usize, U8};
-//use common::ref_panel::RefPanelSlice;
+use crate::{tp_value, Bool, Genotype, Real, UInt, Usize, U16, U8};
 use rand::Rng;
 
 use std::time::{Duration, Instant};
@@ -29,7 +28,7 @@ use ndarray::{s, Array1, Array2, Array3, ArrayView1, Zip};
 const N_HETS_PER_SEGMENT: usize = 3;
 const P: usize = 1 << N_HETS_PER_SEGMENT;
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum IterOption {
     Burnin(usize),
     Pruning(usize),
@@ -101,106 +100,6 @@ impl<'a> Mcmc<'a> {
 
         for iter in iterations_iternal {
             mcmc.iteration(iter, use_rss, &mut rng, id);
-
-            //println!(
-            //"Emission: {:?} ms",
-            //crate::rss_hmm::reduced_obliv::EMISS
-            //.with(|v| {
-            //let out = *v.borrow();
-            //*v.borrow_mut() = std::time::Duration::ZERO;
-            //out
-            //})
-            //.as_millis()
-            //);
-
-            //println!(
-            //"Transition: {:?} ms",
-            //crate::rss_hmm::reduced_obliv::TRANS
-            //.with(|v| {
-            //let out = *v.borrow();
-            //*v.borrow_mut() = std::time::Duration::ZERO;
-            //out
-            //})
-            //.as_millis()
-            //);
-
-            //println!(
-            //"Collapse: {:?} ms",
-            //crate::rss_hmm::reduced_obliv::COLL
-            //.with(|v| {
-            //let out = *v.borrow();
-            //*v.borrow_mut() = std::time::Duration::ZERO;
-            //out
-            //})
-            //.as_millis()
-            //);
-
-            //println!(
-            //"Combine 1: {:?} ms",
-            //crate::rss_hmm::reduced_obliv::COMB1
-            //.with(|v| {
-            //let out = *v.borrow();
-            //*v.borrow_mut() = std::time::Duration::ZERO;
-            //out
-            //})
-            //.as_millis()
-            //);
-
-            //println!(
-            //"Combine 2: {:?} ms",
-            //crate::rss_hmm::reduced_obliv::COMB2
-            //.with(|v| {
-            //let out = *v.borrow();
-            //*v.borrow_mut() = std::time::Duration::ZERO;
-            //out
-            //})
-            //.as_millis()
-            //);
-
-            //println!(
-            //"Expand: {:?} ms",
-            //crate::rss_hmm::reduced_obliv::EXPAND
-            //.with(|v| {
-            //let out = *v.borrow();
-            //*v.borrow_mut() = std::time::Duration::ZERO;
-            //out
-            //})
-            //.as_millis()
-            //);
-
-            //println!(
-            //"Block Transition: {:?} ms",
-            //crate::rss_hmm::reduced_obliv::BLOCK
-            //.with(|v| {
-            //let out = *v.borrow();
-            //*v.borrow_mut() = std::time::Duration::ZERO;
-            //out
-            //})
-            //.as_millis()
-            //);
-
-            //println!(
-            //"Filter Ref Panel: {:?} ms",
-            //FILTER
-            //.with(|v| {
-            //let out = *v.borrow();
-            //*v.borrow_mut() = std::time::Duration::ZERO;
-            //out
-            //})
-            //.as_millis()
-            //);
-
-            //println!(
-            //"Full HMM: {:?} ms",
-            //FULLFWBW
-            //.with(|v| {
-            //let out = *v.borrow();
-            //*v.borrow_mut() = std::time::Duration::ZERO;
-            //out
-            //})
-            //.as_millis()
-            //);
-            println!();
         }
 
         #[cfg(feature = "obliv")]
@@ -233,8 +132,6 @@ impl<'a> Mcmc<'a> {
         let now = Instant::now();
         #[cfg(feature = "obliv")]
         use compressed_pbwt_obliv::mcmc_init::mcmc_init;
-
-        //let (h_0, h_1) = mcmc_init_loaded("init.txt");
 
         #[cfg(not(feature = "obliv"))]
         use compressed_pbwt::mcmc_init::mcmc_init;
@@ -273,23 +170,6 @@ impl<'a> Mcmc<'a> {
 
         let genotype_graph = GenotypeGraph::build(genotypes);
 
-        //{
-        //use std::io::Write;
-        //crate::DEBUG_FILE.with(|f| {
-        //let mut f = f.borrow_mut();
-        //writeln!(*f, "## genotype graph ##").unwrap();
-        //let mut count = 0;
-        //for g in &genotype_graph.graph {
-        //if g.is_segment_marker() {
-        //writeln!(*f, "{count}").unwrap();
-        //count = 0;
-        //}
-        //count += 1;
-        //}
-        //writeln!(*f, "{count}").unwrap();
-        //});
-        //}
-
         #[cfg(not(feature = "obliv"))]
         let n_old_segments = genotype_graph.n_segments();
 
@@ -323,13 +203,6 @@ impl<'a> Mcmc<'a> {
         let now = Instant::now();
 
         let pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
-        //let pbwt_group_filter = {
-        //use std::io::BufRead;
-        //let f = std::io::BufReader::new(std::fs::File::open("random_pbwt.txt").unwrap());
-        //f.lines()
-        //.map(|l| l.unwrap().parse::<u8>().unwrap() == 1)
-        //.collect::<Vec<_>>()
-        //};
 
         let neighbors = {
             let pbwt_group_filter = pbwt_group_filter
@@ -370,8 +243,6 @@ impl<'a> Mcmc<'a> {
                 &pbwt_group_filter,
             );
 
-            //nn_0[3] = Some(vec![6054 - 2, 527 - 2, 19938 - 2, 19854 - 2, 19773 - 2]);
-
             let nn_1 = find_top_neighbors(
                 &h_1,
                 self.params.s,
@@ -380,37 +251,6 @@ impl<'a> Mcmc<'a> {
                 self.params.ref_panel.n_haps,
                 &pbwt_group_filter,
             );
-            //{
-            //use std::io::Write;
-            //crate::DEBUG_FILE.with(|f| {
-            //let mut f = f.borrow_mut();
-            //writeln!(*f, "## neighbors ##").unwrap();
-
-            //for (i, ((a, &h_0), (b, &h_1))) in nn_0
-            //.iter()
-            //.zip(h_0.iter())
-            //.zip(nn_1.iter().zip(h_1.iter()))
-            //.enumerate()
-            //{
-            //if let Some(a) = a.as_ref() {
-            //write!(*f, "{i}, 0, {}: ", h_0 as u8).unwrap();
-            //for v in a {
-            //let v = v + 2;
-            //write!(*f, "{v} ").unwrap();
-            //}
-            //writeln!(*f).unwrap();
-            //}
-            //if let Some(b) = b.as_ref() {
-            //write!(*f, "{i}, 1, {}: ", h_1 as u8).unwrap();
-            //for v in b {
-            //let v = v + 2;
-            //write!(*f, "{v} ").unwrap();
-            //}
-            //writeln!(*f).unwrap();
-            //}
-            //}
-            //});
-            //}
 
             for (a, b) in nn_0.iter_mut().zip(nn_1.into_iter()) {
                 a.as_mut().map(|v| v.extend(b.unwrap().into_iter()));
@@ -424,26 +264,6 @@ impl<'a> Mcmc<'a> {
         );
 
         let windows = self.windows(&mut rng);
-
-        //let windows = {
-        //use std::io::BufRead;
-        //let f = std::io::BufReader::new(std::fs::File::open("windows.txt").unwrap());
-        //let mut prev_end = 0;
-        //f.lines()
-        //.map(|l| {
-        //let l = l.unwrap();
-        //let mut l = l.split_whitespace();
-        //let start_w = l.next().unwrap().parse::<usize>().unwrap();
-        //let end_w = l.next().unwrap().parse::<usize>().unwrap() + 1;
-
-        //let start_write_w = if prev_end != 0 { prev_end } else { start_w };
-
-        //prev_end = end_w;
-
-        //((start_w, end_w), (start_write_w, end_w))
-        //})
-        //.collect::<Vec<_>>()
-        //};
 
         #[cfg(feature = "obliv")]
         let mut prev_ind = (U8::protect(0), U8::protect(0));
@@ -483,18 +303,19 @@ impl<'a> Mcmc<'a> {
 
             window_sizes.push((end_w - start_w) as f64);
 
-            //#[cfg(feature = "obliv")]
-            //{
-            //ks.push(k.expose() as f64);
-            //}
-            //#[cfg(not(feature = "obliv"))]
-            //{
-            //ks.push(k as f64);
-            //}
-
             let t = Instant::now();
             let (tprobs_window, tprobs_window_e) = if use_rss {
                 let (full_filter, k) = find_nn_bitmap(neighbors_w, params_w.ref_panel.n_haps);
+
+                #[cfg(feature = "obliv")]
+                {
+                    ks.push(k.expose() as f64);
+                }
+                #[cfg(not(feature = "obliv"))]
+                {
+                    ks.push(k as f64);
+                }
+
                 let filtered_blocks = params_w
                     .ref_panel
                     .blocks
@@ -507,6 +328,7 @@ impl<'a> Mcmc<'a> {
                     })
                     .collect::<Vec<_>>();
                 let fwbw_out = crate::rss_hmm::reduced_obliv::HmmReduced::fwbw(
+                    start_w,
                     &filtered_blocks,
                     params_w.ref_panel.n_sites,
                     k,
@@ -538,9 +360,10 @@ impl<'a> Mcmc<'a> {
 
                 (tprobs_window, tprobs_window_e)
             } else {
-                //let t = Instant::now();
+                let t = Instant::now();
                 let (max_k_neighbors, filter, n_full_states) = neighbors_to_filter(&neighbors_w);
                 ks.push(n_full_states.expose() as f64);
+
                 let mut unfolded = Array2::from_elem(
                     (end_w - start_w, max_k_neighbors.len()),
                     Genotype::protect(0),
@@ -560,9 +383,11 @@ impl<'a> Mcmc<'a> {
                     *v += t.elapsed();
                 });
 
-                let t = Instant::now();
+                //let t = Instant::now();
 
                 let filter = Array1::from_vec(filter);
+
+                #[cfg(feature = "obliv")]
                 let (tprobs_window, tprobs_window_e) = crate::hmm::Hmm::forward_backward(
                     unfolded.view(),
                     filter.view(),
@@ -573,10 +398,19 @@ impl<'a> Mcmc<'a> {
                     Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
                     start_w == 0,
                 );
-                //FULLFWBW.with(|v| {
-                //let mut v = v.borrow_mut();
-                //*v += t.elapsed();
-                //});
+
+                #[cfg(not(feature = "obliv"))]
+                let tprobs_window = crate::hmm::Hmm::forward_backward(
+                    unfolded.view(),
+                    filter.view(),
+                    n_full_states,
+                    genotype_graph_w.graph.view(),
+                    &self.params.hmm_params,
+                    &rprobs_w,
+                    Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
+                    start_w == 0,
+                );
+
                 (tprobs_window, tprobs_window_e)
 
                 //use crate::dynamic_fixed::*;
@@ -784,35 +618,6 @@ impl<'a> Mcmc<'a> {
             });
         }
 
-        //{
-        //use std::io::Write;
-        //crate::DEBUG_FILE.with(|f| {
-        //let mut f = f.borrow_mut();
-        //writeln!(*f, "## transitions ##").unwrap();
-        ////println!("# transisions = {}", self.genotype_graph.graph.iter().filter(|v| v.is_segment_marker()).count());
-        ////write!(*f, "0: ").unwrap();
-        ////for i in &first_tprobs {
-        ////write!(*f, "{:.8e} ", i).unwrap();
-        ////}
-        ////writeln!(*f).unwrap();
-        //for (c, t) in self
-        //.tprobs
-        //.outer_iter()
-        //.into_iter()
-        //.zip(self.genotype_graph.graph.iter())
-        //.filter_map(|(t, g)| if g.is_segment_marker() { Some(t) } else { None })
-        //.enumerate()
-        //{
-
-        //write!(*f, "{}: ", c+1).unwrap();
-        //for i in &t {
-        //write!(*f, "{:.3e} ", i).unwrap();
-        //}
-        //writeln!(*f).unwrap();
-        //}
-        //});
-        //}
-
         self.genotype_graph
             .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
 
@@ -853,6 +658,108 @@ impl<'a> Mcmc<'a> {
             "Total window size (Mb): {:.2} Mb",
             sum_window_size as f64 / n_windows as f64 / 1e6
         );
+
+        if use_rss {
+            println!(
+                "Emission: {:?} ms",
+                crate::rss_hmm::reduced_obliv::EMISS
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "Transition: {:?} ms",
+                crate::rss_hmm::reduced_obliv::TRANS
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "Collapse: {:?} ms",
+                crate::rss_hmm::reduced_obliv::COLL
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "Combine 1: {:?} ms",
+                crate::rss_hmm::reduced_obliv::COMB1
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "Combine 2: {:?} ms",
+                crate::rss_hmm::reduced_obliv::COMB2
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "Expand: {:?} ms",
+                crate::rss_hmm::reduced_obliv::EXPAND
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "Alpha-Post: {:?} ms",
+                crate::rss_hmm::reduced_obliv::POST
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "Block Transition: {:?} ms",
+                crate::rss_hmm::reduced_obliv::BLOCK
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "Filter Ref Panel: {:?} ms",
+                FILTER
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+        }
+
         println!(
             "HMM+Filter: {:?} ms",
             HMM.with(|v| {
@@ -1097,22 +1004,6 @@ fn find_nn_bitmap(neighbors: &[Option<Vec<Usize>>], n_haps: usize) -> (Vec<Bool>
     (neighbors_bitmap, k)
 }
 
-//fn mcmc_init_loaded(path: &str) -> (Vec<Bool>, Vec<Bool>) {
-//use std::io::BufRead;
-//let f = std::io::BufReader::new(std::fs::File::open(std::path::Path::new(path)).unwrap());
-//let mut h0 = Vec::new();
-//let mut h1 = Vec::new();
-//for line in f.lines() {
-//let line = line.unwrap();
-//let mut line = line.split_whitespace();
-//let _h0 = line.next().unwrap().parse::<u8>().unwrap();
-//let _h1 = line.next().unwrap().parse::<u8>().unwrap();
-//h0.push(_h0 == 1);
-//h1.push(_h1 == 1);
-//}
-//(h0, h1)
-//}
-
 #[cfg(feature = "obliv")]
 fn neighbors_to_filter(neighbors: &[Option<Vec<Usize>>]) -> (Vec<Usize>, Vec<Bool>, Usize) {
     let mut neighbors = neighbors
@@ -1155,7 +1046,6 @@ fn neighbors_to_filter(neighbors: &[Option<Vec<Usize>>]) -> (Vec<Usize>, Vec<Boo
     (neighbors, filter, n_full_states)
 }
 
-#[cfg(feature = "obliv")]
 fn unfold_block<'a>(
     block: &common::ref_panel::BlockSlice<'a>,
     neighbors: &[Usize],
@@ -1164,52 +1054,73 @@ fn unfold_block<'a>(
     assert_eq!(unfolded.nrows(), block.n_sites());
     assert_eq!(unfolded.ncols(), neighbors.len());
 
-    use std::iter::FromIterator;
-    use tp_fixedpoint::timing_shield::TpU16;
+    #[cfg(feature = "obliv")]
+    let unique_neighbors = {
+        use std::iter::FromIterator;
 
-    let obliv_index_map =
-        obliv_utils::vec::OblivVec::from_iter(block.index_map.iter().map(|&v| TpU16::protect(v)));
+        let obliv_index_map =
+            obliv_utils::vec::OblivVec::from_iter(block.index_map.iter().map(|&v| U16::protect(v)));
 
+        neighbors
+            .iter()
+            .map(|&v| obliv_index_map.get(v.as_u32()))
+            .collect::<Vec<_>>()
+    };
+
+    #[cfg(not(feature = "obliv"))]
     let unique_neighbors = neighbors
         .iter()
-        .map(|&v| obliv_index_map.get(v.as_u32()))
+        .map(|&v| block.index_map[v])
         .collect::<Vec<_>>();
 
     Zip::from(block.haplotypes.rows())
         .and(unfolded.rows_mut())
         .for_each(|h, u| {
             unfold_haps(h, block.n_unique(), &unique_neighbors[..], u);
-        })
+        });
 }
 
-#[cfg(feature = "obliv")]
 fn unfold_haps(
     haps: ArrayView1<u8>,
     n_unique_haps: usize,
-    unique_neighbors: &[tp_fixedpoint::timing_shield::TpU16],
+    unique_neighbors: &[U16],
     mut unfolded: ndarray::ArrayViewMut1<Genotype>,
 ) {
-    use tp_fixedpoint::timing_shield::TpU64;
-
-    let mut inner = obliv_utils::vec::OblivVec::with_capacity(haps.len().div_ceil(8));
-    let haps = haps.as_slice().unwrap();
-    for chunk in haps.chunks(8) {
-        let mut new_u64 = 0u64;
-        for &i in chunk.iter().rev() {
-            new_u64 <<= 8;
-            new_u64 |= i as u64;
+    #[cfg(feature = "obliv")]
+    {
+        let mut inner = obliv_utils::vec::OblivVec::with_capacity(haps.len().div_ceil(8));
+        let haps = haps.as_slice().unwrap();
+        for chunk in haps.chunks(8) {
+            let mut new_u64 = 0u64;
+            for &i in chunk.iter().rev() {
+                new_u64 <<= 8;
+                new_u64 |= i as u64;
+            }
+            inner.push(crate::U64::protect(new_u64));
         }
-        inner.push(TpU64::protect(new_u64));
+
+        let bitmap = obliv_utils::bitmap::OblivBitmap::from_inner(inner, n_unique_haps);
+
+        return unfolded
+            .iter_mut()
+            .zip(unique_neighbors.into_iter())
+            .for_each(|(b, n)| {
+                *b = bitmap.get(n.as_u32()).as_i8();
+            });
     }
 
-    let bitmap = obliv_utils::bitmap::OblivBitmap::from_inner(inner, n_unique_haps);
-
-    unfolded
-        .iter_mut()
-        .zip(unique_neighbors.into_iter())
-        .for_each(|(b, n)| {
-            *b = bitmap.get(n.as_u32()).as_i8();
-        });
+    #[cfg(not(feature = "obliv"))]
+    {
+        let mut bitmap = bitvec::prelude::BitSlice::<_, bitvec::prelude::Lsb0>::from_slice(
+            haps.as_slice().unwrap(),
+        );
+        return unfolded
+            .iter_mut()
+            .zip(unique_neighbors.into_iter())
+            .for_each(|(b, &n)| {
+                *b = bitmap[n as usize] as i8;
+            });
+    }
 }
 
 #[cfg(feature = "obliv")]

@@ -1,12 +1,24 @@
-#!/bin/bash
+#!/usr/bin/env bash
+
+LITE=$1
+SGX=$2
+DATA_DIR=$3
+DATASET=$4
+PHASING_PROFILE=$5
 
 source config.sh
-source common.sh
+source $DATASET
+source $PHASING_PROFILE
 
-REF_PANEL=$1
-GMAP=$2
-INPUT=$3
-OUTPUT=$4
+HOST_OPTIONS="\
+    --ref-panel $(realpath $M3VCF_REF_PANEL) \
+    --genetic-map $(realpath $GMAP) \
+    --input $(realpath $INPUT) \
+    --output $(realpath tmp/phased.vcf.gz)"
 
-(cd host && cargo +nightly run $PROFILE $BIN_FLAGS -- $PORT $REF_PANEL $GMAP $INPUT $OUTPUT &)
-(cd phasing && cargo +nightly run --no-default-features --features compressed-pbwt $PROFILE $BIN_FLAGS -- $PORT)
+(
+(cd host && cargo +nightly build $PROFILE) && \
+    (cd phasing && cargo +nightly build $PROFILE $FEATURES $TARGET)) &&
+    (
+    (cd host && cargo +nightly run $PROFILE -- $HOST_OPTIONS) & \
+        (cd phasing && cargo +nightly run $PROFILE $FEATURES $TARGET -- $PHASING_OPTIONS))
