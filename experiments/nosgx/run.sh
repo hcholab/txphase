@@ -3,8 +3,7 @@
 BIN_DIR=$1
 DATASET=$2
 PHASING_OPTIONS=$3
-CARGO_MANIFEST_DIR=$4
-OUTPUT_DIR=$5
+OUTPUT_DIR=$4
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 MAIN_DIR=$(git rev-parse --show-toplevel)
@@ -19,8 +18,6 @@ HOST_OPTIONS="\
     --input $(realpath $INPUT) \
     --output $(realpath $OUTPUT_DIR/phased.vcf.gz)"
 
-export CARGO_MANIFEST_DIR=$(realpath $CARGO_MANIFEST_DIR)
-
 $BIN_DIR/host $HOST_OPTIONS & \
-    /usr/bin/time -f "%e" -o $OUTPUT_DIR/time.txt ftxsgx-runner-cargo $BIN_DIR/phasing $PHASING_OPTIONS
+    /usr/bin/time -f "%e %M" -o $OUTPUT_DIR/time_mem.txt $BIN_DIR/phasing $PHASING_OPTIONS
 
