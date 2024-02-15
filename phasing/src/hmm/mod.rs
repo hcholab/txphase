@@ -12,15 +12,15 @@ use ndarray::{Array1, ArrayViewMut1};
 #[cfg(feature = "obliv")]
 use tp_fixedpoint::timing_shield::{TpEq, TpI16};
 
-use std::time::{Duration, Instant};
+//use std::time::{Duration, Instant};
 
-use std::cell::RefCell;
-thread_local! {
-    pub static EMISS: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static TRANS: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static COLL: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static COMB: RefCell<Duration> = RefCell::new(Duration::ZERO);
-}
+//use std::cell::RefCell;
+//thread_local! {
+    //pub static EMISS: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static TRANS: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static COLL: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static COMB: RefCell<Duration> = RefCell::new(Duration::ZERO);
+//}
 
 use ndarray::{s, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
 pub fn combine_dips(
@@ -540,7 +540,7 @@ impl Hmm {
         mut probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] probs_e: ArrayViewMut1<TpI16>,
     ) {
-        let t = Instant::now();
+        //let t = Instant::now();
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row).and(cond_haps).for_each(|p, &z| {
                 #[cfg(feature = "obliv")]
@@ -559,10 +559,10 @@ impl Hmm {
 
         #[cfg(feature = "obliv")]
         renorm_scale(probs, probs_e);
-        EMISS.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //EMISS.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
     }
 
     fn transition(
@@ -573,7 +573,7 @@ impl Hmm {
         mut cur_probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_probs_e: ArrayViewMut1<TpI16>,
     ) {
-        let t = Instant::now();
+        //let t = Instant::now();
         let all_sum_h = Zip::from(prev_probs.rows()).map_collect(|r| r.sum());
 
         #[cfg(feature = "obliv")]
@@ -601,17 +601,17 @@ impl Hmm {
         {
             cur_probs /= all_sum_h.sum();
         }
-        TRANS.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //TRANS.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
     }
 
     fn collapse(
         mut cur_probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_probs_e: ArrayViewMut1<TpI16>,
     ) {
-        let t = Instant::now();
+        //let t = Instant::now();
         #[cfg(feature = "obliv")]
         let (sum_k, sum_k_e) = sum_scale_by_column(cur_probs.view(), cur_probs_e.view());
 
@@ -632,10 +632,10 @@ impl Hmm {
         cur_probs_e.fill(sum_k_e);
 
         Zip::from(cur_probs.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_k));
-        COLL.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //COLL.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
     }
 
     fn first_combine(
@@ -673,7 +673,7 @@ impl Hmm {
         mut tprobs: ArrayViewMut2<Real>,
         mut tprobs_e: ArrayViewMut2<TpI16>,
     ) {
-        let t = Instant::now();
+        //let t = Instant::now();
 
         Real::matmul(fprobs, bprobs.t(), tprobs.view_mut());
 
@@ -689,10 +689,10 @@ impl Hmm {
             .and(&mut tprobs_e)
             .for_each(|t, e| renorm_scale_single(t, e));
 
-        COMB.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //COMB.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
     }
 
     #[cfg(not(feature = "obliv"))]
@@ -701,9 +701,6 @@ impl Hmm {
         bprobs: ArrayView2<Real>,
         mut tprobs: ArrayViewMut2<Real>,
     ) {
-        let t = Instant::now();
         tprobs.assign(&fprobs.dot(&bprobs.t()));
-        let mut _t = COMB_T.lock().unwrap();
-        *_t += Instant::now() - t;
     }
 }

@@ -26,19 +26,19 @@ use ndarray::linalg::Dot;
 #[cfg(not(feature = "obliv"))]
 const RENORM_THRESHOLD: f64 = 1e-20;
 
-use std::time::{Duration, Instant};
+//use std::time::{Duration, Instant};
 
-use std::cell::RefCell;
-thread_local! {
-    pub static EMISS: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static TRANS: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static COLL: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static COMB1: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static COMB2: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static EXPAND: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static BLOCK: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    pub static POST: RefCell<Duration> = RefCell::new(Duration::ZERO);
-}
+//use std::cell::RefCell;
+//thread_local! {
+    //pub static EMISS: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static TRANS: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static COLL: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static COMB1: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static COMB2: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static EXPAND: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static BLOCK: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    //pub static POST: RefCell<Duration> = RefCell::new(Duration::ZERO);
+//}
 
 #[cfg(feature = "obliv")]
 macro_rules! cond_assign_array {
@@ -1118,7 +1118,7 @@ impl HmmReduced {
             full_trans_prob_e.view_mut(),
         );
 
-        let t = Instant::now();
+        //let t = Instant::now();
 
         let mut cur_c_prob_ = Array::from_shape_vec(
             cur_c_prob.t().raw_dim(),
@@ -1173,10 +1173,10 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         renorm_scale(cur_c_prob.view_mut(), cur_c_prob_e.view_mut());
 
-        BLOCK.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //BLOCK.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
 
         Self::emission(
             cur_block.expand_pos(cur_block.n_sites() - 1).view(),
@@ -1297,7 +1297,7 @@ impl HmmReduced {
             .cnr_prob
             .multi_slice_mut((s![0, .., ..], s![1, .., ..]));
 
-        let t = Instant::now();
+        //let t = Instant::now();
         let mut cur_c_prob_ = Array::from_shape_vec(
             cur_c_prob.t().raw_dim(),
             cur_c_prob.t().iter().cloned().collect(),
@@ -1363,10 +1363,10 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         let mut next_cnr_prob_e = next_c_prob_e.to_owned();
 
-        BLOCK.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //BLOCK.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
 
         #[cfg(feature = "obliv")]
         Self::collapse(
@@ -1429,7 +1429,7 @@ impl HmmReduced {
         mut probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut probs_e: ArrayViewMut1<TpI16>,
     ) {
-        let t = Instant::now();
+        //let t = Instant::now();
 
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row).and(cond_haps).for_each(|p, &z| {
@@ -1451,10 +1451,10 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         renorm_scale(probs.view_mut(), probs_e.view_mut());
 
-        EMISS.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //EMISS.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
     }
 
     fn transition(
@@ -1468,7 +1468,7 @@ impl HmmReduced {
         mut cur_cnr_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_cnr_prob_e: ArrayViewMut1<TpI16>,
     ) {
-        let t = Instant::now();
+        //let t = Instant::now();
 
         Zip::from(cur_c_prob.rows_mut())
             .and(prev_c_prob.rows())
@@ -1493,10 +1493,10 @@ impl HmmReduced {
             }
         }
 
-        TRANS.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //TRANS.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
     }
 
     fn collapse(
@@ -1508,7 +1508,7 @@ impl HmmReduced {
         #[cfg(feature = "obliv")] cur_cnr_prob_e: ArrayViewMut1<TpI16>,
         mut save_cnr_prob: ArrayViewMut2<Real>,
     ) {
-        let t = Instant::now();
+        //let t = Instant::now();
 
         #[cfg(not(feature = "obliv"))]
         {
@@ -1566,10 +1566,10 @@ impl HmmReduced {
             cond_assign_array!(do_collapse, cur_cnr_prob_e, cur_cnr_prob_e_);
         }
 
-        COLL.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //COLL.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
     }
 
     fn compute_alpha_post(
@@ -1578,7 +1578,7 @@ impl HmmReduced {
         alpha_post: &mut Option<Array1<Real>>,
         save_cnr_prob: &mut Option<Array2<Real>>,
     ) {
-        let t = Instant::now();
+        //let t = Instant::now();
         if let (None, Some(save_cnr_prob)) = (alpha_post.as_ref(), save_cnr_prob.take()) {
             #[cfg(feature = "obliv")]
             {
@@ -1638,10 +1638,10 @@ impl HmmReduced {
                 });
         }
 
-        POST.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //POST.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
     }
 
     fn expand_prob(
@@ -1658,7 +1658,7 @@ impl HmmReduced {
         mut expanded_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut expanded_prob_e: ArrayViewMut1<TpI16>,
     ) {
-        let t = Instant::now();
+        //let t = Instant::now();
 
         #[cfg(feature = "obliv")]
         let mut cr_prob = cr_prob.to_owned();
@@ -1746,10 +1746,10 @@ impl HmmReduced {
                 });
         };
 
-        EXPAND.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //EXPAND.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
     }
     fn combine_block_opt<'a>(
         start_site_i: usize,
@@ -1760,7 +1760,7 @@ impl HmmReduced {
         mut tprobs: ArrayViewMut3<Real>,
         #[cfg(feature = "obliv")] mut tprobs_e: ArrayViewMut3<TpI16>,
     ) {
-        let t = Instant::now();
+        //let t = Instant::now();
 
         let inv_weights = block.inv_weights.view();
 
@@ -1810,12 +1810,12 @@ impl HmmReduced {
             alpha_00[i] = Dot::dot(&f_post_arr, &b_post_arr);
         }
 
-        COMB1.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //COMB1.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
 
-        let t = Instant::now();
+        //let t = Instant::now();
 
         #[cfg(not(feature = "obliv"))]
         {
@@ -2023,10 +2023,10 @@ impl HmmReduced {
             });
         }
 
-        COMB2.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //COMB2.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
     }
 
     fn combine_block<'a>(
@@ -2036,7 +2036,7 @@ impl HmmReduced {
         mut tprobs: ArrayViewMut3<Real>,
         #[cfg(feature = "obliv")] mut tprobs_e: ArrayViewMut3<TpI16>,
     ) {
-        let t = Instant::now();
+        //let t = Instant::now();
 
         let inv_weights = block.inv_weights.view();
 
@@ -2086,12 +2086,12 @@ impl HmmReduced {
             alpha_00[i] = Dot::dot(&f_post_arr, &b_post_arr);
         }
 
-        COMB1.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //COMB1.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
 
-        let t = Instant::now();
+        //let t = Instant::now();
 
         Zip::indexed(tprobs.outer_iter_mut())
             .and(
@@ -2206,10 +2206,10 @@ impl HmmReduced {
                     .for_each(|t, e| renorm_scale_single(t, e));
             });
 
-        COMB2.with(|v| {
-            let mut v = v.borrow_mut();
-            *v += t.elapsed();
-        });
+        //COMB2.with(|v| {
+            //let mut v = v.borrow_mut();
+            //*v += t.elapsed();
+        //});
     }
 
     //fn first_combine(
