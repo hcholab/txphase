@@ -743,6 +743,17 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
+                "Alpha-Pre: {:?} ms",
+                crate::rss_hmm::reduced_obliv::PRE
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
                 "Alpha-Post: {:?} ms",
                 crate::rss_hmm::reduced_obliv::POST
                     .with(|v| {

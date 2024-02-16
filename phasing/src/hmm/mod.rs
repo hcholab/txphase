@@ -623,7 +623,7 @@ impl Hmm {
         #[cfg(not(target_vendor = "fortanix"))]
         let t = Instant::now();
 
-        Real::matmul(fprobs, bprobs.t(), tprobs.view_mut());
+        tprobs.assign(&fprobs.dot(&bprobs.t()));
 
         Zip::from(tprobs_e.rows_mut())
             .and(&fprobs_e)

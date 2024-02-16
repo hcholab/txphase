@@ -296,7 +296,8 @@ impl<const F: usize> num_traits::Zero for TpFixed64<F> {
     }
 
     fn is_zero(&self) -> bool {
-        panic!("Unsafe operation");
+        false
+        //panic!("Unsafe operation");
     }
 }
 
