@@ -26,19 +26,21 @@ use ndarray::linalg::Dot;
 #[cfg(not(feature = "obliv"))]
 const RENORM_THRESHOLD: f64 = 1e-20;
 
-//use std::time::{Duration, Instant};
-
-//use std::cell::RefCell;
-//thread_local! {
-    //pub static EMISS: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    //pub static TRANS: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    //pub static COLL: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    //pub static COMB1: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    //pub static COMB2: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    //pub static EXPAND: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    //pub static BLOCK: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    //pub static POST: RefCell<Duration> = RefCell::new(Duration::ZERO);
-//}
+#[cfg(not(target_vendor = "fortanix"))]
+use std::cell::RefCell;
+#[cfg(not(target_vendor = "fortanix"))]
+use std::time::{Duration, Instant};
+#[cfg(not(target_vendor = "fortanix"))]
+thread_local! {
+    pub static EMISS: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static TRANS: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static COLL: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static COMB1: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static COMB2: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static EXPAND: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static BLOCK: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static POST: RefCell<Duration> = RefCell::new(Duration::ZERO);
+}
 
 #[cfg(feature = "obliv")]
 macro_rules! cond_assign_array {
@@ -1118,7 +1120,8 @@ impl HmmReduced {
             full_trans_prob_e.view_mut(),
         );
 
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
 
         let mut cur_c_prob_ = Array::from_shape_vec(
             cur_c_prob.t().raw_dim(),
@@ -1133,20 +1136,7 @@ impl HmmReduced {
             });
 
         #[cfg(feature = "obliv")]
-        let (div_cur_c_prob_, div_cur_c_prob_e) = {
-            let mut div_cur_c_prob_e =
-                Array2::<TpI16>::from_elem(cur_c_prob_.raw_dim(), TpI16::protect(0));
-            let mut div_cur_c_prob_ = cur_c_prob_.clone();
-            Zip::from(&mut div_cur_c_prob_)
-                .and(&mut div_cur_c_prob_e)
-                .for_each(|p, e| renorm_scale_single(p, e));
-            div_cur_c_prob_.map_mut(|v| {
-                *v = v
-                    .tp_eq(&Real::ZERO)
-                    .select(Real::ZERO, Real::protect_i64(1) / *v)
-            });
-            (div_cur_c_prob_, div_cur_c_prob_e)
-        };
+        let (div_cur_c_prob_, div_cur_c_prob_e) = Self::rev_array_2(cur_c_prob_.view());
 
         #[cfg(not(feature = "obliv"))]
         let div_cur_c_prob_ = cur_c_prob_.map(|&v| if v == 0. { 0. } else { 1. / v });
@@ -1173,10 +1163,11 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         renorm_scale(cur_c_prob.view_mut(), cur_c_prob_e.view_mut());
 
-        //BLOCK.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        BLOCK.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
 
         Self::emission(
             cur_block.expand_pos(cur_block.n_sites() - 1).view(),
@@ -1297,7 +1288,8 @@ impl HmmReduced {
             .cnr_prob
             .multi_slice_mut((s![0, .., ..], s![1, .., ..]));
 
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
         let mut cur_c_prob_ = Array::from_shape_vec(
             cur_c_prob.t().raw_dim(),
             cur_c_prob.t().iter().cloned().collect(),
@@ -1322,20 +1314,7 @@ impl HmmReduced {
         cur_cnr_prob.assign(&cur_c_prob);
 
         #[cfg(feature = "obliv")]
-        let (div_cur_c_prob_, div_cur_c_prob_e) = {
-            let mut div_cur_c_prob_e =
-                Array2::<TpI16>::from_elem(cur_c_prob_.raw_dim(), TpI16::protect(0));
-            Zip::from(&mut cur_c_prob_)
-                .and(&mut div_cur_c_prob_e)
-                .for_each(|p, e| renorm_scale_single(p, e));
-            (
-                cur_c_prob_.map(|&v| {
-                    v.tp_eq(&Real::ZERO)
-                        .select(Real::ZERO, Real::protect_i64(1) / v)
-                }),
-                div_cur_c_prob_e,
-            )
-        };
+        let (div_cur_c_prob_, div_cur_c_prob_e) = Self::rev_array_2(cur_c_prob_.view());
 
         #[cfg(not(feature = "obliv"))]
         let div_cur_c_prob_ = cur_c_prob_.map(|&v| if v == 0. { 0. } else { 1. / v });
@@ -1363,10 +1342,11 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         let mut next_cnr_prob_e = next_c_prob_e.to_owned();
 
-        //BLOCK.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        BLOCK.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
 
         #[cfg(feature = "obliv")]
         Self::collapse(
@@ -1429,7 +1409,8 @@ impl HmmReduced {
         mut probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut probs_e: ArrayViewMut1<TpI16>,
     ) {
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
 
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row).and(cond_haps).for_each(|p, &z| {
@@ -1451,10 +1432,11 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         renorm_scale(probs.view_mut(), probs_e.view_mut());
 
-        //EMISS.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        EMISS.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
 
     fn transition(
@@ -1468,7 +1450,8 @@ impl HmmReduced {
         mut cur_cnr_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_cnr_prob_e: ArrayViewMut1<TpI16>,
     ) {
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
 
         Zip::from(cur_c_prob.rows_mut())
             .and(prev_c_prob.rows())
@@ -1493,10 +1476,11 @@ impl HmmReduced {
             }
         }
 
-        //TRANS.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        TRANS.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
 
     fn collapse(
@@ -1508,7 +1492,8 @@ impl HmmReduced {
         #[cfg(feature = "obliv")] cur_cnr_prob_e: ArrayViewMut1<TpI16>,
         mut save_cnr_prob: ArrayViewMut2<Real>,
     ) {
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
 
         #[cfg(not(feature = "obliv"))]
         {
@@ -1566,10 +1551,11 @@ impl HmmReduced {
             cond_assign_array!(do_collapse, cur_cnr_prob_e, cur_cnr_prob_e_);
         }
 
-        //COLL.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        COLL.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
 
     fn compute_alpha_post(
@@ -1578,7 +1564,8 @@ impl HmmReduced {
         alpha_post: &mut Option<Array1<Real>>,
         save_cnr_prob: &mut Option<Array2<Real>>,
     ) {
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
         if let (None, Some(save_cnr_prob)) = (alpha_post.as_ref(), save_cnr_prob.take()) {
             #[cfg(feature = "obliv")]
             {
@@ -1595,13 +1582,8 @@ impl HmmReduced {
 
             #[cfg(feature = "obliv")]
             let weighted_cur_cnr_prob = {
-                let mut div_sum_cnr = sum_cnr.to_owned();
-                let mut div_sum_cnr_e =
-                    Array1::<TpI16>::from_elem(div_sum_cnr.raw_dim(), TpI16::protect(0));
-                Zip::from(&mut div_sum_cnr)
-                    .and(&mut div_sum_cnr_e)
-                    .for_each(|d, e| renorm_scale_single(d, e));
-                div_sum_cnr.map_mut(|v| *v = Real::protect_i64(1) / *v);
+                let (div_sum_cnr, div_sum_cnr_e) = Self::rev_array_1(sum_cnr.view());
+
                 let mut weighted_cur_cnr_prob = save_cnr_prob.to_owned();
                 let mut _e = TpI16::protect(0);
                 Zip::from(weighted_cur_cnr_prob.rows_mut()).for_each(|mut r| {
@@ -1638,10 +1620,11 @@ impl HmmReduced {
                 });
         }
 
-        //POST.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        POST.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
 
     fn expand_prob(
@@ -1658,7 +1641,8 @@ impl HmmReduced {
         mut expanded_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut expanded_prob_e: ArrayViewMut1<TpI16>,
     ) {
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
 
         #[cfg(feature = "obliv")]
         let mut cr_prob = cr_prob.to_owned();
@@ -1746,10 +1730,11 @@ impl HmmReduced {
                 });
         };
 
-        //EXPAND.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        EXPAND.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
     fn combine_block_opt<'a>(
         start_site_i: usize,
@@ -1760,7 +1745,8 @@ impl HmmReduced {
         mut tprobs: ArrayViewMut3<Real>,
         #[cfg(feature = "obliv")] mut tprobs_e: ArrayViewMut3<TpI16>,
     ) {
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
 
         let inv_weights = block.inv_weights.view();
 
@@ -1810,12 +1796,14 @@ impl HmmReduced {
             alpha_00[i] = Dot::dot(&f_post_arr, &b_post_arr);
         }
 
-        //COMB1.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        COMB1.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
 
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
 
         #[cfg(not(feature = "obliv"))]
         {
@@ -2023,10 +2011,11 @@ impl HmmReduced {
             });
         }
 
-        //COMB2.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        COMB2.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
 
     fn combine_block<'a>(
@@ -2036,7 +2025,8 @@ impl HmmReduced {
         mut tprobs: ArrayViewMut3<Real>,
         #[cfg(feature = "obliv")] mut tprobs_e: ArrayViewMut3<TpI16>,
     ) {
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
 
         let inv_weights = block.inv_weights.view();
 
@@ -2086,12 +2076,14 @@ impl HmmReduced {
             alpha_00[i] = Dot::dot(&f_post_arr, &b_post_arr);
         }
 
-        //COMB1.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        COMB1.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
 
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
 
         Zip::indexed(tprobs.outer_iter_mut())
             .and(
@@ -2206,10 +2198,11 @@ impl HmmReduced {
                     .for_each(|t, e| renorm_scale_single(t, e));
             });
 
-        //COMB2.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        COMB2.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
 
     //fn first_combine(
@@ -2337,5 +2330,125 @@ impl HmmReduced {
             });
 
         alpha
+    }
+
+    #[cfg(feature = "obliv")]
+    fn rev_array_1(array: ArrayView1<Real>) -> (Array1<Real>, Array1<TpI16>) {
+        let mut cur = Real::protect_i64(1);
+        let mut cur_e = TpI16::protect(0);
+        let mut rev = Array1::from_elem(array.dim(), Real::ZERO);
+        let mut rev_e = Array1::from_elem(array.dim(), TpI16::protect(0));
+
+        let mut array = array.to_owned();
+        let mut array_e = Array1::from_elem(array.dim(), TpI16::protect(0));
+        Zip::from(&mut array)
+            .and(&mut array_e)
+            .for_each(|p, e| renorm_scale_single(p, e));
+
+        for ((&a, &a_e), (r, r_e)) in array
+            .iter()
+            .zip(array_e.iter())
+            .zip(rev.iter_mut().zip(rev_e.iter_mut()))
+        {
+            let cond = a.tp_not_eq(&0);
+            *r = cond.select(cur, Real::ZERO);
+            *r_e = cond.select(cur_e, TpI16::protect(0));
+            cur = cond.select(cur * a, cur);
+            cur_e = cond.select(cur_e + a_e, cur_e);
+            renorm_scale_single(&mut cur, &mut cur_e);
+        }
+        let prod = cur;
+        let prod_e = cur_e;
+        cur = Real::protect_i64(1);
+        cur_e = TpI16::protect(0);
+
+        for ((&a, &a_e), (r, r_e)) in array
+            .as_slice()
+            .unwrap()
+            .iter()
+            .zip(array_e.as_slice().unwrap().iter())
+            .zip(
+                rev.as_slice_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .zip(rev_e.as_slice_mut().unwrap().iter_mut()),
+            )
+            .rev()
+        {
+            let cond = a.tp_not_eq(&0);
+            *r = cond.select(*r * cur, Real::ZERO);
+            *r_e = cond.select(*r_e + cur_e, TpI16::protect(0));
+            cur = cond.select(cur * a, cur);
+            cur_e = cond.select(cur_e + a_e, cur_e);
+            renorm_scale_single(&mut cur, &mut cur_e);
+        }
+        let rev_prod = Real::protect_i64(1) / prod;
+        let mut out = rev * rev_prod;
+        let mut out_e = rev_e.mapv_into(|v| v - prod_e);
+        Zip::from(&mut out).and(&mut out_e).for_each(|o, o_e| {
+            renorm_scale_single(o, o_e);
+            *o_e = o.tp_eq(&0).select(TpI16::protect(0), *o_e);
+        });
+        (out, -out_e)
+    }
+
+    #[cfg(feature = "obliv")]
+    fn rev_array_2(array: ArrayView2<Real>) -> (Array2<Real>, Array2<TpI16>) {
+        let mut cur = Real::protect_i64(1);
+        let mut cur_e = TpI16::protect(0);
+        let mut rev = Array2::from_elem(array.dim(), Real::ZERO);
+        let mut rev_e = Array2::from_elem(array.dim(), TpI16::protect(0));
+
+        let mut array = array.to_owned();
+        let mut array_e = Array2::from_elem(array.dim(), TpI16::protect(0));
+        Zip::from(&mut array)
+            .and(&mut array_e)
+            .for_each(|p, e| renorm_scale_single(p, e));
+
+        for ((&a, &a_e), (r, r_e)) in array
+            .iter()
+            .zip(array_e.iter())
+            .zip(rev.iter_mut().zip(rev_e.iter_mut()))
+        {
+            let cond = a.tp_not_eq(&0);
+            *r = cond.select(cur, Real::ZERO);
+            *r_e = cond.select(cur_e, TpI16::protect(0));
+            cur = cond.select(cur * a, cur);
+            cur_e = cond.select(cur_e + a_e, cur_e);
+            renorm_scale_single(&mut cur, &mut cur_e);
+        }
+        let prod = cur;
+        let prod_e = cur_e;
+        cur = Real::protect_i64(1);
+        cur_e = TpI16::protect(0);
+
+        for ((&a, &a_e), (r, r_e)) in array
+            .as_slice()
+            .unwrap()
+            .iter()
+            .zip(array_e.as_slice().unwrap().iter())
+            .zip(
+                rev.as_slice_mut()
+                    .unwrap()
+                    .iter_mut()
+                    .zip(rev_e.as_slice_mut().unwrap().iter_mut()),
+            )
+            .rev()
+        {
+            let cond = a.tp_not_eq(&0);
+            *r = cond.select(*r * cur, Real::ZERO);
+            *r_e = cond.select(*r_e + cur_e, TpI16::protect(0));
+            cur = cond.select(cur * a, cur);
+            cur_e = cond.select(cur_e + a_e, cur_e);
+            renorm_scale_single(&mut cur, &mut cur_e);
+        }
+        let rev_prod = Real::protect_i64(1) / prod;
+        let mut out = rev * rev_prod;
+        let mut out_e = rev_e.mapv_into(|v| v - prod_e);
+        Zip::from(&mut out).and(&mut out_e).for_each(|o, o_e| {
+            renorm_scale_single(o, o_e);
+            *o_e = o.tp_eq(&0).select(TpI16::protect(0), *o_e);
+        });
+        (out, -out_e)
     }
 }

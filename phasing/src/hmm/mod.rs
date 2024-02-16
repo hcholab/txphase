@@ -4,23 +4,24 @@ pub use params::*;
 #[cfg(feature = "obliv")]
 use crate::dynamic_fixed::*;
 use crate::genotype_graph::{G, P};
-//#[cfg(feature = "obliv")]
-//use crate::Usize;
 use crate::{Bool, Genotype, Real, Usize};
 #[cfg(feature = "obliv")]
 use ndarray::{Array1, ArrayViewMut1};
 #[cfg(feature = "obliv")]
 use tp_fixedpoint::timing_shield::{TpEq, TpI16};
 
-//use std::time::{Duration, Instant};
+#[cfg(not(target_vendor = "fortanix"))]
+use std::time::{Duration, Instant};
 
-//use std::cell::RefCell;
-//thread_local! {
-    //pub static EMISS: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    //pub static TRANS: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    //pub static COLL: RefCell<Duration> = RefCell::new(Duration::ZERO);
-    //pub static COMB: RefCell<Duration> = RefCell::new(Duration::ZERO);
-//}
+#[cfg(not(target_vendor = "fortanix"))]
+use std::cell::RefCell;
+#[cfg(not(target_vendor = "fortanix"))]
+thread_local! {
+    pub static EMISS: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static TRANS: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static COLL: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static COMB: RefCell<Duration> = RefCell::new(Duration::ZERO);
+}
 
 use ndarray::{s, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
 pub fn combine_dips(
@@ -314,19 +315,6 @@ impl Hmm {
             //.for_each(|c, p| *p = cond.select(*c, *p));
             //}
 
-            //if i == 3 {
-            //let fprobs = cur_fprobs.slice(s![.., ..n_full_states.expose() as usize]);
-            //let fprobs_e = cur_fprobs_e.view();
-
-            //let exposed = debug_expose_array(fprobs, fprobs_e);
-
-            //let exposed = &exposed / exposed.sum();
-
-            //println!("full \n{:#?}", exposed.row(0));
-            //println!("full \n{:#?}", fprobs.row(0).map(|v| v.expose_into_f32()));
-            //println!("full \n{:#?}", fprobs_e.map(|v| v.expose()));
-            //}
-
             prev_fprobs.assign(&cur_fprobs);
 
             #[cfg(feature = "obliv")]
@@ -450,42 +438,7 @@ impl Hmm {
             //Zip::from(&mut cur_bprob)
             //.and(&prev_bprob)
             //.for_each(|c, p| *c = cond.select(*c, *p));
-
-            //let (mut cur_bprob_e, prev_bprob_e) = self.get_probs_e();
-
-            //Zip::from(&mut cur_bprob_e)
-            //.and(&prev_bprob_e)
-            //.for_each(|c, p| *c = cond.select(*c, *p));
-            //}
-            //if i==0 {
-            //println!("cur_bprob: {:?}", cur_bprob.map(|v| v.expose_into_f32()));
-            //panic!();
-            //}
-            //if genograph[i + 1].is_segment_marker().expose() {
-            //println!("{i}:");
-            //println!("{:#?}", ref_panel.row(i).map(|v| v.expose()));
-            //println!("{:#?}", debug_expose_array(bprobs.slice(s![i, .., ..]), self.bprobs_e.slice(s![i, ..])));
-            //println!("{:#?}", debug_expose_s(bprobs.slice(s![i, .., ..])));
-            //println!();
-            //println!();
-            //panic!();
-            //}
         }
-
-        //{
-        //let i = 3;
-
-        //let bprobs = bprobs.slice(s![i, .., ..n_full_states.expose() as usize]);
-        //let bprobs_e = bprobs_e.slice(s![i, ..]);
-
-        //let exposed = debug_expose_array(bprobs, bprobs_e);
-
-        //let exposed = &exposed / exposed.sum();
-
-        //println!("full \n{:#?}", exposed.row(0));
-        //println!("full \n{:#?}", bprobs.row(0).map(|v| v.expose_into_f32()));
-        //println!("full \n{:#?}", bprobs_e.map(|v| v.expose()));
-        //}
 
         #[cfg(feature = "obliv")]
         return (bprobs, bprobs_e);
@@ -540,7 +493,8 @@ impl Hmm {
         mut probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] probs_e: ArrayViewMut1<TpI16>,
     ) {
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row).and(cond_haps).for_each(|p, &z| {
                 #[cfg(feature = "obliv")]
@@ -559,10 +513,11 @@ impl Hmm {
 
         #[cfg(feature = "obliv")]
         renorm_scale(probs, probs_e);
-        //EMISS.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        EMISS.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
 
     fn transition(
@@ -573,7 +528,8 @@ impl Hmm {
         mut cur_probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_probs_e: ArrayViewMut1<TpI16>,
     ) {
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
         let all_sum_h = Zip::from(prev_probs.rows()).map_collect(|r| r.sum());
 
         #[cfg(feature = "obliv")]
@@ -601,17 +557,19 @@ impl Hmm {
         {
             cur_probs /= all_sum_h.sum();
         }
-        //TRANS.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        TRANS.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
 
     fn collapse(
         mut cur_probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_probs_e: ArrayViewMut1<TpI16>,
     ) {
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
         #[cfg(feature = "obliv")]
         let (sum_k, sum_k_e) = sum_scale_by_column(cur_probs.view(), cur_probs_e.view());
 
@@ -632,10 +590,11 @@ impl Hmm {
         cur_probs_e.fill(sum_k_e);
 
         Zip::from(cur_probs.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_k));
-        //COLL.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        COLL.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
 
     fn first_combine(
@@ -645,18 +604,6 @@ impl Hmm {
         #[cfg(feature = "obliv")] mut first_tprobs_e: ArrayViewMut2<TpI16>,
     ) {
         let init_probs = Zip::from(first_bprobs.rows()).map_collect(|r| r.sum());
-
-        //#[cfg(feature = "obliv")]
-        //let init_probs = {
-        //let mut init_probs = init_probs;
-        //let mut first_bprobs_e = first_bprobs_e.to_owned();
-        //renorm_scale_arr1(init_probs.view_mut(), first_bprobs_e.view_mut());
-
-        //let e_to_match = max_e(first_bprobs_e.view());
-
-        //match_scale_arr1(e_to_match, init_probs.view_mut(), first_bprobs_e.view_mut());
-        //init_probs
-        //};
 
         Zip::from(first_tprobs.rows_mut()).for_each(|mut r| r.assign(&init_probs));
 
@@ -673,7 +620,8 @@ impl Hmm {
         mut tprobs: ArrayViewMut2<Real>,
         mut tprobs_e: ArrayViewMut2<TpI16>,
     ) {
-        //let t = Instant::now();
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
 
         Real::matmul(fprobs, bprobs.t(), tprobs.view_mut());
 
@@ -689,10 +637,11 @@ impl Hmm {
             .and(&mut tprobs_e)
             .for_each(|t, e| renorm_scale_single(t, e));
 
-        //COMB.with(|v| {
-            //let mut v = v.borrow_mut();
-            //*v += t.elapsed();
-        //});
+        #[cfg(not(target_vendor = "fortanix"))]
+        COMB.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
     }
 
     #[cfg(not(feature = "obliv"))]
