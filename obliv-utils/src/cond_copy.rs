@@ -12,7 +12,7 @@ pub fn cond_copy_slice_2<T: TpCondSwap + Clone>(tar: &mut [T], src: &[T], cond: 
 
     #[cfg(target_feature = "avx2")]
     {
-        use crate::vec::Aligned;
+        use crate::aligned::Aligned;
         let (src_prefix, src_aligned, src_suffix) = unsafe { src.align_to::<Aligned<u64>>() };
         let (tar_prefix, tar_aligned, tar_suffix) = unsafe { tar.align_to_mut::<Aligned<u64>>() };
 

@@ -3,6 +3,7 @@
 #![allow(incomplete_features)]
 #![feature(int_roundings)]
 
+pub mod aligned;
 pub mod bitmap;
 pub mod bitonic_sort;
 pub mod cmov;

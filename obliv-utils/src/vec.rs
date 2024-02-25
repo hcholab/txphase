@@ -1,8 +1,5 @@
+use crate::aligned::{rl_cap, Aligned};
 use timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd, TpU32, TpU8};
-
-pub const fn rl_cap<T>() -> usize {
-    64 / std::mem::size_of::<T>()
-}
 
 pub const fn log2<T>() -> Option<u32> {
     if rl_cap::<T>().is_power_of_two() {
@@ -186,12 +183,26 @@ where
         item
     }
 
+    pub fn get_many(&self, indices: &[TpU32]) -> Vec<T> {
+        let mut items =
+            unsafe { vec![std::mem::MaybeUninit::<T>::uninit().assume_init(); indices.len()] };
+        let indices = indices.iter().map(|&i| self.cal_ind(i)).collect::<Vec<_>>();
+        for (i, aligned) in self.inner.iter().enumerate() {
+            for (&(aligned_ind, inner_ind), item) in indices.iter().zip(&mut items) {
+                *item = aligned_ind
+                    .tp_eq(&(i as u32))
+                    .select(aligned.0[inner_ind.expose() as usize].clone(), item.clone());
+            }
+        }
+        items
+    }
+
     // Return original value
     pub fn set(&mut self, i: TpU32, mut item: T) -> T {
-        let (alinged_ind, inner_ind) = self.cal_ind(i);
+        let (aligned_ind, inner_ind) = self.cal_ind(i);
         for (i, aligned) in self.inner.iter_mut().enumerate() {
             let target = &mut aligned.0[inner_ind.expose() as usize];
-            alinged_ind.tp_eq(&(i as u32)).cond_swap(target, &mut item);
+            aligned_ind.tp_eq(&(i as u32)).cond_swap(target, &mut item);
         }
         item
     }
@@ -305,38 +316,6 @@ where
         }
         let capacity = rl_cap::<T>();
         &self.inner[index / capacity].0[index % capacity]
-    }
-}
-#[repr(C, align(64))]
-#[derive(Clone)]
-pub struct Aligned<T>([T; rl_cap::<T>()])
-where
-    [(); rl_cap::<T>()]:;
-
-impl<T> Default for Aligned<T>
-where
-    [(); rl_cap::<T>()]:,
-{
-    fn default() -> Self {
-        Self(unsafe { std::mem::MaybeUninit::uninit().assume_init() })
-    }
-}
-
-impl<T> Aligned<T>
-where
-    [(); rl_cap::<T>()]:,
-    T: TpOrd + TpCondSwap,
-{
-    fn obliv_bubble_sort_pos(&mut self, pos: usize) {
-        for i in (1..pos + 1).rev() {
-            let [a, b] = self.0.get_many_mut([i - 1, i]).unwrap();
-            let do_swap = b.tp_lt(&a);
-            do_swap.cond_swap(a, b);
-        }
-    }
-
-    fn obliv_bubble_sort_last(&mut self) {
-        self.obliv_bubble_sort_pos(self.0.len() - 1);
     }
 }
 

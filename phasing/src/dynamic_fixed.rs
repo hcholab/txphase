@@ -113,26 +113,11 @@ pub fn sum_scale_by_row(
     probs: ArrayView2<Real>,
     probs_e: ArrayView1<TpI16>,
 ) -> (Array1<Real>, Array1<TpI16>) {
-    //debug_sum_by_row(probs, probs_e);
     let mut sum_by_row = Zip::from(probs.rows()).map_collect(|r| r.sum());
     let mut sum_by_row_e = probs_e.to_owned();
     renorm_scale_arr1(sum_by_row.view_mut(), sum_by_row_e.view_mut());
     (sum_by_row, sum_by_row_e)
 }
-
-//pub fn debug_sum_by_row(probs: ArrayView2<Real>, probs_e: ArrayView1<TpI16>) {
-//Zip::from(probs.rows()).and(&probs_e).for_each(|r, &e| {
-//if r.iter()
-//.map(|v| v.into_inner().expose() as f64)
-//.sum::<f64>()
-//> i64::MAX as f64
-//{
-//println!("{:#?}", debug_expose_row(r, e));
-//println!("{:#?}", e.expose());
-//println!("{:#?}", debug_expose_s_arr1(r));
-//}
-//});
-//}
 
 pub fn sum_scale_by_column(
     probs: ArrayView2<Real>,
@@ -149,7 +134,7 @@ pub fn sum_scale_by_column_mut(
 ) -> (Array1<Real>, TpI16) {
     let mut sum_e = max_e(probs_e.view());
     match_scale(sum_e, probs.view_mut(), probs_e.view_mut());
-    let mut sum = Zip::from(probs.columns()).map_collect(|c| c.sum());
+    let mut sum = probs.sum_axis(ndarray::Axis(0));
     renorm_scale_row(sum.view_mut(), &mut sum_e);
     (sum, sum_e)
 }

@@ -1,4 +1,5 @@
-use crate::vec::{rl_cap, OblivVec};
+use crate::aligned::rl_cap;
+use crate::vec::OblivVec;
 use timing_shield::{TpCondSwap, TpOrd, TpU8};
 
 pub fn select_top_s<T>(s: usize, mut ranks: Vec<T>) -> OblivVec<T>

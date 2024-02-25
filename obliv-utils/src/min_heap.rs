@@ -1,4 +1,5 @@
-use crate::vec::{rl_cap, OblivVec};
+use crate::aligned::rl_cap;
+use crate::vec::OblivVec;
 use timing_shield::{TpCondSwap, TpOrd};
 
 pub struct OblivMinHeap<T>
