@@ -51,7 +51,7 @@ fn build_init_tree_leaves(
         .map(|(i, &hap_id)| {
             #[cfg(feature = "obliv")]
             let (dist, is_below) = {
-                let i = i as u64;
+                let i = i as u32;
                 let cond = prev_input.full_pos.tp_gt(&i);
                 let dist = cond.select(prev_input.full_pos - i, i - prev_input.full_pos + 1);
                 let is_below = !cond;

@@ -258,7 +258,74 @@ impl<'a> Mcmc<'a> {
 
             nn_0
         };
-        println!("Neighbors Finding: {} ms", now.elapsed().as_millis());
+
+        {
+            println!("Neighbors Finding: {} ms", now.elapsed().as_millis());
+
+            #[cfg(not(target_vendor = "fortanix"))]
+            {
+                println!(
+                    "\tInsert target: {:?} ms",
+                    compressed_pbwt_obliv::nn::INSERT
+                        .with(|v| {
+                            let out = *v.borrow();
+                            *v.borrow_mut() = std::time::Duration::ZERO;
+                            out
+                        })
+                        .as_millis()
+                );
+                println!(
+                    "\tInitialize ranks: {:?} ms",
+                    compressed_pbwt_obliv::nn::INIT_RANKS
+                        .with(|v| {
+                            let out = *v.borrow();
+                            *v.borrow_mut() = std::time::Duration::ZERO;
+                            out
+                        })
+                        .as_millis()
+                );
+                println!(
+                    "\t\tCreate: {:?} ms",
+                    compressed_pbwt_obliv::nn::nn_tree::CREATE
+                        .with(|v| {
+                            let out = *v.borrow();
+                            *v.borrow_mut() = std::time::Duration::ZERO;
+                            out
+                        })
+                        .as_millis()
+                );
+                println!(
+                    "\t\tSort: {:?} ms",
+                    compressed_pbwt_obliv::nn::nn_tree::SORT
+                        .with(|v| {
+                            let out = *v.borrow();
+                            *v.borrow_mut() = std::time::Duration::ZERO;
+                            out
+                        })
+                        .as_millis()
+                );
+                println!(
+                    "\tNN merging & lookups: {:?} ms",
+                    compressed_pbwt_obliv::nn::LOOKUP
+                        .with(|v| {
+                            let out = *v.borrow();
+                            *v.borrow_mut() = std::time::Duration::ZERO;
+                            out
+                        })
+                        .as_millis()
+                );
+                println!(
+                    "\tUpdate PBWT between blocks: {:?} ms",
+                    compressed_pbwt_obliv::nn::UPDATE
+                        .with(|v| {
+                            let out = *v.borrow();
+                            *v.borrow_mut() = std::time::Duration::ZERO;
+                            out
+                        })
+                        .as_millis()
+                );
+            }
+        }
 
         let windows = self.windows(&mut rng);
 
@@ -270,6 +337,10 @@ impl<'a> Mcmc<'a> {
         let n_windows = windows.len();
         let mut ks = Vec::new();
         let mut max_ks = Vec::new();
+        let mut max_u_ks = Vec::new();
+        let mut n_unique_states = Vec::new();
+        let mut n_unique_states_ratios = Vec::new();
+        let mut n_unique_states_ratios_2 = Vec::new();
         let mut window_sizes = Vec::new();
         let mut tprob_pairs = Array2::<Real>::zeros((P, P));
 
@@ -307,6 +378,7 @@ impl<'a> Mcmc<'a> {
 
                 #[cfg(feature = "obliv")]
                 {
+                    //TODO remove this
                     ks.push(k.expose() as f64);
                 }
                 #[cfg(not(feature = "obliv"))]
@@ -330,6 +402,35 @@ impl<'a> Mcmc<'a> {
                     let mut v = v.borrow_mut();
                     *v += t.elapsed();
                 });
+
+                //TODO remove this
+                {
+                    n_unique_states.extend(
+                        filtered_blocks
+                            .iter()
+                            .map(|v| v.n_unique_states().expose() as f64),
+                    );
+                    for block in filtered_blocks.iter() {
+                        let a = block.n_unique_states().expose();
+                        let b = (max_k as f64 * block.n_unique_haps() as f64
+                            / self.params.ref_panel.n_haps as f64
+                            * 2.)
+                            .ceil();
+                        max_u_ks.push(b);
+                        assert!(b > a as f64);
+                    }
+
+                    n_unique_states_ratios.extend(
+                        filtered_blocks.iter().map(|v| {
+                            v.n_unique_states().expose() as f64 / k.expose() as f64 * 100.
+                        }),
+                    );
+                    n_unique_states_ratios_2.extend(
+                        filtered_blocks
+                            .iter()
+                            .map(|v| v.n_unique_states().expose() as f64 / max_k as f64 * 100.),
+                    );
+                }
 
                 let fwbw_out = crate::rss_hmm::reduced_obliv::HmmReduced::fwbw(
                     start_w,
@@ -367,6 +468,8 @@ impl<'a> Mcmc<'a> {
                 let t = Instant::now();
                 let (unfolded, filter, n_full_states) =
                     filter_blocks(neighbors_w, &params_w.ref_panel.blocks);
+
+                //TODO remove this
                 ks.push(n_full_states.expose() as f64);
 
                 FILTER.with(|v| {
@@ -617,6 +720,25 @@ impl<'a> Mcmc<'a> {
                 Statistics::mean(&ratio),
                 Statistics::std_dev(&ratio)
             );
+
+            let ratio = ks
+                .iter()
+                .map(|k| k / self.params.ref_panel.n_haps as f64 * 100.)
+                .collect::<Vec<_>>();
+            println!(
+                "K/#Haps (%): {:.3}+/-{:.3}",
+                Statistics::mean(&ratio),
+                Statistics::std_dev(&ratio)
+            );
+            let ratio = max_ks
+                .iter()
+                .map(|k| k / self.params.ref_panel.n_haps as f64 * 100.)
+                .collect::<Vec<_>>();
+            println!(
+                "MaxK/#Haps (%): {:.3}+/-{:.3}",
+                Statistics::mean(&ratio),
+                Statistics::std_dev(&ratio)
+            );
         }
         println!(
             "Window sizes (#sites): {:.3}+/-{:.3}",
@@ -728,6 +850,26 @@ impl<'a> Mcmc<'a> {
                         out
                     })
                     .as_millis()
+            );
+            println!(
+                "U-K: {:.3}+/-{:.3}",
+                Statistics::mean(&n_unique_states),
+                Statistics::std_dev(&n_unique_states)
+            );
+            println!(
+                "U-K/K (%): {:.3}+/-{:.3}",
+                Statistics::mean(&n_unique_states_ratios),
+                Statistics::std_dev(&n_unique_states_ratios)
+            );
+            println!(
+                "U-K/MaxK (%): {:.3}+/-{:.3}",
+                Statistics::mean(&n_unique_states_ratios_2),
+                Statistics::std_dev(&n_unique_states_ratios_2)
+            );
+            println!(
+                "Max U-K (%): {:.3}+/-{:.3}",
+                Statistics::mean(&max_u_ks),
+                Statistics::std_dev(&max_u_ks)
             );
         } else {
             println!(

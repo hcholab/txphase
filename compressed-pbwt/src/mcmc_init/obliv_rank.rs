@@ -1,12 +1,17 @@
 use crate::{Bool, Usize};
-use timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd, TpU64};
+use timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd, TpU32, TpU64};
 
 #[derive(Clone)]
 pub struct InitRank(TpU64);
 
 impl InitRank {
-    pub fn new(div: Usize, dist: Usize, is_below: Bool, hap: bool) -> Self {
-        Self(div << 32 | dist << 2 | is_below.as_u64() << 1 | Bool::protect(hap).as_u64())
+    pub fn new(div: TpU32, dist: TpU32, is_below: Bool, hap: bool) -> Self {
+        Self(
+            div.as_u64() << 32
+                | dist.as_u64() << 2
+                | is_below.as_u64() << 1
+                | Bool::protect(hap).as_u64(),
+        )
     }
 
     pub fn get_div(&self) -> Usize {

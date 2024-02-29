@@ -1,6 +1,115 @@
-use crate::aligned::rl_cap;
+use crate::aligned::{merge_sort_aligned, rl_cap, Aligned};
 use crate::vec::OblivVec;
-use timing_shield::{TpCondSwap, TpOrd, TpU8};
+use timing_shield::{TpCondSwap, TpEq, TpOrd, TpU32, TpU8};
+
+pub fn select_top_s_merge<T>(s: usize, ranks: Vec<T>) -> OblivVec<T>
+where
+    [(); rl_cap::<T>()]:,
+    T: TpOrd + TpCondSwap + Clone,
+{
+    let mut split_i = TpU32::protect(ranks.len() as u32 - 1);
+    for (i, window) in ranks.windows(2).enumerate() {
+        let cond = window[1].tp_gt(&window[0]);
+        split_i = cond.select(TpU32::protect(i as u32), split_i);
+    }
+
+    let ranks = OblivVec::from_iter(ranks.into_iter());
+
+    let mut ptr_up = split_i.as_i32();
+    let mut ptr_down = split_i.as_i32() + 1;
+
+    let mut item_up = ranks.get(ptr_up.as_u32());
+    let mut item_down = ranks.get(ptr_down.as_u32());
+
+    let mut some_up;
+    let mut some_down;
+
+    let mut top_s = Vec::new();
+    for i in 0..s {
+        some_up = ptr_up.tp_gt_eq(&0);
+        some_down = ptr_down.tp_lt(&(ranks.len() as i32 - 1));
+
+        let select_up = some_up & (!some_down | item_up.tp_lt(&item_down));
+        top_s.push(select_up.select(item_up.clone(), item_down.clone()));
+
+        if i < s {
+            ptr_up = select_up.select(ptr_up - 1, ptr_up);
+            ptr_down = select_up.select(ptr_down, ptr_down + 1);
+
+            let new_item = ranks.get(select_up.select(ptr_up, ptr_down).as_u32());
+            item_up = select_up.select(new_item.clone(), item_up);
+            item_down = select_up.select(item_down, new_item);
+        }
+    }
+
+    OblivVec::from_iter(top_s.into_iter())
+}
+
+pub fn select_top_s_2<T>(s: usize, mut ranks: Vec<T>) -> OblivVec<T>
+where
+    [(); rl_cap::<T>()]:,
+    T: TpOrd + TpCondSwap + Clone,
+{
+    let (prefix, aligned, suffix) = unsafe { ranks.align_to_mut::<Aligned<T>>() };
+    {
+        let mut buffer = Aligned::<T>::default();
+        let len = prefix.len();
+        if len > 0 {
+            merge_sort_aligned(prefix, &mut buffer.0[..len], true);
+        }
+        for aligned in aligned.iter_mut() {
+            merge_sort_aligned(&mut aligned.0, &mut buffer.0, true);
+        }
+        let len = suffix.len();
+        if len > 0 {
+            merge_sort_aligned(suffix, &mut buffer.0[..len], true);
+        }
+    }
+
+    let mut slices = Vec::new();
+    if prefix.len() > 0 {
+        slices.push((TpU8::protect(0), &*prefix));
+    }
+    for aligned in aligned.iter() {
+        slices.push((TpU8::protect(0), &aligned.0));
+    }
+    if suffix.len() > 0 {
+        slices.push((TpU8::protect(0), &*suffix));
+    }
+
+    let mut top_s = Vec::with_capacity(s);
+
+    let mut max_rank: Option<T> = None;
+    let mut max_slice_i = TpU32::protect(0);
+
+    for _ in 0..s {
+        for (slice_i, (i, slice)) in slices.iter_mut().enumerate() {
+            let i = i.tp_lt(&(slice.len() as u8)).select(*i, TpU8::protect(0));
+            let slice_item = slice[i.expose() as usize].to_owned();
+
+            let slice_i = slice_i as u32;
+
+            if let Some(max_rank_) = max_rank.as_mut() {
+                let cond = max_rank_.tp_lt(&slice_item);
+                *max_rank_ = cond.select(max_rank_.to_owned(), slice_item);
+                max_slice_i = cond.select(max_slice_i, TpU32::protect(slice_i));
+            } else {
+                max_rank = Some(slice_item);
+                max_slice_i = TpU32::protect(slice_i);
+            }
+        }
+
+        top_s.push(max_rank.take().unwrap());
+
+        for (slice_i, (i, _)) in slices.iter_mut().enumerate() {
+            *i = max_slice_i.tp_eq(&(slice_i as u32)).select(*i + 1, *i);
+        }
+
+        max_slice_i = TpU32::protect(0);
+    }
+
+    crate::vec::OblivVec::from_iter(top_s.into_iter())
+}
 
 pub fn select_top_s<T>(s: usize, mut ranks: Vec<T>) -> OblivVec<T>
 where
@@ -93,6 +202,16 @@ mod tests {
 
         let result = select_top_s(s, rank);
 
+        for (i, &a) in [1, 2, 3, 4].iter().enumerate() {
+            assert_eq!(result.get(TpU32::protect(i as u32)).expose(), a);
+        }
+
+        let rank = (1..100)
+            .rev()
+            .map(|v| TpU64::protect(v))
+            .collect::<Vec<_>>();
+
+        let result = select_top_s_(s, rank);
         for (i, &a) in [1, 2, 3, 4].iter().enumerate() {
             assert_eq!(result.get(TpU32::protect(i as u32)).expose(), a);
         }

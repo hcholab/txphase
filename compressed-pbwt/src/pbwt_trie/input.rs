@@ -1,11 +1,11 @@
-use crate::{Usize, U16};
+use crate::{U16, U32};
 
 #[cfg(feature = "obliv")]
 use timing_shield::{TpEq, TpOrd};
 
 pub struct PbwtTrieInput {
-    pub full_pos: Usize,
-    pub full_div: Vec<Usize>,
+    pub full_pos: U32,
+    pub full_div: Vec<U32>,
 }
 
 impl PbwtTrieInput {
@@ -13,8 +13,8 @@ impl PbwtTrieInput {
         #[cfg(feature = "obliv")]
         {
             Self {
-                full_pos: Usize::protect(0),
-                full_div: vec![Usize::protect(0); n_haps],
+                full_pos: U32::protect(0),
+                full_div: vec![U32::protect(0); n_haps],
             }
         }
 
@@ -56,18 +56,6 @@ impl PbwtTrieInput {
             cur_ppa,
             self.full_div.len(),
         );
-        //#[cfg(feature = "obliv")]
-        //println!(
-        //"input: {}, a: {}, b: {}",
-        //self.full_pos.expose(),
-        //div_above.expose(),
-        //div_below.expose()
-        //);
-        //#[cfg(not(feature = "obliv"))]
-        //println!(
-        //"input: {}, a: {}, b: {}",
-        //self.full_pos, div_above, div_below
-        //);
     }
 }
 
@@ -78,7 +66,7 @@ fn expand_input_div(
     last_div: &[u16],
     start_site_i: usize,
     ppa: &[Vec<usize>],
-    prev_div: &mut [Usize],
+    prev_div: &mut [U32],
 ) {
     #[cfg(feature = "obliv")]
     let mut input_div = vec![U16::protect(0); last_div.len()];
@@ -152,10 +140,9 @@ fn expand_input_div(
     for (&d, group) in input_div.iter().zip(ppa.iter()) {
         #[cfg(feature = "obliv")]
         for &i in group {
-            prev_div[i] = d.tp_eq(&0).select(
-                prev_div[i],
-                Usize::protect(start_site_i as u64) + d.as_u64(),
-            );
+            prev_div[i] = d
+                .tp_eq(&0)
+                .select(prev_div[i], U32::protect(start_site_i as u32) + d.as_u32());
         }
 
         #[cfg(not(feature = "obliv"))]
@@ -171,19 +158,19 @@ fn expand_input_ppa(
     input_pos: U16,
     div_above: U16,
     div_below: U16,
-    prev_full_pos: Usize,
+    prev_full_pos: U32,
     prev_ppa: &[Vec<usize>],
     cur_ppa: &[Vec<usize>],
     n_haps: usize,
-) -> Usize {
+) -> U32 {
     #[cfg(feature = "obliv")]
     {
         // in-between groups
-        let mut full_pos_a = Usize::protect(0);
+        let mut full_pos_a = U32::protect(0);
         for (i, group) in cur_ppa.into_iter().enumerate() {
             full_pos_a = input_pos
                 .tp_gt(&(i as u16))
-                .select(full_pos_a + Usize::protect(group.len() as u64), full_pos_a);
+                .select(full_pos_a + U32::protect(group.len() as u32), full_pos_a);
         }
 
         // group member
@@ -196,11 +183,11 @@ fn expand_input_ppa(
                 .select(i - prev_full_pos.as_i64() + 1, i - prev_full_pos.as_i64());
         }
         let group_id = div_below.tp_eq(&0).select(input_pos, input_pos - 1);
-        let mut full_pos_b = Usize::protect(0);
+        let mut full_pos_b = U32::protect(0);
 
         for (i, group) in cur_ppa.into_iter().enumerate() {
             let i = i as u16;
-            let ingroup_n = group.into_iter().fold(Usize::protect(0), |accu, &pos| {
+            let ingroup_n = group.into_iter().fold(U32::protect(0), |accu, &pos| {
                 order[pos].tp_lt(&0).select(accu + 1, accu)
             });
             full_pos_b = group_id
@@ -209,7 +196,7 @@ fn expand_input_ppa(
 
             full_pos_b = group_id
                 .tp_gt(&i)
-                .select(full_pos_b + Usize::protect(group.len() as u64), full_pos_b);
+                .select(full_pos_b + U32::protect(group.len() as u32), full_pos_b);
         }
 
         let is_between_groups = (!div_above.tp_eq(&0)) & (!div_below.tp_eq(&0));

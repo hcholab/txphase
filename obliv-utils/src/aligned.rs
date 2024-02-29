@@ -36,32 +36,38 @@ where
         self.obliv_bubble_sort_pos(self.0.len() - 1);
     }
 }
-impl<T> Aligned<T>
-where
-    [(); rl_cap::<T>()]:,
-    T: TpOrd + TpCondSwap + Clone,
-{
-    pub fn obliv_merge_sort_pos(&mut self, pos: usize) {
-        let mut buffer = Self::default();
-        merge_sort_(&mut self.0[..pos + 1], &mut buffer.0[..pos + 1])
-    }
 
-    pub fn obliv_merge_sort_last(&mut self) {
-        let mut buffer = Self::default();
-        merge_sort_(&mut self.0, &mut buffer.0)
-    }
-}
+//impl<T> Aligned<T>
+//where
+//[(); rl_cap::<T>()]:,
+//T: TpOrd + TpCondSwap + Clone,
+//{
+//pub fn obliv_merge_sort_pos(&mut self, pos: usize) {
+//let mut buffer = Self::default();
+//merge_sort_aligned(&mut self.0[..pos + 1], &mut buffer.0[..pos + 1])
+//}
 
-fn merge_sort_<T: TpOrd + TpCondSwap + Clone>(items: &mut [T], buffer: &mut [T]) {
+//pub fn obliv_merge_sort_last(&mut self) {
+//let mut buffer = Self::default();
+//merge_sort_aligned(&mut self.0, &mut buffer.0)
+//}
+//}
+
+pub fn merge_sort_aligned<T: TpOrd + TpCondSwap + Clone>(
+    items: &mut [T],
+    buffer: &mut [T],
+    ascending: bool,
+) {
+    assert_eq!(items.len(), buffer.len());
     if items.len() == 2 {
         let [a, b] = unsafe { items.get_many_unchecked_mut([0, 1]) };
-        a.tp_gt(b).cond_swap(a, b);
+        (!(ascending ^ a.tp_gt(b))).cond_swap(a, b);
     } else if items.len() > 2 {
         {
             let (items_a, items_b) = items.split_at_mut(items.len() / 2);
             let (buffer_a, buffer_b) = buffer.split_at_mut(buffer.len() / 2);
-            merge_sort_(items_a, buffer_a);
-            merge_sort_(items_b, buffer_b);
+            merge_sort_aligned(items_a, buffer_a, ascending);
+            merge_sort_aligned(items_b, buffer_b, ascending);
         }
 
         buffer.clone_from_slice(items);
@@ -73,7 +79,7 @@ fn merge_sort_<T: TpOrd + TpCondSwap + Clone>(items: &mut [T], buffer: &mut [T])
         let (mut some_b, mut cur_b) = (TpBool::protect(true), &buffer_b[0]);
 
         for item in items.iter_mut() {
-            let select_a = some_a & ((!some_b) | cur_a.tp_gt(cur_b));
+            let select_a = some_a & ((!some_b) | (ascending ^ cur_a.tp_gt(cur_b)));
             *item = select_a.select(cur_a.to_owned(), cur_b.to_owned());
             a_ptr = select_a.select(a_ptr + 1, a_ptr);
             b_ptr = select_a.select(b_ptr, b_ptr + 1);

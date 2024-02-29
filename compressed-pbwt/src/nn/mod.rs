@@ -1,5 +1,5 @@
 mod nn;
-mod nn_tree;
+pub mod nn_tree;
 
 pub use nn::*;
 pub use nn_tree::*;

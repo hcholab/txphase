@@ -11,15 +11,19 @@ use crate::{Bool, Usize};
 #[cfg(feature = "obliv")]
 use timing_shield::TpEq;
 
-//use std::sync::{Arc, Mutex};
-//use std::time::{Duration, Instant};
-
-//lazy_static::lazy_static! {
-//pub static ref INIT_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
-//pub static ref INSERT_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
-//pub static ref NEIGH_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
-//pub static ref UPDATE_T: Arc<Mutex<Duration>> = Arc::new(Mutex::new(Duration::from_millis(0)));
-//}
+#[cfg(not(target_vendor = "fortanix"))]
+mod timing {
+    pub use std::cell::RefCell;
+    pub use std::time::{Duration, Instant};
+    thread_local! {
+        pub static INSERT: RefCell<Duration> = RefCell::new(Duration::ZERO);
+        pub static INIT_RANKS: RefCell<Duration> = RefCell::new(Duration::ZERO);
+        pub static LOOKUP: RefCell<Duration> = RefCell::new(Duration::ZERO);
+        pub static UPDATE: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    }
+}
+#[cfg(not(target_vendor = "fortanix"))]
+pub use timing::*;
 
 pub fn find_top_neighbors(
     input_hap: &[Bool],
@@ -63,90 +67,134 @@ fn find_top_neighbors_trie(
     #[cfg(not(feature = "obliv"))]
     let (mut last_group_id, mut last_div_above, mut last_div_below) = (0, 0, 0);
 
-    //let t = Instant::now();
+    let do_query = find_neighbors_filter
+        .iter()
+        .cloned()
+        .reduce(|accu, i| accu | i)
+        .unwrap();
+    #[cfg(not(target_vendor = "fortanix"))]
+    let t = Instant::now();
     let mut nearest_neighbors = Vec::new();
     for (i, ((id, d_a, d_b), &b)) in pbwt_trie
         .insert(input_hap.iter().cloned())
         .zip(find_neighbors_filter.into_iter())
         .enumerate()
     {
-        nearest_neighbors.push(if b {
-            Some(nearest_group(id, d_a, d_b))
-        } else {
-            None
-        });
+        if do_query {
+            nearest_neighbors.push(if b {
+                Some(nearest_group(id, d_a, d_b))
+            } else {
+                None
+            });
+        }
         if i == input_hap.len() - 1 {
             last_group_id = id;
             last_div_above = d_a;
             last_div_below = d_b;
         }
     }
-    let mut nearest_neighbors_iter = nearest_neighbors.into_iter().rev();
-    //let mut _t = INSERT_T.lock().unwrap();
-    //*_t += Instant::now() - t;
 
-    //let t = Instant::now();
-    let mut rank_level = init_last_rank_level(
-        n_neighbors,
-        pbwt_input.full_pos,
-        &pbwt_input.full_div,
-        &prev_ppa,
-        &pbwt_trie.ppa,
-    );
-    //let mut _t = INIT_T.lock().unwrap();
-    //*_t += Instant::now() - t;
+    #[cfg(not(target_vendor = "fortanix"))]
+    INSERT.with(|v| {
+        let mut v = v.borrow_mut();
+        *v += t.elapsed();
+    });
 
-    let mut all_neighbors = Vec::new();
+    let all_neighbors = if do_query {
+        let mut nearest_neighbors_iter = nearest_neighbors.into_iter().rev();
 
-    // last level
-    let id = nearest_neighbors_iter.next().unwrap();
-
-    let neighbors = if let Some(id) = id {
-        Some(find_top_neighbors_level(
-            id,
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
+        let mut rank_level = init_last_rank_level(
             n_neighbors,
-            pbwt_trie.div.last().unwrap(),
-            &rank_level,
-        ))
-    } else {
-        None
-    };
+            pbwt_input.full_pos,
+            &pbwt_input.full_div,
+            &prev_ppa,
+            &pbwt_trie.ppa,
+        );
 
-    all_neighbors.push(neighbors);
+        #[cfg(not(target_vendor = "fortanix"))]
+        INIT_RANKS.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
 
-    //let t = Instant::now();
-    for ((trie_level, div_level), id) in pbwt_trie
-        .trie
-        .iter()
-        .rev()
-        .zip(
-            pbwt_trie
-                .div
-                .iter()
-                .rev()
-                .skip(1)
-                .chain(std::iter::once(&vec![0])),
-        )
-        .zip(nearest_neighbors_iter)
-    {
-        rank_level = build_rank_level(n_neighbors, trie_level, &rank_level);
+        #[cfg(not(target_vendor = "fortanix"))]
+        let t = Instant::now();
+
+        let mut all_neighbors = Vec::new();
+
+        let mut stop = 0;
+
+        for (i, &b) in find_neighbors_filter.iter().enumerate() {
+            if b {
+                stop = i;
+                break;
+            }
+        }
+
+        // last level
+        let id = nearest_neighbors_iter.next().unwrap();
 
         let neighbors = if let Some(id) = id {
             Some(find_top_neighbors_level(
                 id,
                 n_neighbors,
-                div_level,
+                pbwt_trie.div.last().unwrap(),
                 &rank_level,
             ))
         } else {
             None
         };
-        all_neighbors.push(neighbors);
-    }
-    //let mut _t = NEIGH_T.lock().unwrap();
-    //*_t += Instant::now() - t;
 
-    //let t = Instant::now();
+        all_neighbors.push(neighbors);
+
+        for (((i, trie_level), div_level), id) in pbwt_trie
+            .trie
+            .iter()
+            .enumerate()
+            .rev()
+            .zip(
+                pbwt_trie
+                    .div
+                    .iter()
+                    .rev()
+                    .skip(1)
+                    .chain(std::iter::once(&vec![0])),
+            )
+            .zip(nearest_neighbors_iter)
+        {
+            if i < stop {
+                all_neighbors.push(None);
+            } else {
+                rank_level = build_rank_level(n_neighbors, trie_level, &rank_level);
+
+                let neighbors = if let Some(id) = id {
+                    Some(find_top_neighbors_level(
+                        id,
+                        n_neighbors,
+                        div_level,
+                        &rank_level,
+                    ))
+                } else {
+                    None
+                };
+                all_neighbors.push(neighbors);
+            }
+        }
+        #[cfg(not(target_vendor = "fortanix"))]
+        LOOKUP.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
+
+        all_neighbors
+    } else {
+        vec![None; find_neighbors_filter.len()]
+    };
+
+    #[cfg(not(target_vendor = "fortanix"))]
+    let t = Instant::now();
     pbwt_input.update(
         last_group_id,
         last_div_above,
@@ -156,8 +204,13 @@ fn find_top_neighbors_trie(
         prev_ppa,
         &pbwt_trie.ppa,
     );
-    //let mut _t = UPDATE_T.lock().unwrap();
-    //*_t += Instant::now() - t;
+
+    #[cfg(not(target_vendor = "fortanix"))]
+    UPDATE.with(|v| {
+        let mut v = v.borrow_mut();
+        *v += t.elapsed();
+    });
+
     all_neighbors
 }
 

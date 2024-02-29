@@ -272,6 +272,16 @@ fn main() {
                 Statistics::std_dev(&block_n_sites)
             );
 
+            let compression_ratio = block_n_unique_haps
+                .iter()
+                .map(|v| v / ref_panel_meta.n_haps as f64 * 100.)
+                .collect::<Vec<_>>();
+            println!(
+                "M3VCF compression ratios: {:.3}+/-{:.3}",
+                Statistics::mean(&compression_ratio),
+                Statistics::std_dev(&compression_ratio)
+            );
+
             mcmc::McmcSharedParams::new(
                 ref_panel_new,
                 bps,
