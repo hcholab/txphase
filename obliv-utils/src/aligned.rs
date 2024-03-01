@@ -10,12 +10,36 @@ pub struct Aligned<T>(pub [T; rl_cap::<T>()])
 where
     [(); rl_cap::<T>()]:;
 
-impl<T> Default for Aligned<T>
+impl<T> Aligned<T>
 where
     [(); rl_cap::<T>()]:,
 {
+    pub unsafe fn uninit() -> Self {
+        Self(std::mem::MaybeUninit::uninit().assume_init())
+    }
+}
+
+impl<T> Aligned<T>
+where
+    [(); rl_cap::<T>()]:,
+    T: Clone,
+{
+    pub fn with_elem(elem: T) -> Self {
+        let mut new_self = Self(unsafe { std::mem::MaybeUninit::uninit().assume_init() });
+        new_self.0.fill(elem);
+        new_self
+    }
+}
+
+impl<T> Default for Aligned<T>
+where
+    [(); rl_cap::<T>()]:,
+    T: Default + Clone,
+{
     fn default() -> Self {
-        Self(unsafe { std::mem::MaybeUninit::uninit().assume_init() })
+        let mut new_self = Self(unsafe { std::mem::MaybeUninit::uninit().assume_init() });
+        new_self.0.fill(T::default());
+        new_self
     }
 }
 

@@ -1,14 +1,6 @@
 use crate::aligned::{rl_cap, Aligned};
 use timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd, TpU32, TpU8};
 
-pub const fn log2<T>() -> Option<u32> {
-    if rl_cap::<T>().is_power_of_two() {
-        Some(rl_cap::<T>().ilog2())
-    } else {
-        None
-    }
-}
-
 #[derive(Clone)]
 pub struct OblivVec<T>
 where
@@ -25,7 +17,7 @@ where
 {
     pub fn new() -> Self {
         Self {
-            inner: vec![Aligned::<T>::default()],
+            inner: unsafe { vec![Aligned::<T>::uninit()] },
             len: 0,
             last_len: 0,
         }
@@ -33,7 +25,7 @@ where
 
     pub fn with_capacity(capacity: usize) -> Self {
         let mut inner = Vec::with_capacity(capacity.div_ceil(rl_cap::<T>()));
-        inner.push(Aligned::<T>::default());
+        inner.push(unsafe { Aligned::<T>::uninit() });
         Self {
             inner,
             len: 0,
@@ -48,7 +40,7 @@ where
     pub fn push(&mut self, item: T) {
         if self.last_len as usize == rl_cap::<T>() {
             self.last_len = 0;
-            self.inner.push(Aligned::<T>::default());
+            self.inner.push(unsafe { Aligned::<T>::uninit() });
         }
         self.inner.last_mut().unwrap().0[self.last_len as usize] = item;
         self.last_len += 1;
@@ -150,13 +142,21 @@ where
     T: Clone,
 {
     pub fn with_elem(n: usize, elem: T) -> Self {
-        let mut new_self = Self::with_capacity(n);
-        for _ in 0..n {
-            new_self.push(elem.clone());
+        let aligned = Aligned::with_elem(elem);
+        let inner = vec![aligned; n.div_ceil(rl_cap::<T>())];
+        Self {
+            inner,
+            len: n as u32,
+            last_len: (n % rl_cap::<T>()) as u8,
         }
-        new_self
     }
+}
 
+impl<T> OblivVec<T>
+where
+    [(); rl_cap::<T>()]:,
+    T: Default + Clone,
+{
     pub fn default(len: usize) -> Self {
         let n_aligned = len.div_ceil(rl_cap::<T>());
         Self {
@@ -316,6 +316,14 @@ where
         }
         let capacity = rl_cap::<T>();
         &self.inner[index / capacity].0[index % capacity]
+    }
+}
+
+const fn log2<T>() -> Option<u32> {
+    if rl_cap::<T>().is_power_of_two() {
+        Some(rl_cap::<T>().ilog2())
+    } else {
+        None
     }
 }
 

@@ -52,7 +52,7 @@ where
 {
     let (prefix, aligned, suffix) = unsafe { ranks.align_to_mut::<Aligned<T>>() };
     {
-        let mut buffer = Aligned::<T>::default();
+        let mut buffer = unsafe { Aligned::<T>::uninit() };
         let len = prefix.len();
         if len > 0 {
             merge_sort_aligned(prefix, &mut buffer.0[..len], true);
@@ -211,7 +211,7 @@ mod tests {
             .map(|v| TpU64::protect(v))
             .collect::<Vec<_>>();
 
-        let result = select_top_s_(s, rank);
+        let result = select_top_s_2(s, rank);
         for (i, &a) in [1, 2, 3, 4].iter().enumerate() {
             assert_eq!(result.get(TpU32::protect(i as u32)).expose(), a);
         }

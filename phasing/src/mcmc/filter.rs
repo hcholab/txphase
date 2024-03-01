@@ -1,6 +1,7 @@
 use crate::{Bool, Genotype, UInt, Usize, U16};
 use common::ref_panel::BlockSlice;
 use ndarray::{s, Array1, Array2, ArrayView1, Zip};
+use obliv_utils::vec::OblivVec;
 use tp_fixedpoint::timing_shield::TpU64;
 
 #[cfg(feature = "obliv")]
@@ -103,16 +104,14 @@ pub fn filter_blocks<'a>(
 
     let unique_neighbors = {
         let packed = pack_index_maps(blocks);
-        let mut max_k_neighbors_indices = vec![packed[0].to_owned(); max_k_neighbors.len()];
-        for (i, packed) in packed.into_iter().enumerate().skip(1) {
+        let mut max_k_neighbors_indices = vec![Vec::new(); max_k_neighbors.len()];
+
+        for packed in packed.into_iter() {
             for (n, indices) in max_k_neighbors
                 .iter()
                 .zip(max_k_neighbors_indices.iter_mut())
             {
-                let cond = n.tp_eq(&(i as u64));
-                for (a, &b) in indices.iter_mut().zip(&packed) {
-                    *a = cond.select(b, *a);
-                }
+                indices.push(packed.get(n.as_u32()));
             }
         }
         let unpacked = unpack_indices(&max_k_neighbors_indices, blocks);
@@ -258,9 +257,10 @@ fn unfold_haps(
 //}
 //}
 
-pub fn pack_index_maps<'a>(blocks: &[BlockSlice<'a>]) -> Vec<Vec<TpU64>> {
+pub fn pack_index_maps<'a>(blocks: &[BlockSlice<'a>]) -> Vec<OblivVec<TpU64>> {
+    use std::iter::FromIterator;
     let n_full_haps = blocks[0].index_map.len();
-    let mut packed = vec![Vec::new(); n_full_haps];
+    let mut packed = Vec::new();
     let mut cur_bit_count = 0;
     let mut cur_packed = Some(vec![0u64; n_full_haps]);
     for block in blocks {
@@ -274,14 +274,13 @@ pub fn pack_index_maps<'a>(blocks: &[BlockSlice<'a>]) -> Vec<Vec<TpU64>> {
         }
         cur_bit_count += n_bits;
         if cur_bit_count >= 64 {
-            for (c, p) in cur_packed
-                .take()
-                .unwrap()
-                .into_iter()
-                .zip(packed.iter_mut())
-            {
-                p.push(TpU64::protect(c));
-            }
+            packed.push(OblivVec::from_iter(
+                cur_packed
+                    .take()
+                    .unwrap()
+                    .into_iter()
+                    .map(|v| TpU64::protect(v)),
+            ));
             cur_packed = Some(vec![0u64; n_full_haps]);
             cur_bit_count &= 0b111111;
 
@@ -298,14 +297,13 @@ pub fn pack_index_maps<'a>(blocks: &[BlockSlice<'a>]) -> Vec<Vec<TpU64>> {
         }
     }
     if cur_bit_count > 0 {
-        for (c, p) in cur_packed
-            .take()
-            .unwrap()
-            .into_iter()
-            .zip(packed.iter_mut())
-        {
-            p.push(TpU64::protect(c));
-        }
+        packed.push(OblivVec::from_iter(
+            cur_packed
+                .take()
+                .unwrap()
+                .into_iter()
+                .map(|v| TpU64::protect(v)),
+        ));
     }
     packed
 }
