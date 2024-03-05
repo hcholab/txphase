@@ -6,7 +6,7 @@ use crate::U16;
 use super::{NNRank, RankList};
 
 use crate::pbwt_trie::{nearest_group, PbwtTrie, PbwtTrieInput};
-use crate::{Bool, Usize};
+use crate::{Bool, U32};
 
 #[cfg(feature = "obliv")]
 use timing_shield::TpEq;
@@ -31,10 +31,10 @@ pub fn find_top_neighbors(
     pbwt_tries: &[PbwtTrie],
     n_haps: usize,
     find_neighbors_filter: &[bool],
-) -> Vec<Option<Vec<Usize>>> {
+) -> Vec<Option<Vec<U32>>> {
     assert_eq!(input_hap.len(), find_neighbors_filter.len());
     let mut pbwt_input = PbwtTrieInput::new(n_haps);
-    let mut prev_ppa = &vec![(0..n_haps).collect::<Vec<_>>()];
+    let mut prev_ppa = &vec![(0..n_haps as u32).collect::<Vec<_>>()];
     let mut neighbors = Vec::new();
     for pbwt in pbwt_tries {
         let input_slice = &input_hap[pbwt.start_site..pbwt.start_site + pbwt.n_sites()];
@@ -56,10 +56,10 @@ fn find_top_neighbors_trie(
     input_hap: &[Bool],
     n_neighbors: usize,
     pbwt_trie: &PbwtTrie,
-    prev_ppa: &[Vec<usize>],
+    prev_ppa: &[Vec<u32>],
     pbwt_input: &mut PbwtTrieInput,
     find_neighbors_filter: &[bool],
-) -> Vec<Option<Vec<Usize>>> {
+) -> Vec<Option<Vec<U32>>> {
     #[cfg(feature = "obliv")]
     let (mut last_group_id, mut last_div_above, mut last_div_below) =
         (U16::protect(0), U16::protect(0), U16::protect(0));
@@ -222,8 +222,8 @@ pub fn find_top_neighbors_level(
     n_neighbors: usize,
     div_level: &[u16],
     nn_ranks: &[Rc<RankList<NNRank>>],
-) -> Vec<Usize> {
-    let mut result_ranks = RankList::with_elem(n_neighbors, Usize::protect(0));
+) -> Vec<U32> {
+    let mut result_ranks = RankList::with_elem(n_neighbors, U32::protect(0));
     for i in 0..nn_ranks.len() as u16 {
         let ranks = find_top_neighbors_level_(i, n_neighbors, div_level, nn_ranks);
         result_ranks.cond_copy_from_slice(&ranks, pos.tp_eq(&i));
@@ -247,7 +247,7 @@ pub fn find_top_neighbors_level_(
     n_neighbors: usize,
     div_level: &[u16],
     nn_ranks: &[Rc<RankList<NNRank>>],
-) -> Vec<Usize> {
+) -> Vec<U32> {
     let pos = pos as usize;
     let mut neighbors = Vec::with_capacity(n_neighbors);
     neighbors.extend(nn_ranks[pos].iter().map(|rank| rank.get_hap_id()));

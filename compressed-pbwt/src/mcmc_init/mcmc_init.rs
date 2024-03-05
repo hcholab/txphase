@@ -151,7 +151,7 @@ pub fn mcmc_init(
         }
         let zero_ppa;
         let prev_ppa = prev_ppa.unwrap_or({
-            zero_ppa = vec![(0..n_haps).collect::<Vec<_>>()];
+            zero_ppa = vec![(0..n_haps as u32).collect::<Vec<_>>()];
             &zero_ppa
         });
 
@@ -181,7 +181,7 @@ pub fn mcmc_init(
 pub fn iter_pbwt_tries(
     pbwt_tries: &[PbwtTrie],
     n_haps: usize,
-) -> impl Iterator<Item = (&PbwtTrie, Option<&[Vec<usize>]>, Option<Vec<bool>>)> + '_ {
+) -> impl Iterator<Item = (&PbwtTrie, Option<&[Vec<u32>]>, Option<Vec<bool>>)> + '_ {
     use std::iter::once;
     pbwt_tries
         .iter()

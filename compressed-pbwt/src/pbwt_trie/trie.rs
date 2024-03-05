@@ -16,7 +16,7 @@ pub struct PbwtTrie {
     pub div: Vec<Vec<u16>>,
     pub first_haps: Vec<bool>,
     pub last_hap_ids: Vec<u16>,
-    pub ppa: Vec<Vec<usize>>,
+    pub ppa: Vec<Vec<u32>>,
     #[cfg(feature = "obliv")]
     pub insert: OblivInsert,
     #[cfg(not(feature = "obliv"))]
@@ -27,7 +27,7 @@ impl PbwtTrie {
     pub fn transform(
         start_site: usize,
         hap_site_iter: impl Iterator<Item = Vec<bool>>,
-        prev_ppa: &[Vec<usize>],
+        prev_ppa: &[Vec<u32>],
         cur_index_map: &[u16],
         n_haps: usize,
         n_sites: usize,
@@ -93,7 +93,7 @@ impl PbwtTrie {
         let mut index_map = vec![0; n_haps];
         for (m, &i) in self.ppa.iter().zip(self.last_hap_ids.iter()) {
             for &j in m {
-                index_map[j] = i;
+                index_map[j as usize] = i;
             }
         }
         index_map
@@ -165,11 +165,7 @@ fn build_trie_layer(
     (trie_layer, a, d, z)
 }
 
-fn build_ppa(
-    prev_ppa: &[Vec<usize>],
-    cur_index_map: &[u16],
-    last_hap_ids: &[u16],
-) -> Vec<Vec<usize>> {
+fn build_ppa(prev_ppa: &[Vec<u32>], cur_index_map: &[u16], last_hap_ids: &[u16]) -> Vec<Vec<u32>> {
     let mut ppa = vec![Vec::new(); last_hap_ids.len()];
     let rev_last_hap_id = {
         let mut rev_last_hap_id = vec![0; last_hap_ids.len()];

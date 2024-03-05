@@ -15,8 +15,8 @@ const INIT_NEIGHBORS: usize = 2;
 pub fn build_init_tree(
     trie: &[Vec<Node>],
     input: &PbwtTrieInput,
-    prev_ppa: Option<&[Vec<usize>]>,
-    cur_ppa: &[Vec<usize>],
+    prev_ppa: Option<&[Vec<u32>]>,
+    cur_ppa: &[Vec<u32>],
     next_first_full_haps: Option<&[bool]>, // (index map, haps)
 ) -> Vec<Vec<RankList<InitRank>>> {
     let mut init_tree = Vec::new();
@@ -32,23 +32,33 @@ pub fn build_init_tree(
 
 fn build_init_tree_leaves(
     prev_input: &PbwtTrieInput,
-    prev_ppa: Option<&[Vec<usize>]>,
-    cur_ppa: &[Vec<usize>],
+    prev_ppa: Option<&[Vec<u32>]>,
+    cur_ppa: &[Vec<u32>],
     next_first_full_haps: Option<&[bool]>,
 ) -> Vec<RankList<InitRank>> {
     // if first block, use zero ppa
     let zero_ppa;
     let prev_ppa = prev_ppa.unwrap_or({
         let n_haps = prev_input.full_div.len();
-        zero_ppa = vec![(0..n_haps).collect::<Vec<_>>()];
+        zero_ppa = vec![(0..n_haps as u32).collect::<Vec<_>>()];
         &zero_ppa
     });
 
-    let ranks = prev_ppa
+    let len = cur_ppa.iter().map(|v| v.len()).sum::<usize>();
+    let mut rev_cur_ppa = vec![0u32; len];
+    for (i, g) in cur_ppa.iter().enumerate() {
+        for &j in g {
+            rev_cur_ppa[j as usize] = i as u32;
+        }
+    }
+
+    let mut ranks = vec![Vec::new(); cur_ppa.len()];
+
+    prev_ppa
         .into_iter()
         .flatten()
         .enumerate()
-        .map(|(i, &hap_id)| {
+        .for_each(|(i, &hap_id)| {
             #[cfg(feature = "obliv")]
             let (dist, is_below) = {
                 let i = i as u32;
@@ -65,38 +75,22 @@ fn build_init_tree_leaves(
                 (i - prev_input.full_pos + 1, true)
             };
 
-            (
-                hap_id,
-                InitRank::new(
-                    prev_input.full_div[hap_id],
-                    dist,
-                    is_below,
-                    get_hap(hap_id, next_first_full_haps),
-                ),
-            )
-        })
-        .collect::<Vec<_>>();
+            ranks[rev_cur_ppa[hap_id as usize] as usize].push(InitRank::new(
+                prev_input.full_div[hap_id as usize],
+                dist,
+                is_below,
+                get_hap(hap_id, next_first_full_haps),
+            ))
+        });
 
-    let mut sorted_ranks: Vec<Option<InitRank>> = vec![None; ranks.len()];
-
-    for (id, rank) in ranks {
-        sorted_ranks[id] = Some(rank);
-    }
-
-    cur_ppa
+    ranks
         .into_iter()
-        .map(|group| {
-            let rank = group
-                .into_iter()
-                .map(|&id| sorted_ranks[id].take().unwrap())
-                .collect::<Vec<_>>();
-            select_top_s(INIT_NEIGHBORS, rank)
-        })
+        .map(|r| select_top_s(INIT_NEIGHBORS, r))
         .collect()
 }
 
-fn get_hap(hap_id: usize, haps: Option<&[bool]>) -> bool {
-    haps.map(|v| v[hap_id]).unwrap_or(false)
+fn get_hap(hap_id: u32, haps: Option<&[bool]>) -> bool {
+    haps.map(|v| v[hap_id as usize]).unwrap_or(false)
 }
 
 fn build_init_tree_level(

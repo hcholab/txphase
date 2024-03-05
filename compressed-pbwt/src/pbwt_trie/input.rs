@@ -34,8 +34,8 @@ impl PbwtTrieInput {
         div_below: U16,
         trie_start_site: usize,
         last_trie_div: &[u16],
-        prev_ppa: &[Vec<usize>],
-        cur_ppa: &[Vec<usize>],
+        prev_ppa: &[Vec<u32>],
+        cur_ppa: &[Vec<u32>],
     ) {
         expand_input_div(
             pos,
@@ -65,7 +65,7 @@ fn expand_input_div(
     div_below: U16,
     last_div: &[u16],
     start_site_i: usize,
-    ppa: &[Vec<usize>],
+    ppa: &[Vec<u32>],
     prev_div: &mut [U32],
 ) {
     #[cfg(feature = "obliv")]
@@ -140,9 +140,10 @@ fn expand_input_div(
     for (&d, group) in input_div.iter().zip(ppa.iter()) {
         #[cfg(feature = "obliv")]
         for &i in group {
-            prev_div[i] = d
-                .tp_eq(&0)
-                .select(prev_div[i], U32::protect(start_site_i as u32) + d.as_u32());
+            prev_div[i as usize] = d.tp_eq(&0).select(
+                prev_div[i as usize],
+                U32::protect(start_site_i as u32) + d.as_u32(),
+            );
         }
 
         #[cfg(not(feature = "obliv"))]
@@ -159,8 +160,8 @@ fn expand_input_ppa(
     div_above: U16,
     div_below: U16,
     prev_full_pos: U32,
-    prev_ppa: &[Vec<usize>],
-    cur_ppa: &[Vec<usize>],
+    prev_ppa: &[Vec<u32>],
+    cur_ppa: &[Vec<u32>],
     n_haps: usize,
 ) -> U32 {
     #[cfg(feature = "obliv")]
@@ -178,7 +179,7 @@ fn expand_input_ppa(
         let mut order = vec![TpI64::protect(0); n_haps];
         for (i, &pos) in prev_ppa.iter().flatten().enumerate() {
             let i = TpI64::protect(i as i64);
-            order[pos] = i
+            order[pos as usize] = i
                 .tp_gt_eq(&prev_full_pos.as_i64())
                 .select(i - prev_full_pos.as_i64() + 1, i - prev_full_pos.as_i64());
         }
@@ -188,7 +189,7 @@ fn expand_input_ppa(
         for (i, group) in cur_ppa.into_iter().enumerate() {
             let i = i as u16;
             let ingroup_n = group.into_iter().fold(U32::protect(0), |accu, &pos| {
-                order[pos].tp_lt(&0).select(accu + 1, accu)
+                order[pos as usize].tp_lt(&0).select(accu + 1, accu)
             });
             full_pos_b = group_id
                 .tp_eq(&i)

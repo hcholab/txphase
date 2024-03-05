@@ -1,19 +1,18 @@
-use crate::{Bool, Usize};
 use timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd, TpU32, TpU64};
 
 #[derive(Clone, Copy)]
 pub struct NNRank(pub (TpU64, TpU32));
 
 impl NNRank {
-    pub fn new(div: TpU32, dist: TpU32, is_below: Bool, hap_id: usize) -> Self {
+    pub fn new(div: TpU32, dist: TpU32, is_below: TpBool, hap_id: u32) -> Self {
         Self((
             div.as_u64() << 32 | dist.as_u64() << 1 | is_below.as_u64(),
-            TpU32::protect(hap_id as u32),
+            TpU32::protect(hap_id),
         ))
     }
 
-    pub fn get_hap_id(&self) -> Usize {
-        self.0 .1.as_u64()
+    pub fn get_hap_id(&self) -> TpU32 {
+        self.0 .1
     }
 }
 

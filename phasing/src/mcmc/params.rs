@@ -107,7 +107,7 @@ impl McmcSharedParams {
                         block.n_sites(),
                     )
                 } else {
-                    let ppa = vec![(0..ref_panel.n_haps).collect::<Vec<_>>()];
+                    let ppa = vec![(0..ref_panel.n_haps as u32).collect::<Vec<_>>()];
                     PbwtTrie::transform(
                         start_site,
                         block.iter(),

@@ -1,4 +1,4 @@
-use crate::{Bool, Genotype, UInt, Usize, U16};
+use crate::{Bool, Genotype, UInt, Usize, U16, U32};
 use common::ref_panel::BlockSlice;
 use ndarray::{s, Array1, Array2, ArrayView1, Zip};
 use obliv_utils::vec::OblivVec;
@@ -7,7 +7,7 @@ use tp_fixedpoint::timing_shield::TpU64;
 #[cfg(feature = "obliv")]
 use tp_fixedpoint::timing_shield::TpEq;
 
-pub fn find_nn_bitmap(neighbors: &[Option<Vec<Usize>>], n_haps: usize) -> (Vec<Bool>, UInt) {
+pub fn find_nn_bitmap(neighbors: &[Option<Vec<U32>>], n_haps: usize) -> (Vec<Bool>, UInt) {
     #[cfg(feature = "obliv")]
     let neighbors_bitmap = {
         let mut bitmap = obliv_utils::bitmap::OblivBitmap::new(n_haps);
@@ -15,7 +15,7 @@ pub fn find_nn_bitmap(neighbors: &[Option<Vec<Usize>>], n_haps: usize) -> (Vec<B
             neighbors
                 .into_iter()
                 .filter_map(|v| v.as_ref())
-                .map(|v| v.iter().map(|&v| v.as_u32()))
+                .map(|v| v.iter().cloned())
                 .flatten(),
         );
         bitmap
@@ -51,13 +51,13 @@ pub fn find_nn_bitmap(neighbors: &[Option<Vec<Usize>>], n_haps: usize) -> (Vec<B
 }
 
 #[cfg(feature = "obliv")]
-pub fn neighbors_to_filter(neighbors: &[Option<Vec<Usize>>]) -> (Vec<Usize>, Vec<Bool>, Usize) {
+pub fn neighbors_to_filter(neighbors: &[Option<Vec<U32>>]) -> (Vec<U32>, Vec<Bool>, Usize) {
     let mut neighbors = neighbors
         .into_iter()
         .filter_map(|v| v.as_ref())
         .flatten()
         .cloned()
-        .collect::<Vec<Usize>>();
+        .collect::<Vec<U32>>();
     obliv_utils::bitonic_sort::bitonic_sort(&mut neighbors, true);
 
     let mut n_full_states = Usize::protect(1);
@@ -93,7 +93,7 @@ pub fn neighbors_to_filter(neighbors: &[Option<Vec<Usize>>]) -> (Vec<Usize>, Vec
 }
 
 pub fn filter_blocks<'a>(
-    neighbors: &[Option<Vec<Usize>>],
+    neighbors: &[Option<Vec<U32>>],
     blocks: &[BlockSlice<'a>],
 ) -> (Array2<Genotype>, Array1<Bool>, Usize) {
     let window_len = neighbors.len();
@@ -107,11 +107,11 @@ pub fn filter_blocks<'a>(
         let mut max_k_neighbors_indices = vec![Vec::new(); max_k_neighbors.len()];
 
         for packed in packed.into_iter() {
-            for (n, indices) in max_k_neighbors
+            for (&n, indices) in max_k_neighbors
                 .iter()
                 .zip(max_k_neighbors_indices.iter_mut())
             {
-                indices.push(packed.get(n.as_u32()));
+                indices.push(packed.get(n));
             }
         }
         let unpacked = unpack_indices(&max_k_neighbors_indices, blocks);

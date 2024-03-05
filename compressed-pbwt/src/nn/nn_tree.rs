@@ -28,8 +28,8 @@ pub fn init_last_rank_level(
     n_neighbors: usize,
     prev_input_pos: U32,
     init_input_div: &[U32],
-    prev_ppa: &[Vec<usize>],
-    cur_ppa: &[Vec<usize>],
+    prev_ppa: &[Vec<u32>],
+    cur_ppa: &[Vec<u32>],
 ) -> Vec<Rc<RankList<NNRank>>> {
     #[cfg(not(target_vendor = "fortanix"))]
     let t = Instant::now();
@@ -38,7 +38,7 @@ pub fn init_last_rank_level(
     let mut rev_cur_ppa = vec![0u32; len];
     for (i, g) in cur_ppa.iter().enumerate() {
         for &j in g {
-            rev_cur_ppa[j] = i as u32;
+            rev_cur_ppa[j as usize] = i as u32;
         }
     }
 
@@ -65,8 +65,8 @@ pub fn init_last_rank_level(
                 (i - prev_input_pos + 1, true)
             };
 
-            ranks[rev_cur_ppa[hap_id] as usize].push(NNRank::new(
-                init_input_div[hap_id],
+            ranks[rev_cur_ppa[hap_id as usize] as usize].push(NNRank::new(
+                init_input_div[hap_id as usize],
                 dist,
                 is_below,
                 hap_id,

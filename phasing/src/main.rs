@@ -26,6 +26,7 @@ mod inner {
     pub type Int = TpI32;
     pub type U8 = TpU8;
     pub type U16 = TpU16;
+    pub type U32 = TpU32;
     pub type U64 = TpU64;
     pub type Bool = TpBool;
     pub const F: usize = 52;
@@ -282,7 +283,8 @@ fn main() {
                 Statistics::std_dev(&compression_ratio)
             );
 
-            mcmc::McmcSharedParams::new(
+            let t = std::time::Instant::now();
+            let params = mcmc::McmcSharedParams::new(
                 ref_panel_new,
                 bps,
                 cms,
@@ -291,7 +293,12 @@ fn main() {
                 n_pos_window_overlap,
                 pbwt_modulo,
                 pbwt_depth,
-            )
+            );
+
+            println!("Build PBWT tree structures: {:?} ms", t.elapsed().as_millis());
+
+            params
+
         };
 
         drop(ref_panel_meta);
