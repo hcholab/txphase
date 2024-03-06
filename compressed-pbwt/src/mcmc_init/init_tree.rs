@@ -2,7 +2,7 @@ use super::{InitRank, RankList};
 use crate::pbwt_trie::{Node, PbwtTrieInput};
 
 #[cfg(feature = "obliv")]
-use obliv_utils::top_s::{merge_top_s, select_top_s};
+use obliv_utils::top_s::{merge_top_s, select_top_s_stable};
 
 #[cfg(not(feature = "obliv"))]
 use crate::top_s::{merge_top_s, select_top_s};
@@ -42,7 +42,7 @@ fn build_init_tree_leaves(
                     )
                 })
                 .collect();
-            select_top_s(INIT_NEIGHBORS, ranks)
+            select_top_s_stable(INIT_NEIGHBORS, ranks)
         })
         .collect()
 }

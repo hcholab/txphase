@@ -45,6 +45,28 @@ where
     OblivVec::from_iter(top_s.into_iter())
 }
 
+pub fn select_top_s_stable<T>(s: usize, mut ranks: Vec<T>) -> OblivVec<T>
+where
+    [(); rl_cap::<T>()]:,
+    T: TpOrd + TpCondSwap + Clone,
+{
+    if ranks.len() == 1 {
+        return crate::vec::OblivVec::with_elem(1, ranks.pop().unwrap());
+    }
+
+    let mut top_s = crate::vec::OblivVec::with_elem(s, unsafe {
+        std::mem::MaybeUninit::<T>::uninit().assume_init()
+    });
+    for j in 0..s.min(ranks.len() - 1) {
+        for i in 0..ranks.len() - 1 {
+            let [a, b] = unsafe { ranks.get_many_unchecked_mut([i, i + 1]) };
+            a.tp_lt_eq(b).cond_swap(a, b);
+        }
+        top_s[j] = ranks.pop().unwrap();
+    }
+    top_s
+}
+
 pub fn select_top_s_2<T>(s: usize, mut ranks: Vec<T>) -> OblivVec<T>
 where
     [(); rl_cap::<T>()]:,

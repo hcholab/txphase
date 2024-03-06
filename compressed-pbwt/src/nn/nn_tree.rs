@@ -1,5 +1,5 @@
 #[cfg(feature = "obliv")]
-use obliv_utils::top_s::{merge_top_s, select_top_s};
+use obliv_utils::top_s::{merge_top_s, select_top_s_stable};
 
 #[cfg(not(feature = "obliv"))]
 use crate::top_s::{merge_top_s, select_top_s};
@@ -20,7 +20,7 @@ pub fn init_last_rank_level(
                 .into_iter()
                 .map(|&hap_id| NNRank::new(init_input_div[hap_id as usize], hap_id))
                 .collect::<Vec<_>>();
-            Rc::new(select_top_s(n_neighbors, ranks))
+            Rc::new(select_top_s_stable(n_neighbors, ranks))
         })
         .collect()
 }
