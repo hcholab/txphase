@@ -1,7 +1,7 @@
 use super::{InitRank, RankList};
 
 const INIT_NEIGHBORS: usize = 2;
-use crate::{Bool, Isize, Usize, U16};
+use crate::{Bool, Isize, U16, U32};
 
 #[cfg(feature = "obliv")]
 use timing_shield::{TpEq, TpOrd};
@@ -48,7 +48,7 @@ pub fn process_top_init_neighbors(
     d_b: U16,
     div_level: &[u16],
     init_level: &[RankList<InitRank>],
-) -> Vec<(Usize, Bool)> {
+) -> Vec<(U32, Bool)> {
     let mut nn = Vec::new();
 
     #[cfg(feature = "obliv")]
@@ -127,7 +127,7 @@ pub fn process_top_init_neighbors(
     nn
 }
 
-fn init_single_site_from_ranks(nn_0: &[(Usize, Bool)], nn_1: &[(Usize, Bool)]) -> (Bool, Bool) {
+fn init_single_site_from_ranks(nn_0: &[(U32, Bool)], nn_1: &[(U32, Bool)]) -> (Bool, Bool) {
     #[cfg(feature = "obliv")]
     {
         let s = score(nn_0) - score(nn_1);
@@ -160,7 +160,7 @@ fn init_single_site_from_ranks(nn_0: &[(Usize, Bool)], nn_1: &[(Usize, Bool)]) -
     }
 }
 
-fn score(nn: &[(Usize, Bool)]) -> Isize {
+fn score(nn: &[(U32, Bool)]) -> Isize {
     #[cfg(feature = "obliv")]
     return nn
         .iter()
@@ -173,10 +173,10 @@ fn score(nn: &[(Usize, Bool)]) -> Isize {
 }
 
 #[cfg(feature = "obliv")]
-fn check_score_div(nn_0: &[(Usize, Bool)], nn_1: &[(Usize, Bool)]) -> Bool {
+fn check_score_div(nn_0: &[(U32, Bool)], nn_1: &[(U32, Bool)]) -> Bool {
     let score_div_0 = nn_0
         .iter()
-        .map(|v| v.1.select((v.0 + 1) * (v.0 + 1), Usize::protect(1)))
+        .map(|v| v.1.select((v.0 + 1) * (v.0 + 1), U32::protect(1)))
         .reduce(|acc, x| acc * x)
         .unwrap()
         * nn_1
@@ -186,7 +186,7 @@ fn check_score_div(nn_0: &[(Usize, Bool)], nn_1: &[(Usize, Bool)]) -> Bool {
             .unwrap();
     let score_div_1 = nn_1
         .iter()
-        .map(|v| v.1.select((v.0 + 1) * (v.0 + 1), Usize::protect(1)))
+        .map(|v| v.1.select((v.0 + 1) * (v.0 + 1), U32::protect(1)))
         .reduce(|acc, x| acc * x)
         .unwrap()
         * nn_0
@@ -209,18 +209,18 @@ fn score_div(nn: &[(usize, bool)]) -> f64 {
         .sum()
 }
 
-fn get_match_length(start_site_i: usize, site_i: usize, prev_div: Usize, rel_div: U16) -> Usize {
+fn get_match_length(start_site_i: usize, site_i: usize, prev_div: U32, rel_div: U16) -> U32 {
     #[cfg(feature = "obliv")]
-    let site_i = site_i as u64;
+    let site_i = site_i as u32;
 
     site_i + 1 - get_abs_div(start_site_i, prev_div, rel_div)
 }
 
-fn get_abs_div(start_site_i: usize, prev_div: Usize, rel_div: U16) -> Usize {
+fn get_abs_div(start_site_i: usize, prev_div: U32, rel_div: U16) -> U32 {
     #[cfg(feature = "obliv")]
     return rel_div
         .tp_eq(&0)
-        .select(prev_div, start_site_i as u64 + rel_div.as_u64());
+        .select(prev_div, start_site_i as u32 + rel_div.as_u32());
 
     #[cfg(not(feature = "obliv"))]
     if rel_div == 0 {

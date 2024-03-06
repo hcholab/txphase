@@ -1,24 +1,18 @@
-use crate::{Bool, Usize};
-use timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd, TpU32, TpU64};
+use timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd, TpU32};
 
 #[derive(Clone)]
-pub struct InitRank(TpU64);
+pub struct InitRank(TpU32);
 
 impl InitRank {
-    pub fn new(div: TpU32, dist: TpU32, is_below: Bool, hap: bool) -> Self {
-        Self(
-            div.as_u64() << 32
-                | dist.as_u64() << 2
-                | is_below.as_u64() << 1
-                | Bool::protect(hap).as_u64(),
-        )
+    pub fn new(div: TpU32, hap: bool) -> Self {
+        Self(div << 1 | hap as u32)
     }
 
-    pub fn get_div(&self) -> Usize {
-        self.0 >> 32
+    pub fn get_div(&self) -> TpU32 {
+        self.0 >> 1
     }
 
-    pub fn get_hap(&self) -> Bool {
+    pub fn get_hap(&self) -> TpBool {
         (self.0 & 1).tp_eq(&1)
     }
 
@@ -26,14 +20,14 @@ impl InitRank {
         if hap {
             self.0 |= 1
         } else {
-            self.0 &= u64::MAX - 1;
+            self.0 &= u32::MAX - 1;
         }
     }
 }
 
 impl Default for InitRank {
     fn default() -> Self {
-        Self(TpU64::protect(0))
+        Self(TpU32::protect(0))
     }
 }
 
@@ -58,18 +52,18 @@ impl TpEq for InitRank {
 impl TpOrd for InitRank {
     #[inline]
     fn tp_lt(&self, rank: &InitRank) -> TpBool {
-        self.0.tp_lt(&rank.0)
+        (self.0 >> 1).tp_lt(&(rank.0 >> 1))
     }
     #[inline]
     fn tp_lt_eq(&self, rank: &InitRank) -> TpBool {
-        self.0.tp_lt_eq(&rank.0)
+        (self.0 >> 1).tp_lt_eq(&(rank.0 >> 1))
     }
     #[inline]
     fn tp_gt(&self, rank: &InitRank) -> TpBool {
-        self.0.tp_gt(&rank.0)
+        (self.0 >> 1).tp_gt(&(rank.0 >> 1))
     }
     #[inline]
     fn tp_gt_eq(&self, rank: &InitRank) -> TpBool {
-        self.0.tp_gt_eq(&rank.0)
+        (self.0 >> 1).tp_gt_eq(&(rank.0 >> 1))
     }
 }

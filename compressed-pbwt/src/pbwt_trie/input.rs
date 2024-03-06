@@ -4,7 +4,6 @@ use crate::{U16, U32};
 use timing_shield::{TpEq, TpOrd};
 
 pub struct PbwtTrieInput {
-    pub full_pos: U32,
     pub full_div: Vec<U32>,
 }
 
@@ -13,7 +12,6 @@ impl PbwtTrieInput {
         #[cfg(feature = "obliv")]
         {
             Self {
-                full_pos: U32::protect(0),
                 full_div: vec![U32::protect(0); n_haps],
             }
         }
@@ -34,8 +32,7 @@ impl PbwtTrieInput {
         div_below: U16,
         trie_start_site: usize,
         last_trie_div: &[u16],
-        prev_ppa: &[Vec<u32>],
-        cur_ppa: &[Vec<u32>],
+        ppa: &[Vec<u32>],
     ) {
         expand_input_div(
             pos,
@@ -43,18 +40,8 @@ impl PbwtTrieInput {
             div_below,
             last_trie_div,
             trie_start_site,
-            cur_ppa,
+            ppa,
             &mut self.full_div,
-        );
-
-        self.full_pos = expand_input_ppa(
-            pos,
-            div_above,
-            div_below,
-            self.full_pos,
-            prev_ppa,
-            cur_ppa,
-            self.full_div.len(),
         );
     }
 }
@@ -152,100 +139,5 @@ fn expand_input_div(
                 prev_div[i] = start_site_i as usize + d as usize;
             }
         }
-    }
-}
-
-fn expand_input_ppa(
-    input_pos: U16,
-    div_above: U16,
-    div_below: U16,
-    prev_full_pos: U32,
-    prev_ppa: &[Vec<u32>],
-    cur_ppa: &[Vec<u32>],
-    n_haps: usize,
-) -> U32 {
-    #[cfg(feature = "obliv")]
-    {
-        // in-between groups
-        let mut full_pos_a = U32::protect(0);
-        for (i, group) in cur_ppa.into_iter().enumerate() {
-            full_pos_a = input_pos
-                .tp_gt(&(i as u16))
-                .select(full_pos_a + U32::protect(group.len() as u32), full_pos_a);
-        }
-
-        // group member
-        use timing_shield::TpI64;
-        let mut order = vec![TpI64::protect(0); n_haps];
-        for (i, &pos) in prev_ppa.iter().flatten().enumerate() {
-            let i = TpI64::protect(i as i64);
-            order[pos as usize] = i
-                .tp_gt_eq(&prev_full_pos.as_i64())
-                .select(i - prev_full_pos.as_i64() + 1, i - prev_full_pos.as_i64());
-        }
-        let group_id = div_below.tp_eq(&0).select(input_pos, input_pos - 1);
-        let mut full_pos_b = U32::protect(0);
-
-        for (i, group) in cur_ppa.into_iter().enumerate() {
-            let i = i as u16;
-            let ingroup_n = group.into_iter().fold(U32::protect(0), |accu, &pos| {
-                order[pos as usize].tp_lt(&0).select(accu + 1, accu)
-            });
-            full_pos_b = group_id
-                .tp_eq(&i)
-                .select(full_pos_b + ingroup_n, full_pos_b);
-
-            full_pos_b = group_id
-                .tp_gt(&i)
-                .select(full_pos_b + U32::protect(group.len() as u32), full_pos_b);
-        }
-
-        let is_between_groups = (!div_above.tp_eq(&0)) & (!div_below.tp_eq(&0));
-
-        is_between_groups.select(full_pos_a, full_pos_b)
-    }
-
-    #[cfg(not(feature = "obliv"))]
-    {
-        let mut cur_full_pos;
-        if div_above != 0 && div_below != 0 {
-            cur_full_pos = cur_ppa
-                .iter()
-                .map(|group| group.len())
-                .take(input_pos as usize)
-                .sum::<usize>();
-        } else {
-            let mut order = vec![0isize; n_haps];
-            for (i, &pos) in prev_ppa.iter().flatten().enumerate() {
-                order[pos] = if i >= prev_full_pos {
-                    i as isize - prev_full_pos as isize + 1
-                } else {
-                    i as isize - prev_full_pos as isize
-                };
-            }
-            let group_id = if div_below == 0 {
-                input_pos
-            } else {
-                input_pos - 1
-            } as usize;
-            cur_full_pos = cur_ppa
-                .iter()
-                .map(|group| group.len())
-                .take(group_id)
-                .sum::<usize>();
-
-            let mut found = false;
-            for (i, &pos) in cur_ppa[group_id].iter().enumerate() {
-                if order[pos] >= 0 {
-                    cur_full_pos += i;
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                cur_full_pos += cur_ppa[group_id].len();
-            }
-        }
-        cur_full_pos
     }
 }

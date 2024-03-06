@@ -8,8 +8,6 @@
 pub mod mcmc_init;
 pub mod nn;
 pub mod pbwt_trie;
-//pub mod record;
-//pub mod site;
 #[cfg(not(feature = "obliv"))]
 mod top_s;
 

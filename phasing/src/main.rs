@@ -295,10 +295,12 @@ fn main() {
                 pbwt_depth,
             );
 
-            println!("Build PBWT tree structures: {:?} ms", t.elapsed().as_millis());
+            println!(
+                "Build PBWT tree structures: {:?} ms",
+                t.elapsed().as_millis()
+            );
 
             params
-
         };
 
         drop(ref_panel_meta);

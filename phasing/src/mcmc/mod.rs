@@ -285,26 +285,6 @@ impl<'a> Mcmc<'a> {
                         .as_millis()
                 );
                 println!(
-                    "\t\tCreate: {:?} ms",
-                    compressed_pbwt_obliv::nn::nn_tree::CREATE
-                        .with(|v| {
-                            let out = *v.borrow();
-                            *v.borrow_mut() = std::time::Duration::ZERO;
-                            out
-                        })
-                        .as_millis()
-                );
-                println!(
-                    "\t\tSort: {:?} ms",
-                    compressed_pbwt_obliv::nn::nn_tree::SORT
-                        .with(|v| {
-                            let out = *v.borrow();
-                            *v.borrow_mut() = std::time::Duration::ZERO;
-                            out
-                        })
-                        .as_millis()
-                );
-                println!(
                     "\tNN merging & lookups: {:?} ms",
                     compressed_pbwt_obliv::nn::LOOKUP
                         .with(|v| {
@@ -751,10 +731,31 @@ impl<'a> Mcmc<'a> {
             sum_window_size as f64 / n_windows as f64 / 1e6
         );
 
+        println!(
+            "HMM+Filter: {:?} ms",
+            HMM.with(|v| {
+                let out = *v.borrow();
+                *v.borrow_mut() = std::time::Duration::ZERO;
+                out
+            })
+            .as_millis()
+        );
+
+        println!(
+            "\tFilter Ref Panel: {:?} ms",
+            FILTER
+                .with(|v| {
+                    let out = *v.borrow();
+                    *v.borrow_mut() = std::time::Duration::ZERO;
+                    out
+                })
+                .as_millis()
+        );
+
         #[cfg(not(target_vendor = "fortanix"))]
         if use_rss {
             println!(
-                "Emission: {:?} ms",
+                "\tEmission: {:?} ms",
                 crate::rss_hmm::reduced_obliv::EMISS
                     .with(|v| {
                         let out = *v.borrow();
@@ -765,7 +766,7 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
-                "Transition: {:?} ms",
+                "\tTransition: {:?} ms",
                 crate::rss_hmm::reduced_obliv::TRANS
                     .with(|v| {
                         let out = *v.borrow();
@@ -776,7 +777,7 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
-                "Collapse: {:?} ms",
+                "\tCollapse: {:?} ms",
                 crate::rss_hmm::reduced_obliv::COLL
                     .with(|v| {
                         let out = *v.borrow();
@@ -787,7 +788,7 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
-                "Combine 1: {:?} ms",
+                "\tCombine 1: {:?} ms",
                 crate::rss_hmm::reduced_obliv::COMB1
                     .with(|v| {
                         let out = *v.borrow();
@@ -798,7 +799,7 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
-                "Combine 2: {:?} ms",
+                "\tCombine 2: {:?} ms",
                 crate::rss_hmm::reduced_obliv::COMB2
                     .with(|v| {
                         let out = *v.borrow();
@@ -809,7 +810,7 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
-                "Expand: {:?} ms",
+                "\tExpand: {:?} ms",
                 crate::rss_hmm::reduced_obliv::EXPAND
                     .with(|v| {
                         let out = *v.borrow();
@@ -820,7 +821,7 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
-                "Alpha-Pre: {:?} ms",
+                "\tAlpha-Pre: {:?} ms",
                 crate::rss_hmm::reduced_obliv::PRE
                     .with(|v| {
                         let out = *v.borrow();
@@ -831,7 +832,7 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
-                "Alpha-Post: {:?} ms",
+                "\tAlpha-Post: {:?} ms",
                 crate::rss_hmm::reduced_obliv::POST
                     .with(|v| {
                         let out = *v.borrow();
@@ -842,7 +843,7 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
-                "Block Transition: {:?} ms",
+                "\tBlock Transition: {:?} ms",
                 crate::rss_hmm::reduced_obliv::BLOCK
                     .with(|v| {
                         let out = *v.borrow();
@@ -873,7 +874,7 @@ impl<'a> Mcmc<'a> {
             );
         } else {
             println!(
-                "Emission: {:?} ms",
+                "\tEmission: {:?} ms",
                 crate::hmm::EMISS
                     .with(|v| {
                         let out = *v.borrow();
@@ -884,7 +885,7 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
-                "Transition: {:?} ms",
+                "\tTransition: {:?} ms",
                 crate::hmm::TRANS
                     .with(|v| {
                         let out = *v.borrow();
@@ -895,7 +896,7 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
-                "Collapse: {:?} ms",
+                "\tCollapse: {:?} ms",
                 crate::hmm::COLL
                     .with(|v| {
                         let out = *v.borrow();
@@ -906,7 +907,7 @@ impl<'a> Mcmc<'a> {
             );
 
             println!(
-                "Combine: {:?} ms",
+                "\tCombine: {:?} ms",
                 crate::hmm::COMB
                     .with(|v| {
                         let out = *v.borrow();
@@ -917,26 +918,6 @@ impl<'a> Mcmc<'a> {
             );
         }
 
-        println!(
-            "Filter Ref Panel: {:?} ms",
-            FILTER
-                .with(|v| {
-                    let out = *v.borrow();
-                    *v.borrow_mut() = std::time::Duration::ZERO;
-                    out
-                })
-                .as_millis()
-        );
-
-        println!(
-            "HMM+Filter: {:?} ms",
-            HMM.with(|v| {
-                let out = *v.borrow();
-                *v.borrow_mut() = std::time::Duration::ZERO;
-                out
-            })
-            .as_millis()
-        );
         println!("Elapsed: {} ms", (Instant::now() - now).as_millis());
         println!();
     }

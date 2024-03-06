@@ -35,26 +35,24 @@ pub fn mcmc_init(
         _ => panic!("This shouldn't happen"),
     };
 
-    for (cur_pbwt, prev_ppa, next_first_full_haps) in iter_pbwt_tries(pbwt_tries, n_haps) {
+    for (pbwt, next_first_full_haps) in iter_pbwt_tries(pbwt_tries, n_haps) {
         let init_tree_0 = build_init_tree(
-            &cur_pbwt.trie,
+            &pbwt.trie,
             &pbwt_trie_input_0,
-            prev_ppa,
-            &cur_pbwt.ppa,
+            &pbwt.ppa,
             next_first_full_haps.as_deref(),
         );
 
         let init_tree_1 = build_init_tree(
-            &cur_pbwt.trie,
+            &pbwt.trie,
             &pbwt_trie_input_1,
-            prev_ppa,
-            &cur_pbwt.ppa,
+            &pbwt.ppa,
             next_first_full_haps.as_deref(),
         );
 
-        let start_site = cur_pbwt.start_site + 1;
+        let start_site = pbwt.start_site + 1;
         let genotypes_slice =
-            &genotypes[start_site..(start_site + cur_pbwt.n_sites()).min(genotypes.len())];
+            &genotypes[start_site..(start_site + pbwt.n_sites()).min(genotypes.len())];
 
         let (sender_0, receiver_0) = std::sync::mpsc::channel::<Bool>();
         let (sender_1, receiver_1) = std::sync::mpsc::channel::<Bool>();
@@ -62,8 +60,8 @@ pub fn mcmc_init(
         sender_0.send(*h_0.last().unwrap()).unwrap();
         sender_1.send(*h_1.last().unwrap()).unwrap();
 
-        let neighbors_iter_0 = cur_pbwt.insert(receiver_0.into_iter());
-        let neighbors_iter_1 = cur_pbwt.insert(receiver_1.into_iter());
+        let neighbors_iter_0 = pbwt.insert(receiver_0.into_iter());
+        let neighbors_iter_1 = pbwt.insert(receiver_1.into_iter());
         #[cfg(feature = "obliv")]
         let (mut last_id_0, mut last_d_a_0, mut last_d_b_0) =
             (U16::protect(0), U16::protect(0), U16::protect(0));
@@ -89,15 +87,15 @@ pub fn mcmc_init(
             .into_iter()
             .zip(init_tree_1.into_iter())
             .zip(neighbors_iter_0.zip(neighbors_iter_1))
-            .zip(cur_pbwt.div.iter())
+            .zip(pbwt.div.iter())
             .zip(genotypes_slice)
             .enumerate()
         {
             #[cfg(feature = "obliv")]
             let (next_h_0, next_h_1) = {
-                let site_i = i + cur_pbwt.start_site;
+                let site_i = i + pbwt.start_site;
                 let phase = init_single_site(
-                    cur_pbwt.start_site,
+                    pbwt.start_site,
                     site_i,
                     id_0,
                     d_a_0,
@@ -118,9 +116,9 @@ pub fn mcmc_init(
             #[cfg(not(feature = "obliv"))]
             let (next_h_0, next_h_1) = match g {
                 1 => {
-                    let site_i = i + cur_pbwt.start_site;
+                    let site_i = i + pbwt.start_site;
                     init_single_site(
-                        cur_pbwt.start_site,
+                        pbwt.start_site,
                         site_i,
                         id_0,
                         d_a_0,
@@ -141,7 +139,7 @@ pub fn mcmc_init(
             h_0.push(next_h_0);
             h_1.push(next_h_1);
 
-            if i == cur_pbwt.n_sites() - 1 {
+            if i == pbwt.n_sites() - 1 {
                 (last_id_0, last_d_a_0, last_d_b_0) = (id_0, d_a_0, d_b_0);
                 (last_id_1, last_d_a_1, last_d_b_1) = (id_1, d_a_1, d_b_1);
             } else {
@@ -149,30 +147,23 @@ pub fn mcmc_init(
                 sender_1.send(next_h_1).unwrap();
             }
         }
-        let zero_ppa;
-        let prev_ppa = prev_ppa.unwrap_or({
-            zero_ppa = vec![(0..n_haps as u32).collect::<Vec<_>>()];
-            &zero_ppa
-        });
 
         pbwt_trie_input_0.update(
             last_id_0,
             last_d_a_0,
             last_d_b_0,
-            cur_pbwt.start_site,
-            cur_pbwt.div.last().unwrap(),
-            prev_ppa,
-            &cur_pbwt.ppa,
+            pbwt.start_site,
+            pbwt.div.last().unwrap(),
+            &pbwt.ppa,
         );
 
         pbwt_trie_input_1.update(
             last_id_1,
             last_d_a_1,
             last_d_b_1,
-            cur_pbwt.start_site,
-            cur_pbwt.div.last().unwrap(),
-            prev_ppa,
-            &cur_pbwt.ppa,
+            pbwt.start_site,
+            pbwt.div.last().unwrap(),
+            &pbwt.ppa,
         );
     }
     (h_0, h_1)
@@ -181,14 +172,12 @@ pub fn mcmc_init(
 pub fn iter_pbwt_tries(
     pbwt_tries: &[PbwtTrie],
     n_haps: usize,
-) -> impl Iterator<Item = (&PbwtTrie, Option<&[Vec<u32>]>, Option<Vec<bool>>)> + '_ {
+) -> impl Iterator<Item = (&PbwtTrie, Option<Vec<bool>>)> + '_ {
     use std::iter::once;
     pbwt_tries
         .iter()
         .zip(pbwt_tries.iter().skip(1).map(|v| Some(v)).chain(once(None)))
-        .zip(once(None).chain(pbwt_tries.iter().map(|v| Some(v))))
-        .map(move |((cur_pbwt, next_pbwt), prev_pbwt)| {
-            let prev_ppa = prev_pbwt.map(|v| &v.ppa[..]);
+        .map(move |(cur_pbwt, next_pbwt)| {
             let next_first_full_haps = next_pbwt.map(|v| {
                 v.get_index_map(n_haps)
                     .into_iter()
@@ -196,6 +185,6 @@ pub fn iter_pbwt_tries(
                     .collect::<Vec<_>>()
             });
 
-            (cur_pbwt, prev_ppa, next_first_full_haps)
+            (cur_pbwt, next_first_full_haps)
         })
 }

@@ -34,7 +34,6 @@ pub fn find_top_neighbors(
 ) -> Vec<Option<Vec<U32>>> {
     assert_eq!(input_hap.len(), find_neighbors_filter.len());
     let mut pbwt_input = PbwtTrieInput::new(n_haps);
-    let mut prev_ppa = &vec![(0..n_haps as u32).collect::<Vec<_>>()];
     let mut neighbors = Vec::new();
     for pbwt in pbwt_tries {
         let input_slice = &input_hap[pbwt.start_site..pbwt.start_site + pbwt.n_sites()];
@@ -42,12 +41,10 @@ pub fn find_top_neighbors(
             input_slice,
             n_neighbors,
             pbwt,
-            prev_ppa,
             &mut pbwt_input,
             &find_neighbors_filter[pbwt.start_site..pbwt.start_site + pbwt.n_sites()],
         );
         neighbors.extend(new_neighbors.into_iter().rev());
-        prev_ppa = &pbwt.ppa;
     }
     neighbors
 }
@@ -56,7 +53,6 @@ fn find_top_neighbors_trie(
     input_hap: &[Bool],
     n_neighbors: usize,
     pbwt_trie: &PbwtTrie,
-    prev_ppa: &[Vec<u32>],
     pbwt_input: &mut PbwtTrieInput,
     find_neighbors_filter: &[bool],
 ) -> Vec<Option<Vec<U32>>> {
@@ -105,13 +101,8 @@ fn find_top_neighbors_trie(
 
         #[cfg(not(target_vendor = "fortanix"))]
         let t = Instant::now();
-        let mut rank_level = init_last_rank_level(
-            n_neighbors,
-            pbwt_input.full_pos,
-            &pbwt_input.full_div,
-            &prev_ppa,
-            &pbwt_trie.ppa,
-        );
+        let mut rank_level =
+            init_last_rank_level(n_neighbors, &pbwt_input.full_div, &pbwt_trie.ppa);
 
         #[cfg(not(target_vendor = "fortanix"))]
         INIT_RANKS.with(|v| {
@@ -201,7 +192,6 @@ fn find_top_neighbors_trie(
         last_div_below,
         pbwt_trie.start_site,
         pbwt_trie.div.last().unwrap(),
-        prev_ppa,
         &pbwt_trie.ppa,
     );
 

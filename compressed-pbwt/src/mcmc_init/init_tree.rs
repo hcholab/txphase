@@ -7,20 +7,16 @@ use obliv_utils::top_s::{merge_top_s, select_top_s};
 #[cfg(not(feature = "obliv"))]
 use crate::top_s::{merge_top_s, select_top_s};
 
-#[cfg(feature = "obliv")]
-use timing_shield::TpOrd;
-
 const INIT_NEIGHBORS: usize = 2;
 
 pub fn build_init_tree(
     trie: &[Vec<Node>],
     input: &PbwtTrieInput,
-    prev_ppa: Option<&[Vec<u32>]>,
-    cur_ppa: &[Vec<u32>],
+    ppa: &[Vec<u32>],
     next_first_full_haps: Option<&[bool]>, // (index map, haps)
 ) -> Vec<Vec<RankList<InitRank>>> {
     let mut init_tree = Vec::new();
-    let mut init_level = build_init_tree_leaves(input, prev_ppa, cur_ppa, next_first_full_haps);
+    let mut init_level = build_init_tree_leaves(input, ppa, next_first_full_haps);
 
     for trie_level in trie.iter().rev() {
         init_tree.push(init_level);
@@ -32,60 +28,22 @@ pub fn build_init_tree(
 
 fn build_init_tree_leaves(
     prev_input: &PbwtTrieInput,
-    prev_ppa: Option<&[Vec<u32>]>,
-    cur_ppa: &[Vec<u32>],
+    ppa: &[Vec<u32>],
     next_first_full_haps: Option<&[bool]>,
 ) -> Vec<RankList<InitRank>> {
-    // if first block, use zero ppa
-    let zero_ppa;
-    let prev_ppa = prev_ppa.unwrap_or({
-        let n_haps = prev_input.full_div.len();
-        zero_ppa = vec![(0..n_haps as u32).collect::<Vec<_>>()];
-        &zero_ppa
-    });
-
-    let len = cur_ppa.iter().map(|v| v.len()).sum::<usize>();
-    let mut rev_cur_ppa = vec![0u32; len];
-    for (i, g) in cur_ppa.iter().enumerate() {
-        for &j in g {
-            rev_cur_ppa[j as usize] = i as u32;
-        }
-    }
-
-    let mut ranks = vec![Vec::new(); cur_ppa.len()];
-
-    prev_ppa
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .for_each(|(i, &hap_id)| {
-            #[cfg(feature = "obliv")]
-            let (dist, is_below) = {
-                let i = i as u32;
-                let cond = prev_input.full_pos.tp_gt(&i);
-                let dist = cond.select(prev_input.full_pos - i, i - prev_input.full_pos + 1);
-                let is_below = !cond;
-                (dist, is_below)
-            };
-
-            #[cfg(not(feature = "obliv"))]
-            let (dist, is_below) = if i < prev_input.full_pos {
-                (prev_input.full_pos - i, false)
-            } else {
-                (i - prev_input.full_pos + 1, true)
-            };
-
-            ranks[rev_cur_ppa[hap_id as usize] as usize].push(InitRank::new(
-                prev_input.full_div[hap_id as usize],
-                dist,
-                is_below,
-                get_hap(hap_id, next_first_full_haps),
-            ))
-        });
-
-    ranks
-        .into_iter()
-        .map(|r| select_top_s(INIT_NEIGHBORS, r))
+    ppa.iter()
+        .map(|group| {
+            let ranks = group
+                .iter()
+                .map(|&hap_id| {
+                    InitRank::new(
+                        prev_input.full_div[hap_id as usize],
+                        get_hap(hap_id, next_first_full_haps),
+                    )
+                })
+                .collect();
+            select_top_s(INIT_NEIGHBORS, ranks)
+        })
         .collect()
 }
 
