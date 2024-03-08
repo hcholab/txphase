@@ -89,7 +89,14 @@ struct Cli {
     max_m3vcf_unique_haps: Option<usize>,
     #[arg(long)]
     use_rss: bool,
-    #[arg(long, default_value_t = true)]
+    #[arg(
+        long,
+        default_missing_value("true"),
+        default_value("true"),
+        num_args(0..=1),
+        require_equals(true),
+        action = clap::ArgAction::Set,
+    )]
     single_sample: bool,
     #[arg(short, long, default_value_t = 1, value_parser = value_parser!(u16).range(1..))]
     n_cpus: u16,
