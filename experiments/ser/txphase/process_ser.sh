@@ -3,7 +3,7 @@ OUTPUT_DIR=$1
 
 OUTPUT_SER=$OUTPUT_DIR/ser.txt
 
-echo "ref_panel_size_k child_id n_tested n_swithes" > $OUTPUT_SER
+echo "ref_panel_size_k child_id n_tested n_switches" > $OUTPUT_SER
 
 for dir in $OUTPUT_DIR/*; do
     if [ -d "$dir" ]; then
