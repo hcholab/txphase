@@ -12,7 +12,7 @@ SAMPLE_DIR=$TAR_DIR/$UKB_SAMPLE_ID
 source $MAIN_DIR/profiles/dataset/ukb_single.sh
 
 mkdir -p $SAMPLE_DIR && \
-/usr/bin/time -f "%e %K %M" -o $SAMPLE_DIR/time.txt $MAIN_DIR/shapeit-bin/phase_common_static \
+/usr/bin/time -f "%e %M" -o $SAMPLE_DIR/time.txt $MAIN_DIR/shapeit-bin/phase_common_static \
     --input $INPUT \
     --reference $VCF_REF_PANEL \
     --map $GMAP \
@@ -21,4 +21,5 @@ mkdir -p $SAMPLE_DIR && \
     --thread 1 \
     --output $SAMPLE_DIR/phased.bcf \
     --log $SAMPLE_DIR/log.txt && \
+
 $MAIN_DIR/scripts/switch-error-rate.sh $SAMPLE_DIR/phased.bcf $PARENTS $TRIO $SAMPLE_DIR

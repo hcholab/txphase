@@ -6,3 +6,4 @@ bin_sgx
 data
 results
 tmp
+output*

@@ -166,12 +166,6 @@ fn main() {
 
     let mcmc_iterations = parse_iterations(&cli.mcmc_iterations).unwrap();
 
-    #[cfg(target_vendor = "fortanix")]
-    println!("SGX: true");
-
-    #[cfg(feature = "benchmarking")]
-    println!("SGX: false");
-
     println!("PBWT depth: {pbwt_depth}");
     println!("PBWT modulo: {:.3}", pbwt_modulo);
     println!("MCMC iterations: {}", cli.mcmc_iterations);
