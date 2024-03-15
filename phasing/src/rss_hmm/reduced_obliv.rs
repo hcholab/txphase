@@ -15,7 +15,7 @@ use ndarray::ArrayViewMut1;
 use crate::dynamic_fixed::*;
 
 #[cfg(feature = "obliv")]
-use tp_fixedpoint::timing_shield::{TpEq, TpI16, TpI8, TpOrd};
+use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpI16, TpI8, TpOrd};
 
 #[cfg(feature = "obliv")]
 use ndarray::linalg::Dot;
@@ -27,11 +27,11 @@ use ndarray::linalg::Dot;
 #[cfg(not(feature = "obliv"))]
 const RENORM_THRESHOLD: f64 = 1e-20;
 
-#[cfg(not(target_vendor = "fortanix"))]
+#[cfg(feature = "benchmarking")]
 use std::cell::RefCell;
-#[cfg(not(target_vendor = "fortanix"))]
+#[cfg(feature = "benchmarking")]
 use std::time::{Duration, Instant};
-#[cfg(not(target_vendor = "fortanix"))]
+#[cfg(feature = "benchmarking")]
 thread_local! {
     pub static EMISS: RefCell<Duration> = RefCell::new(Duration::ZERO);
     pub static TRANS: RefCell<Duration> = RefCell::new(Duration::ZERO);
@@ -1026,7 +1026,7 @@ impl HmmReduced {
             full_trans_prob_e.view_mut(),
         );
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
 
         let mut cur_c_prob_ = Array::from_shape_vec(
@@ -1041,7 +1041,7 @@ impl HmmReduced {
                 c += &p;
             });
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         BLOCK.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -1168,7 +1168,7 @@ impl HmmReduced {
             full_trans_prob_e.view_mut(),
         );
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
 
         let (mut cur_c_prob, mut next_c_prob) = cur_prob_block
@@ -1207,7 +1207,7 @@ impl HmmReduced {
 
         cur_cnr_prob.assign(&cur_c_prob);
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         BLOCK.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -1290,7 +1290,7 @@ impl HmmReduced {
         mut probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut probs_e: ArrayViewMut1<TpI16>,
     ) {
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
 
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
@@ -1313,7 +1313,7 @@ impl HmmReduced {
         #[cfg(feature = "obliv")]
         renorm_scale(probs.view_mut(), probs_e.view_mut());
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         EMISS.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -1331,7 +1331,7 @@ impl HmmReduced {
         mut cur_cnr_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_cnr_prob_e: ArrayViewMut1<TpI16>,
     ) {
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
 
         Zip::from(cur_c_prob.rows_mut())
@@ -1357,7 +1357,7 @@ impl HmmReduced {
             }
         }
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         TRANS.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -1373,7 +1373,7 @@ impl HmmReduced {
         #[cfg(feature = "obliv")] cur_cnr_prob_e: ArrayViewMut1<TpI16>,
         mut save_cnr_prob: ArrayViewMut2<Real>,
     ) {
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
 
         #[cfg(not(feature = "obliv"))]
@@ -1432,7 +1432,7 @@ impl HmmReduced {
             cond_assign_array!(do_collapse, cur_cnr_prob_e, cur_cnr_prob_e_);
         }
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         COLL.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -1445,7 +1445,7 @@ impl HmmReduced {
         full_trans_prob: ArrayViewMut2<Real>,
         mut alpha_pre: ArrayViewMut2<Real>,
     ) {
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
 
         #[cfg(feature = "obliv")]
@@ -1471,7 +1471,7 @@ impl HmmReduced {
                     .for_each(|p, &e| adjust_scale_single(e, p, &mut TpI16::protect(0)));
             });
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         PRE.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -1485,7 +1485,7 @@ impl HmmReduced {
         save_cnr_prob: &mut Option<Array2<Real>>,
     ) {
         if let (None, Some(save_cnr_prob)) = (alpha_post.as_ref(), save_cnr_prob.take()) {
-            #[cfg(not(target_vendor = "fortanix"))]
+            #[cfg(feature = "benchmarking")]
             let t = Instant::now();
             #[cfg(feature = "obliv")]
             {
@@ -1541,7 +1541,7 @@ impl HmmReduced {
                         };
                     }
                 });
-            #[cfg(not(target_vendor = "fortanix"))]
+            #[cfg(feature = "benchmarking")]
             POST.with(|v| {
                 let mut v = v.borrow_mut();
                 *v += t.elapsed();
@@ -1563,7 +1563,7 @@ impl HmmReduced {
         mut expanded_prob: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut expanded_prob_e: ArrayViewMut1<TpI16>,
     ) {
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
 
         #[cfg(feature = "obliv")]
@@ -1659,7 +1659,7 @@ impl HmmReduced {
                 });
         };
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         EXPAND.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -1674,7 +1674,7 @@ impl HmmReduced {
         mut tprobs: ArrayViewMut3<Real>,
         #[cfg(feature = "obliv")] mut tprobs_e: ArrayViewMut3<TpI16>,
     ) {
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
         let inv_weights = block.inv_weights.view();
 
@@ -1718,13 +1718,13 @@ impl HmmReduced {
             alpha_00[i] = Dot::dot(&f_post_arr, &b_post_arr);
         }
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         COMB1.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
         });
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
 
         #[cfg(not(feature = "obliv"))]
@@ -1933,7 +1933,7 @@ impl HmmReduced {
             });
         }
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         COMB2.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();

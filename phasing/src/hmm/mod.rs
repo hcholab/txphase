@@ -10,12 +10,12 @@ use ndarray::{Array1, ArrayViewMut1};
 #[cfg(feature = "obliv")]
 use tp_fixedpoint::timing_shield::{TpEq, TpI16};
 
-#[cfg(not(target_vendor = "fortanix"))]
+#[cfg(feature = "benchmarking")]
 use std::time::{Duration, Instant};
 
-#[cfg(not(target_vendor = "fortanix"))]
+#[cfg(feature = "benchmarking")]
 use std::cell::RefCell;
-#[cfg(not(target_vendor = "fortanix"))]
+#[cfg(feature = "benchmarking")]
 thread_local! {
     pub static EMISS: RefCell<Duration> = RefCell::new(Duration::ZERO);
     pub static TRANS: RefCell<Duration> = RefCell::new(Duration::ZERO);
@@ -493,7 +493,7 @@ impl Hmm {
         mut probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] probs_e: ArrayViewMut1<TpI16>,
     ) {
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
         Zip::indexed(probs.rows_mut()).for_each(|i, mut p_row| {
             Zip::from(&mut p_row).and(cond_haps).for_each(|p, &z| {
@@ -513,7 +513,7 @@ impl Hmm {
 
         #[cfg(feature = "obliv")]
         renorm_scale(probs, probs_e);
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         EMISS.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -528,7 +528,7 @@ impl Hmm {
         mut cur_probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_probs_e: ArrayViewMut1<TpI16>,
     ) {
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
         let all_sum_h = Zip::from(prev_probs.rows()).map_collect(|r| r.sum());
 
@@ -557,7 +557,7 @@ impl Hmm {
         {
             cur_probs /= all_sum_h.sum();
         }
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         TRANS.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -568,7 +568,7 @@ impl Hmm {
         mut cur_probs: ArrayViewMut2<Real>,
         #[cfg(feature = "obliv")] mut cur_probs_e: ArrayViewMut1<TpI16>,
     ) {
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
         #[cfg(feature = "obliv")]
         let (sum_k, sum_k_e) = sum_scale_by_column(cur_probs.view(), cur_probs_e.view());
@@ -590,7 +590,7 @@ impl Hmm {
         cur_probs_e.fill(sum_k_e);
 
         Zip::from(cur_probs.rows_mut()).for_each(|mut p_row| p_row.assign(&sum_k));
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         COLL.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -620,7 +620,7 @@ impl Hmm {
         mut tprobs: ArrayViewMut2<Real>,
         mut tprobs_e: ArrayViewMut2<TpI16>,
     ) {
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
 
         tprobs.assign(&fprobs.dot(&bprobs.t()));
@@ -637,7 +637,7 @@ impl Hmm {
             .and(&mut tprobs_e)
             .for_each(|t, e| renorm_scale_single(t, e));
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         COMB.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();

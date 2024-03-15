@@ -10,4 +10,4 @@ source $MAIN_DIR/config.sh
 
 (cd $MAIN_DIR/host && cargo +nightly build $PROFILE) && \
     (cp $HOST $TARGET_DIR) && \
-    (cd $TARGET_DIR && make -C $GRAMINE_DIR SGX=1 DEBUG=0 EDMM=1)
+    (cd $TARGET_DIR && make -C $GRAMINE_DIR SGX=1 DEBUG=0 EDMM=1 PROFILE="$PROFILE")

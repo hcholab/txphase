@@ -11,7 +11,7 @@ use crate::{Bool, U32};
 #[cfg(feature = "obliv")]
 use timing_shield::TpEq;
 
-#[cfg(not(target_vendor = "fortanix"))]
+#[cfg(feature = "benchmarking")]
 mod timing {
     pub use std::cell::RefCell;
     pub use std::time::{Duration, Instant};
@@ -22,7 +22,7 @@ mod timing {
         pub static UPDATE: RefCell<Duration> = RefCell::new(Duration::ZERO);
     }
 }
-#[cfg(not(target_vendor = "fortanix"))]
+#[cfg(feature = "benchmarking")]
 pub use timing::*;
 
 pub fn find_top_neighbors(
@@ -68,7 +68,7 @@ fn find_top_neighbors_trie(
         .cloned()
         .reduce(|accu, i| accu | i)
         .unwrap();
-    #[cfg(not(target_vendor = "fortanix"))]
+    #[cfg(feature = "benchmarking")]
     let t = Instant::now();
     let mut nearest_neighbors = Vec::new();
     for (i, ((id, d_a, d_b), &b)) in pbwt_trie
@@ -90,7 +90,7 @@ fn find_top_neighbors_trie(
         }
     }
 
-    #[cfg(not(target_vendor = "fortanix"))]
+    #[cfg(feature = "benchmarking")]
     INSERT.with(|v| {
         let mut v = v.borrow_mut();
         *v += t.elapsed();
@@ -99,18 +99,18 @@ fn find_top_neighbors_trie(
     let all_neighbors = if do_query {
         let mut nearest_neighbors_iter = nearest_neighbors.into_iter().rev();
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
         let mut rank_level =
             init_last_rank_level(n_neighbors, &pbwt_input.full_div, &pbwt_trie.ppa);
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         INIT_RANKS.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
         });
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         let t = Instant::now();
 
         let mut all_neighbors = Vec::new();
@@ -173,7 +173,7 @@ fn find_top_neighbors_trie(
                 all_neighbors.push(neighbors);
             }
         }
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         LOOKUP.with(|v| {
             let mut v = v.borrow_mut();
             *v += t.elapsed();
@@ -184,7 +184,7 @@ fn find_top_neighbors_trie(
         vec![None; find_neighbors_filter.len()]
     };
 
-    #[cfg(not(target_vendor = "fortanix"))]
+    #[cfg(feature = "benchmarking")]
     let t = Instant::now();
     pbwt_input.update(
         last_group_id,
@@ -195,7 +195,7 @@ fn find_top_neighbors_trie(
         &pbwt_trie.ppa,
     );
 
-    #[cfg(not(target_vendor = "fortanix"))]
+    #[cfg(feature = "benchmarking")]
     UPDATE.with(|v| {
         let mut v = v.borrow_mut();
         *v += t.elapsed();

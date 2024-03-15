@@ -1,6 +1,5 @@
 use bitvec::prelude::{BitSlice, Lsb0};
 use ndarray::{Array1, Array2};
-use std::convert::TryFrom;
 use std::io::Result;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]

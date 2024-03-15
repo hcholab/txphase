@@ -258,7 +258,6 @@ fn unfold_haps(
 //}
 
 pub fn pack_index_maps<'a>(blocks: &[BlockSlice<'a>]) -> Vec<OblivVec<TpU64>> {
-    use std::iter::FromIterator;
     let n_full_haps = blocks[0].index_map.len();
     let mut packed = Vec::new();
     let mut cur_bit_count = 0;

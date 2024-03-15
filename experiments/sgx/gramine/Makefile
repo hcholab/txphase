@@ -21,7 +21,7 @@ endif
 
 -include $(ORIG_SELF_EXE).d # See also: .cargo/config.toml
 $(ORIG_SELF_EXE): $(PHASING_DIR)/Cargo.toml
-	cd $(PHASING_DIR)
+	cd $(PHASING_DIR); \
 	RUSTFLAGS="$(RUSTFLAGS)" cargo +nightly build $(PROFILE)
 
 $(SELF_EXE): $(ORIG_SELF_EXE)

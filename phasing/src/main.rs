@@ -19,7 +19,7 @@ mod dynamic_fixed;
 
 #[cfg(feature = "obliv")]
 mod inner {
-    pub use tp_fixedpoint::timing_shield::{TpBool, TpEq, TpI32, TpI8, TpU16, TpU32, TpU64, TpU8};
+    use tp_fixedpoint::timing_shield::{TpBool, TpI32, TpI8, TpU16, TpU32, TpU64, TpU8};
     pub type Genotype = TpI8;
     pub type UInt = TpU32;
     pub type Usize = TpU64;
@@ -32,6 +32,8 @@ mod inner {
     pub const F: usize = 52;
     pub type Real = tp_fixedpoint::TpFixed64<F>;
 }
+#[cfg(feature = "obliv")]
+pub use tp_fixedpoint::timing_shield::TpEq;
 
 #[cfg(not(feature = "obliv"))]
 mod inner {
@@ -167,7 +169,7 @@ fn main() {
     #[cfg(target_vendor = "fortanix")]
     println!("SGX: true");
 
-    #[cfg(not(target_vendor = "fortanix"))]
+    #[cfg(feature = "benchmarking")]
     println!("SGX: false");
 
     println!("PBWT depth: {pbwt_depth}");

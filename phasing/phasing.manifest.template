@@ -13,6 +13,8 @@ loader.env.MALLOC_ARENA_MAX = "1"
 # For easier debugging — not strictly required to run this workload
 loader.env.RUST_BACKTRACE = "full"
 
+loader.insecure__use_cmdline_argv = true
+
 fs.mounts = [
   { path = "/lib", uri = "file:{{ gramine.runtimedir() }}" },
   { path = "{{ arch_libdir }}", uri = "file:{{ arch_libdir }}" },

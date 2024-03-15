@@ -7,7 +7,7 @@ pub const MCMC_PRUNE_PROB_THRES: f64 = 0.999; // "mcmc-prune" parameter in Shape
 pub const MAX_HETS: usize = 22; // "MAX_AMB" constant in ShapeIt4 (utils/otools.h)
 
 #[cfg(feature = "obliv")]
-use tp_fixedpoint::timing_shield::{TpCondSwap, TpOrd};
+use tp_fixedpoint::timing_shield::{TpCondSwap, TpEq, TpOrd};
 
 #[derive(Clone, Copy)]
 pub struct GMeta(U8);
@@ -759,7 +759,7 @@ fn select_top_p_with_entropy(tab: ArrayView2<Real>) -> (Array2<u8>, f64, f64) {
 #[cfg(feature = "obliv")]
 mod inner {
     use super::*;
-    pub use tp_fixedpoint::timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd};
+    use tp_fixedpoint::timing_shield::TpBool;
     #[derive(Clone)]
     pub struct SortItem {
         pub dip: Real,

@@ -262,7 +262,7 @@ impl<'a> Mcmc<'a> {
         {
             println!("Neighbors Finding: {} ms", now.elapsed().as_millis());
 
-            #[cfg(not(target_vendor = "fortanix"))]
+            #[cfg(feature = "benchmarking")]
             {
                 println!(
                     "\tInsert target: {:?} ms",
@@ -752,7 +752,7 @@ impl<'a> Mcmc<'a> {
                 .as_millis()
         );
 
-        #[cfg(not(target_vendor = "fortanix"))]
+        #[cfg(feature = "benchmarking")]
         if use_rss {
             println!(
                 "\tEmission: {:?} ms",
