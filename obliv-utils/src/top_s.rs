@@ -1,6 +1,6 @@
 use crate::aligned::{merge_sort_aligned, rl_cap, Aligned};
 use crate::vec::OblivVec;
-use timing_shield::{TpCondSwap, TpEq, TpOrd, TpU32, TpU8};
+use timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd, TpU32, TpU8};
 
 pub fn select_top_s_merge<T>(s: usize, ranks: Vec<T>) -> OblivVec<T>
 where
@@ -63,6 +63,30 @@ where
             a.tp_lt_eq(b).cond_swap(a, b);
         }
         top_s[j] = ranks.pop().unwrap();
+    }
+    top_s
+}
+
+pub fn select_top_s_stable_by<T>(
+    s: usize,
+    mut ranks: Vec<T>,
+    lt_eq: fn(&T, &T) -> TpBool,
+    cond_swap: fn(TpBool, &mut T, &mut T),
+) -> Vec<T>
+where
+    T: Clone,
+{
+    if ranks.len() == 1 {
+        return ranks;
+    }
+
+    let mut top_s = Vec::with_capacity(s);
+    for _ in 0..s.min(ranks.len() - 1) {
+        for i in 0..ranks.len() - 1 {
+            let [a, b] = unsafe { ranks.get_many_unchecked_mut([i, i + 1]) };
+            cond_swap(lt_eq(a, b), a, b);
+        }
+        top_s.push(ranks.pop().unwrap());
     }
     top_s
 }

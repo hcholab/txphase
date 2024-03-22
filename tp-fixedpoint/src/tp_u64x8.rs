@@ -2,7 +2,7 @@ use derive_more::*;
 use std::simd::u64x8;
 use timing_shield::{TpBool, TpCondSwap, TpU64};
 
-#[derive(From, BitXor, BitXorAssign, BitAnd, Not, Clone, Copy)]
+#[derive(From, BitXor, BitXorAssign, BitAnd, Not, Clone, Copy, Add, AddAssign)]
 pub struct TpU64x8(u64x8);
 
 impl TpU64x8 {
@@ -21,12 +21,18 @@ impl TpU64x8 {
     pub const fn as_array(&self) -> &[TpU64; 8] {
         unsafe { std::mem::transmute(self.0.as_array()) }
     }
+
+    pub fn as_mut_array(&mut self) -> &mut [TpU64; 8] {
+        unsafe { std::mem::transmute(self.0.as_mut_array()) }
+    }
+
     pub const fn to_array(self) -> [TpU64; 8] {
         unsafe { std::mem::transmute(self.0.to_array()) }
     }
 }
 
 impl TpCondSwap for TpU64x8 {
+    #[inline(always)]
     fn tp_cond_swap(condition: TpBool, a: &mut Self, b: &mut Self) {
         // Zero-extend condition to this type's width
         let cond_zx = condition.as_u64();

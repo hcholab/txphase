@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["obliv"]
+default = ["obliv", "benchmarking"]
+benchmarking = []
 obliv = ["timing-shield", "obliv-utils"]
 
 [dependencies]

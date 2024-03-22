@@ -35,7 +35,7 @@ impl<'a> FilteredBlockSliceObliv<'a> {
             .iter()
             .zip(block_slice.index_map.iter())
             .for_each(|(&b, &i)| {
-                filter[i as usize] = b;
+                filter[i as usize] |= b;
 
                 #[cfg(feature = "obliv")]
                 {

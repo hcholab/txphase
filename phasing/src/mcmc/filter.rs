@@ -104,6 +104,7 @@ pub fn filter_blocks<'a>(
 
     let unique_neighbors = {
         let packed = pack_index_maps(blocks);
+
         let mut max_k_neighbors_indices = vec![Vec::new(); max_k_neighbors.len()];
 
         for packed in packed.into_iter() {
@@ -114,9 +115,10 @@ pub fn filter_blocks<'a>(
                 indices.push(packed.get(n));
             }
         }
+
         let unpacked = unpack_indices(&max_k_neighbors_indices, blocks);
         unpacked.into_iter().fold(
-            vec![Vec::<U16>::with_capacity(blocks.len()); max_k_neighbors.len()],
+            vec![Vec::<U16>::with_capacity(max_k_neighbors.len()); blocks.len()],
             |mut accu, unpacked| {
                 for (a, b) in unpacked.into_iter().zip(accu.iter_mut()) {
                     b.push(a);
@@ -307,8 +309,90 @@ pub fn pack_index_maps<'a>(blocks: &[BlockSlice<'a>]) -> Vec<OblivVec<TpU64>> {
     packed
 }
 
+use tp_fixedpoint::TpU64x8;
+
+pub fn pack_index_maps_2<'a>(blocks: &[BlockSlice<'a>]) -> Vec<Vec<TpU64x8>> {
+    use std::simd::u64x8;
+    let n_full_haps = blocks[0].index_map.len();
+    let mut packed = vec![Vec::new(); n_full_haps];
+    let mut packed_count = 0;
+    let mut cur_bit_count = 0;
+    let mut cur_packed = Some(vec![0u64; n_full_haps]);
+    for block in blocks {
+        let n_bits = block.n_unique().next_power_of_two().ilog2();
+        for (&i, p) in block
+            .index_map
+            .iter()
+            .zip(cur_packed.as_mut().unwrap().iter_mut())
+        {
+            *p |= (i as u64) << cur_bit_count;
+        }
+        cur_bit_count += n_bits;
+        if cur_bit_count >= 64 {
+            {
+                if packed_count == 7 {
+                    packed_count = 0;
+                }
+                for (v, p) in cur_packed
+                    .take()
+                    .unwrap()
+                    .into_iter()
+                    .zip(packed.iter_mut())
+                {
+                    if packed_count == 0 {
+                        p.push(TpU64x8::ZERO);
+                    }
+                    let packed_u64x8 = unsafe {
+                        (p.last_mut().unwrap() as *mut _ as *mut u64x8)
+                            .as_mut()
+                            .unwrap()
+                    };
+                    packed_u64x8[packed_count] = v;
+                }
+                packed_count += 1;
+            }
+
+            cur_packed = Some(vec![0u64; n_full_haps]);
+            cur_bit_count &= 0b111111;
+
+            if cur_bit_count > 0 {
+                let n_shifts = n_bits - cur_bit_count;
+                for (&i, p) in block
+                    .index_map
+                    .iter()
+                    .zip(cur_packed.as_mut().unwrap().iter_mut())
+                {
+                    *p |= (i as u64) >> n_shifts;
+                }
+            }
+        }
+    }
+    if cur_bit_count > 0 {
+        if packed_count == 7 {
+            packed_count = 0;
+        }
+        for (v, p) in cur_packed
+            .take()
+            .unwrap()
+            .into_iter()
+            .zip(packed.iter_mut())
+        {
+            if packed_count == 0 {
+                p.push(TpU64x8::ZERO);
+            }
+            let packed_u64x8 = unsafe {
+                (p.last_mut().unwrap() as *mut _ as *mut u64x8)
+                    .as_mut()
+                    .unwrap()
+            };
+            packed_u64x8[packed_count] = v;
+        }
+    }
+    packed
+}
+
 pub fn unpack_indices<'a>(packed: &[Vec<TpU64>], blocks: &[BlockSlice<'a>]) -> Vec<Vec<U16>> {
-    let mut unpacked = vec![Vec::with_capacity(blocks.len())];
+    let mut unpacked = Vec::with_capacity(packed.len());
     let lens = blocks
         .into_iter()
         .map(|b| b.n_unique().next_power_of_two().ilog2())

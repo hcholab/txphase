@@ -1,44 +1,4 @@
-//use crate::aligned::{merge_sort_aligned, rl_cap, Aligned};
 use timing_shield::{TpBool, TpCondSwap, TpEq, TpOrd};
-
-//pub fn bitonic_sort_<T: TpOrd + TpCondSwap + Clone>(items: &mut [T], ascending: bool)
-//where
-//[(); rl_cap::<T>()]:,
-//{
-//let mut lens = {
-//let (mut prefix, aligned, mut suffix) = unsafe { items.align_to_mut::<Aligned<T>>() };
-//let mut lens = vec![prefix.len()];
-//lens.append(&mut vec![rl_cap::<T>(); aligned.len()]);
-//lens.push(suffix.len());
-
-//let mut buffer = Aligned::<T>::default();
-//let len = prefix.len();
-//merge_sort_aligned(&mut prefix, &mut buffer.0[..len], ascending);
-//for aligned in aligned.iter_mut() {
-//merge_sort_aligned(&mut aligned.0, &mut buffer.0, ascending);
-//}
-//let len = suffix.len();
-//merge_sort_aligned(&mut suffix, &mut buffer.0[..len], ascending);
-//lens
-//};
-
-//while lens.len() > 1 {
-
-//}
-//}
-
-//fn merge_<T: TpOrd + TpCondSwap>(a: &mut [T], b: &mut [T], dir: bool) {
-//let n = items.len();
-//if n > 1 {
-//let m = n.next_power_of_two() >> 1;
-//for i in 0..(n - m) {
-//let cond = items[i].tp_gt_eq(&items[i + m]).tp_eq(&dir);
-//cond_swap_in_slice(cond, items, i, i + m);
-//}
-//merge(&mut items[..m], dir);
-//merge(&mut items[m..n], dir);
-//}
-//}
 
 // ref: https://github.com/flakusha/sorting_rs/blob/master/src/bitonic_sort.rs
 pub fn bitonic_sort<T: TpOrd + TpCondSwap>(items: &mut [T], ascending: bool) {
@@ -52,23 +12,72 @@ pub fn bitonic_sort<T: TpOrd + TpCondSwap>(items: &mut [T], ascending: bool) {
     }
 }
 
+// ref: https://github.com/flakusha/sorting_rs/blob/master/src/bitonic_sort.rs
+pub fn bitonic_sort_top_s<T: TpOrd + TpCondSwap>(
+    items: &mut [T],
+    s: usize,
+    ascending: bool,
+) -> &[T] {
+    let n = items.len();
+    assert!(s <= n);
+    if n > 1 {
+        let dir = ascending;
+        let m = n / 2;
+        bitonic_sort(&mut items[..m], !dir);
+        bitonic_sort(&mut items[m..n], dir);
+        merge(&mut items[m - s..m + s], dir);
+        return &items[m - s..m + s];
+    }
+    return items;
+}
+
 fn merge<T: TpOrd + TpCondSwap>(items: &mut [T], dir: bool) {
     let n = items.len();
     if n > 1 {
         let m = n.next_power_of_two() >> 1;
-        for i in 0..(n - m) {
-            let cond = items[i].tp_gt_eq(&items[i + m]).tp_eq(&dir);
-            cond_swap_in_slice(cond, items, i, i + m);
+        let (a, b) = items.split_at_mut(m);
+        for (a, b) in a.iter_mut().take(n - m).zip(b.iter_mut().take(n - m)) {
+            let cond = a.tp_gt_eq(b).tp_eq(&dir);
+            cond.cond_swap(a, b);
         }
         merge(&mut items[..m], dir);
         merge(&mut items[m..n], dir);
     }
 }
 
-fn cond_swap_in_slice<T: TpCondSwap>(cond: TpBool, slice: &mut [T], i: usize, j: usize) {
-    assert!(j < slice.len());
-    let [a, b] = unsafe { slice.get_many_unchecked_mut([i, j]) };
-    cond.cond_swap(a, b);
+pub fn bitonic_sort_by<T>(
+    items: &mut [T],
+    ascending: bool,
+    gt_eq: fn(&T, &T) -> TpBool,
+    cond_swap: fn(TpBool, &mut T, &mut T),
+) {
+    let n = items.len();
+    if n > 1 {
+        let dir = ascending;
+        let m = n / 2;
+        bitonic_sort_by(&mut items[..m], !dir, gt_eq, cond_swap);
+        bitonic_sort_by(&mut items[m..n], dir, gt_eq, cond_swap);
+        merge_by(items, dir, gt_eq, cond_swap)
+    }
+}
+
+fn merge_by<T>(
+    items: &mut [T],
+    dir: bool,
+    gt_eq: fn(&T, &T) -> TpBool,
+    cond_swap: fn(TpBool, &mut T, &mut T),
+) {
+    let n = items.len();
+    if n > 1 {
+        let m = n.next_power_of_two() >> 1;
+        let (a, b) = items.split_at_mut(m);
+        for (a, b) in a.iter_mut().take(n - m).zip(b.iter_mut().take(n - m)) {
+            let cond = gt_eq(a, b).tp_eq(&dir);
+            cond_swap(cond, a, b);
+        }
+        merge_by(&mut items[..m], dir, gt_eq, cond_swap);
+        merge_by(&mut items[m..n], dir, gt_eq, cond_swap);
+    }
 }
 
 #[cfg(test)]

@@ -1,8 +1,8 @@
 PROFILE="--release"
-
+FEATURES="--features benchmarking"
 if [[ $LITE -eq 1 ]]
 then
-    FEATURES="--no-default-features --features lite"
+    FEATURES += "--no-default-features --features lite"
 fi
 
 if [[ $SGX -eq 1 ]]
