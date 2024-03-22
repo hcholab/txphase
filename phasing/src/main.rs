@@ -1,5 +1,6 @@
 #![feature(stmt_expr_attributes)]
 #![feature(iter_array_chunks)]
+#![feature(portable_simd)]
 #![allow(dead_code)]
 
 mod genotype_graph;
