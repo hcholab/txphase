@@ -207,6 +207,178 @@ fn unfold_haps(
     }
 }
 
+pub fn pack_index_maps<'a>(blocks: &[BlockSlice<'a>]) -> Vec<OblivVec<TpU64>> {
+    let n_full_haps = blocks[0].index_map.len();
+    let mut packed = Vec::new();
+    let mut cur_bit_count = 0;
+    let mut cur_packed = Some(vec![0u64; n_full_haps]);
+    for block in blocks {
+        let n_bits = block.n_unique().next_power_of_two().ilog2();
+        for (&i, p) in block
+            .index_map
+            .iter()
+            .zip(cur_packed.as_mut().unwrap().iter_mut())
+        {
+            *p |= (i as u64) << cur_bit_count;
+        }
+        cur_bit_count += n_bits;
+        if cur_bit_count >= 64 {
+            packed.push(OblivVec::from_iter(
+                cur_packed
+                    .take()
+                    .unwrap()
+                    .into_iter()
+                    .map(|v| TpU64::protect(v)),
+            ));
+            cur_packed = Some(vec![0u64; n_full_haps]);
+            cur_bit_count &= 0b111111;
+
+            if cur_bit_count > 0 {
+                let n_shifts = n_bits - cur_bit_count;
+                for (&i, p) in block
+                    .index_map
+                    .iter()
+                    .zip(cur_packed.as_mut().unwrap().iter_mut())
+                {
+                    *p |= (i as u64) >> n_shifts;
+                }
+            }
+        }
+    }
+    if cur_bit_count > 0 {
+        packed.push(OblivVec::from_iter(
+            cur_packed
+                .take()
+                .unwrap()
+                .into_iter()
+                .map(|v| TpU64::protect(v)),
+        ));
+    }
+    packed
+}
+
+pub fn unpack_indices<'a>(packed: &[Vec<TpU64>], blocks: &[BlockSlice<'a>]) -> Vec<Vec<U16>> {
+    let mut unpacked = Vec::with_capacity(packed.len());
+    let lens = blocks
+        .into_iter()
+        .map(|b| b.n_unique().next_power_of_two().ilog2())
+        .collect::<Vec<_>>();
+    for packed in packed {
+        let mut packed_iter = packed.iter();
+        let mut cur_packed = packed_iter.next().unwrap().to_owned();
+        let mut n_bits = 64;
+        let new_unpacked = lens
+            .iter()
+            .map(|&l| {
+                if n_bits >= l {
+                    let unpacked = cur_packed.as_u16() & ((1 << l) - 1);
+                    cur_packed >>= l as u32;
+                    n_bits -= l;
+                    unpacked
+                } else {
+                    let mut unpacked = cur_packed.as_u16();
+                    cur_packed = packed_iter.next().unwrap().to_owned();
+                    let n_remain = l - n_bits;
+                    unpacked |= (cur_packed.as_u16() & ((1 << n_remain) - 1)) << n_bits;
+                    cur_packed >>= n_remain;
+                    n_bits = 64 - n_remain;
+                    unpacked
+                }
+            })
+            .collect();
+        unpacked.push(new_unpacked);
+    }
+
+    unpacked
+}
+
+//struct ToSort {
+//selection_bit: TpU8,
+//packed: Vec<TpU64x8>,
+//}
+
+//impl tp_fixedpoint::timing_shield::TpCondSwap for ToSort {
+//fn tp_cond_swap(cond: TpBool, a: &mut Self, b: &mut Self) {
+//cond.cond_swap(&mut a.selection_bit, &mut b.selection_bit);
+//cond.cond_swap(&mut a.packed, &mut b.packed);
+//}
+//}
+
+//impl tp_fixedpoint::timing_shield::TpOrd for ToSort {
+//fn tp_lt(&self, other: &Self) -> TpBool {
+//self.selection_bit.tp_lt(&other.selection_bit)
+//}
+
+//fn tp_lt_eq(&self, other: &Self) -> TpBool {
+//self.selection_bit.tp_lt_eq(&other.selection_bit)
+//}
+
+//fn tp_gt(&self, other: &Self) -> TpBool {
+//self.selection_bit.tp_gt(&other.selection_bit)
+//}
+
+//fn tp_gt_eq(&self, other: &Self) -> TpBool {
+//self.selection_bit.tp_gt_eq(&other.selection_bit)
+//}
+//}
+
+//pub fn filter_blocks_2<'a>(
+//neighbors: &[Option<Vec<U32>>],
+//blocks: &[BlockSlice<'a>],
+//) -> (Array2<Genotype>, Array1<Bool>, Usize) {
+//let window_len = neighbors.len();
+
+//let (max_k_neighbors, filter, n_full_states) = neighbors_to_filter(neighbors);
+
+//let mut unfolded = Array2::from_elem((window_len, max_k_neighbors.len()), Genotype::protect(0));
+
+//let unique_neighbors = {
+//let packed = pack_index_maps_2(blocks);
+//let mut max_k_neighbors_indices = vec![Vec::new(); max_k_neighbors.len()];
+//for packed in packed.into_iter() {
+//for (&n, indices) in max_k_neighbors
+//.iter()
+//.zip(max_k_neighbors_indices.iter_mut())
+//{
+//let mut cur = None;
+//for (i, packed) in packed.iter().enumerate() {
+//if let Some(cur_) = cur.take() {
+//cur = Some(n.tp_eq(&(i as u32)).select(*packed, cur_));
+
+//} else {
+//cur = Some(packed.to_owned())
+//}
+//}
+//indices.push(cur.take().unwrap());
+//}
+//}
+//let unpacked = unpack_indices_2(&max_k_neighbors_indices, blocks);
+//unpacked.into_iter().fold(
+//vec![Vec::<U16>::with_capacity(max_k_neighbors.len()); blocks.len()],
+//|mut accu, unpacked| {
+//for (a, b) in unpacked.into_iter().zip(accu.iter_mut()) {
+//b.push(a);
+//}
+//accu
+//},
+//)
+//};
+
+//let mut start_slice = 0;
+//for (block, unique_neighbors) in blocks.into_iter().zip(unique_neighbors.into_iter()) {
+//unfold_block(
+//block,
+//&unique_neighbors,
+//unfolded.slice_mut(s![start_slice..start_slice + block.n_sites(), ..]),
+//);
+//start_slice += block.n_sites();
+//}
+
+//let filter = Array1::from_vec(filter);
+
+//(unfolded, filter, n_full_states)
+//}
+
 //#[cfg(feature = "obliv")]
 //fn unfold_block_2<'a>(
 //block: &common::ref_panel::BlockSlice<'a>,
@@ -259,169 +431,135 @@ fn unfold_haps(
 //}
 //}
 
-pub fn pack_index_maps<'a>(blocks: &[BlockSlice<'a>]) -> Vec<OblivVec<TpU64>> {
-    let n_full_haps = blocks[0].index_map.len();
-    let mut packed = Vec::new();
-    let mut cur_bit_count = 0;
-    let mut cur_packed = Some(vec![0u64; n_full_haps]);
-    for block in blocks {
-        let n_bits = block.n_unique().next_power_of_two().ilog2();
-        for (&i, p) in block
-            .index_map
-            .iter()
-            .zip(cur_packed.as_mut().unwrap().iter_mut())
-        {
-            *p |= (i as u64) << cur_bit_count;
-        }
-        cur_bit_count += n_bits;
-        if cur_bit_count >= 64 {
-            packed.push(OblivVec::from_iter(
-                cur_packed
-                    .take()
-                    .unwrap()
-                    .into_iter()
-                    .map(|v| TpU64::protect(v)),
-            ));
-            cur_packed = Some(vec![0u64; n_full_haps]);
-            cur_bit_count &= 0b111111;
+//use tp_fixedpoint::TpU64x8;
 
-            if cur_bit_count > 0 {
-                let n_shifts = n_bits - cur_bit_count;
-                for (&i, p) in block
-                    .index_map
-                    .iter()
-                    .zip(cur_packed.as_mut().unwrap().iter_mut())
-                {
-                    *p |= (i as u64) >> n_shifts;
-                }
-            }
-        }
-    }
-    if cur_bit_count > 0 {
-        packed.push(OblivVec::from_iter(
-            cur_packed
-                .take()
-                .unwrap()
-                .into_iter()
-                .map(|v| TpU64::protect(v)),
-        ));
-    }
-    packed
-}
+//pub fn pack_index_maps_u64x8<'a>(blocks: &[BlockSlice<'a>]) -> Vec<Vec<TpU64x8>> {
+//use std::simd::u64x8;
+//let n_full_haps = blocks[0].index_map.len();
 
-use tp_fixedpoint::TpU64x8;
+//let mut packed = vec![vec![TpU64x8::ZERO; n_full_haps]];
 
-pub fn pack_index_maps_2<'a>(blocks: &[BlockSlice<'a>]) -> Vec<Vec<TpU64x8>> {
-    use std::simd::u64x8;
-    let n_full_haps = blocks[0].index_map.len();
-    let mut packed = vec![Vec::new(); n_full_haps];
-    let mut packed_count = 0;
-    let mut cur_bit_count = 0;
-    let mut cur_packed = Some(vec![0u64; n_full_haps]);
-    for block in blocks {
-        let n_bits = block.n_unique().next_power_of_two().ilog2();
-        for (&i, p) in block
-            .index_map
-            .iter()
-            .zip(cur_packed.as_mut().unwrap().iter_mut())
-        {
-            *p |= (i as u64) << cur_bit_count;
-        }
-        cur_bit_count += n_bits;
-        if cur_bit_count >= 64 {
-            {
-                if packed_count == 7 {
-                    packed_count = 0;
-                }
-                for (v, p) in cur_packed
-                    .take()
-                    .unwrap()
-                    .into_iter()
-                    .zip(packed.iter_mut())
-                {
-                    if packed_count == 0 {
-                        p.push(TpU64x8::ZERO);
-                    }
-                    let packed_u64x8 = unsafe {
-                        (p.last_mut().unwrap() as *mut _ as *mut u64x8)
-                            .as_mut()
-                            .unwrap()
-                    };
-                    packed_u64x8[packed_count] = v;
-                }
-                packed_count += 1;
-            }
+//let mut packed_count = 0;
+//let mut cur_bit_count = 0;
 
-            cur_packed = Some(vec![0u64; n_full_haps]);
-            cur_bit_count &= 0b111111;
+//let mut cur_packed = packed
+//.last_mut()
+//.unwrap()
+//.iter_mut()
+//.map(|v| unsafe { &mut (v as *mut _ as *mut u64x8).as_mut().unwrap().as_mut_array()[0] })
+//.collect::<Vec<&mut u64>>();
 
-            if cur_bit_count > 0 {
-                let n_shifts = n_bits - cur_bit_count;
-                for (&i, p) in block
-                    .index_map
-                    .iter()
-                    .zip(cur_packed.as_mut().unwrap().iter_mut())
-                {
-                    *p |= (i as u64) >> n_shifts;
-                }
-            }
-        }
-    }
-    if cur_bit_count > 0 {
-        if packed_count == 7 {
-            packed_count = 0;
-        }
-        for (v, p) in cur_packed
-            .take()
-            .unwrap()
-            .into_iter()
-            .zip(packed.iter_mut())
-        {
-            if packed_count == 0 {
-                p.push(TpU64x8::ZERO);
-            }
-            let packed_u64x8 = unsafe {
-                (p.last_mut().unwrap() as *mut _ as *mut u64x8)
-                    .as_mut()
-                    .unwrap()
-            };
-            packed_u64x8[packed_count] = v;
-        }
-    }
-    packed
-}
+//for block in blocks {
+//let n_bits = block.n_unique().next_power_of_two().ilog2();
+//for (&i, p) in block.index_map.iter().zip(cur_packed.iter_mut()) {
+//**p |= (i as u64) << cur_bit_count;
+//}
+//cur_bit_count += n_bits;
+//if cur_bit_count >= 64 {
+//{
+//if packed_count == 8 {
+//packed_count = 0;
+//packed.push(vec![TpU64x8::ZERO; n_full_haps]);
+//}
+//cur_packed = packed
+//.last_mut()
+//.unwrap()
+//.iter_mut()
+//.map(|v| unsafe {
+//&mut (v as *mut _ as *mut u64x8).as_mut().unwrap().as_mut_array()[packed_count]
+//})
+//.collect::<Vec<&mut u64>>();
+//packed_count += 1;
 
-pub fn unpack_indices<'a>(packed: &[Vec<TpU64>], blocks: &[BlockSlice<'a>]) -> Vec<Vec<U16>> {
-    let mut unpacked = Vec::with_capacity(packed.len());
-    let lens = blocks
-        .into_iter()
-        .map(|b| b.n_unique().next_power_of_two().ilog2())
-        .collect::<Vec<_>>();
-    for packed in packed {
-        let mut packed_iter = packed.iter();
-        let mut cur_packed = packed_iter.next().unwrap().to_owned();
-        let mut n_bits = 64;
-        let new_unpacked = lens
-            .iter()
-            .map(|&l| {
-                if n_bits >= l {
-                    let unpacked = cur_packed.as_u16() & ((1 << l) - 1);
-                    cur_packed >>= l as u32;
-                    n_bits -= l;
-                    unpacked
-                } else {
-                    let mut unpacked = cur_packed.as_u16();
-                    cur_packed = packed_iter.next().unwrap().to_owned();
-                    let n_remain = l - n_bits;
-                    unpacked |= (cur_packed.as_u16() & ((1 << n_remain) - 1)) << n_bits;
-                    cur_packed >>= n_remain;
-                    n_bits = 64 - n_remain;
-                    unpacked
-                }
-            })
-            .collect();
-        unpacked.push(new_unpacked);
-    }
+////for (v, p) in cur_packed
+////.take()
+////.unwrap()
+////.into_iter()
+////.zip(packed.iter_mut())
+////{
+////if packed_count == 0 {
+////p.push(TpU64x8::ZERO);
+////}
+////let packed_u64x8 = unsafe {
+////(p.last_mut().unwrap() as *mut _ as *mut u64x8)
+////.as_mut()
+////.unwrap()
+////};
+////packed_u64x8[packed_count] = v;
+////}
+////packed_count += 1;
+//}
 
-    unpacked
-}
+////cur_packed = Some(vec![0u64; n_full_haps]);
+//cur_bit_count &= 0b111111;
+
+//if cur_bit_count > 0 {
+//let n_shifts = n_bits - cur_bit_count;
+//for (&i, p) in block.index_map.iter().zip(cur_packed.iter_mut()) {
+//**p |= (i as u64) >> n_shifts;
+//}
+//}
+//}
+//}
+////if cur_bit_count > 0 {
+////if packed_count == 8 {
+////packed_count = 0;
+////packed.push(vec![TpU64x8::ZERO; n_full_haps]);
+////}
+////for (v, p) in cur_packed
+////.take()
+////.unwrap()
+////.into_iter()
+////.zip(packed.iter_mut())
+////{
+////if packed_count == 0 {
+////p.push(TpU64x8::ZERO);
+////}
+////let packed_u64x8 = unsafe {
+////(p.last_mut().unwrap() as *mut _ as *mut u64x8)
+////.as_mut()
+////.unwrap()
+////};
+////packed_u64x8[packed_count] = v;
+////}
+////}
+//packed
+//}
+
+//pub fn unpack_indices_u64x8<'a>(packed: &[Vec<TpU64x8>], blocks: &[BlockSlice<'a>]) -> Vec<Vec<U16>> {
+//let mut unpacked = Vec::with_capacity(packed.len());
+//let lens = blocks
+//.into_iter()
+//.map(|b| b.n_unique().next_power_of_two().ilog2())
+//.collect::<Vec<_>>();
+//for packed in packed {
+//let (prefix, packed, suffix) = unsafe { packed.align_to::<TpU64>() };
+//assert!(prefix.is_empty());
+//assert!(suffix.is_empty());
+//let mut packed_iter = packed.iter();
+//let mut cur_packed = packed_iter.next().unwrap().to_owned();
+//let mut n_bits = 64;
+//let new_unpacked = lens
+//.iter()
+//.map(|&l| {
+//if n_bits >= l {
+//let unpacked = cur_packed.as_u16() & ((1 << l) - 1);
+//cur_packed >>= l as u32;
+//n_bits -= l;
+//unpacked
+//} else {
+//let mut unpacked = cur_packed.as_u16();
+//cur_packed = packed_iter.next().unwrap().to_owned();
+//let n_remain = l - n_bits;
+//unpacked |= (cur_packed.as_u16() & ((1 << n_remain) - 1)) << n_bits;
+//cur_packed >>= n_remain;
+//n_bits = 64 - n_remain;
+//unpacked
+//}
+//})
+//.collect();
+//unpacked.push(new_unpacked);
+//}
+
+//unpacked
+//}

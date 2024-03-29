@@ -18,7 +18,6 @@ pub fn sites_from_bcf_path(
     path: &Path,
 ) -> anyhow::Result<(Vec<Site>, bcf::header::HeaderView, Vec<bcf::record::Record>)> {
     let mut reader = bcf::Reader::from_path(path)?;
-    reader.set_threads(10).unwrap();
     let mut records = Vec::new();
     use bcf::Read;
     let header = reader.header().clone();
