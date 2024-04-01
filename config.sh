@@ -1,5 +1,5 @@
 PROFILE="--release"
-FEATURES="--features benchmarking"
+#FEATURES="--features benchmarking"
 if [[ $LITE -eq 1 ]]
 then
     FEATURES += "--no-default-features --features lite"

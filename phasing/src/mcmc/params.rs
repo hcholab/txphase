@@ -1,11 +1,7 @@
 use crate::hmm::HmmParams;
+use crate::neighbor_finding::PbwtTrie;
 use crate::variants::{build_variants, Variant};
 use common::ref_panel::{RefPanel, RefPanelSlice};
-#[cfg(feature = "obliv")]
-use compressed_pbwt_obliv::pbwt_trie::PbwtTrie;
-
-#[cfg(not(feature = "obliv"))]
-use compressed_pbwt::pbwt_trie::PbwtTrie;
 use ndarray::{s, Array1, ArrayView1};
 use rand::Rng;
 

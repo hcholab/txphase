@@ -5,7 +5,7 @@ use obliv_utils::top_s::{merge_top_s, select_top_s_stable};
 use crate::top_s::{merge_top_s, select_top_s};
 
 use super::{NNRank, RankList};
-use crate::pbwt_trie::Node;
+use crate::neighbor_finding::pbwt_trie::Node;
 use crate::U32;
 use std::rc::Rc;
 

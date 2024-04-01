@@ -1,5 +1,4 @@
-use crate::pbwt_trie::insert::Insert;
-use crate::pbwt_trie::Node;
+use crate::neighbor_finding::pbwt_trie::{insert::Insert, Node};
 use obliv_utils::vec::OblivVec;
 use timing_shield::{TpBool, TpOrd, TpU16};
 

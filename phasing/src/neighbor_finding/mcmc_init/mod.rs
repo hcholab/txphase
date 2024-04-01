@@ -1,6 +1,6 @@
 mod init_single_site;
 mod init_tree;
-mod mcmc_init;
+pub mod mcmc_init;
 
 #[cfg(not(feature = "obliv"))]
 mod rank;
@@ -19,8 +19,6 @@ pub type RankList<T> = obliv_utils::vec::OblivVec<T>;
 
 #[cfg(not(feature = "obliv"))]
 pub type RankList<T> = Vec<T>;
-
-pub use mcmc_init::mcmc_init;
 
 //#[cfg(test)]
 //mod tests {

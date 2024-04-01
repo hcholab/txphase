@@ -1,9 +1,9 @@
 use crate::hmm::params::*;
 
 use crate::genotype_graph::{G, P};
-use crate::inner::*;
 use crate::rss_hmm::filtered_block::FilteredBlockSliceObliv;
 use crate::tp_value;
+use crate::types::*;
 use ndarray::{
     s, Array, Array1, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, ArrayViewMut3, Zip,
 };

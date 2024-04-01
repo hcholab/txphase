@@ -1,8 +1,8 @@
 #[cfg(feature = "obliv")]
-use crate::pbwt_trie::obliv_insert::OblivInsert;
+use crate::neighbor_finding::pbwt_trie::obliv_insert::OblivInsert;
 
 #[cfg(not(feature = "obliv"))]
-use crate::pbwt_trie::insert::Insert;
+use crate::neighbor_finding::pbwt_trie::insert::Insert;
 
 use crate::{Bool, U16};
 

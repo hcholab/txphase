@@ -1,7 +1,7 @@
 use super::{InitRank, RankList};
 
 const INIT_NEIGHBORS: usize = 2;
-use crate::{Bool, Isize, U16, U32};
+use crate::{Bool, I64, U16, U32};
 
 #[cfg(feature = "obliv")]
 use timing_shield::{TpEq, TpOrd};
@@ -160,7 +160,7 @@ fn init_single_site_from_ranks(nn_0: &[(U32, Bool)], nn_1: &[(U32, Bool)]) -> (B
     }
 }
 
-fn score(nn: &[(U32, Bool)]) -> Isize {
+fn score(nn: &[(U32, Bool)]) -> I64 {
     #[cfg(feature = "obliv")]
     return nn
         .iter()

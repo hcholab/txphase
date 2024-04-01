@@ -1,8 +1,5 @@
-mod nn;
+pub mod nn;
 pub mod nn_tree;
-
-pub use nn::*;
-pub use nn_tree::*;
 
 #[cfg(not(feature = "obliv"))]
 mod rank;
@@ -22,13 +19,11 @@ pub type RankList<T> = obliv_utils::vec::OblivVec<T>;
 #[cfg(not(feature = "obliv"))]
 pub type RankList<T> = Vec<T>;
 
-pub use nn::find_top_neighbors;
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pbwt_trie::PbwtTrie;
-    use crate::test_utils::*;
+    use crate::neighbor_finding::pbwt_trie::PbwtTrie;
+    use crate::neighbor_finding::test_utils::*;
     use rand::Rng;
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::pbwt_trie::Node;
+use crate::neighbor_finding::pbwt_trie::Node;
 
 pub struct Insert {
     zero: Vec<Vec<(u16, u16, u16)>>,

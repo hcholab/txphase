@@ -6,29 +6,27 @@
 mod genotype_graph;
 mod hmm;
 mod mcmc;
+mod neighbor_finding;
 mod rss_hmm;
 mod utils;
 mod variants;
-
-#[cfg(not(feature = "obliv"))]
-mod neighbors_finding;
-#[cfg(not(feature = "obliv"))]
-mod pbwt;
 
 #[cfg(feature = "obliv")]
 mod dynamic_fixed;
 
 #[cfg(feature = "obliv")]
-mod inner {
-    use tp_fixedpoint::timing_shield::{TpBool, TpI32, TpI8, TpU16, TpU32, TpU64, TpU8};
+mod types {
+    use tp_fixedpoint::timing_shield::{TpBool, TpI32, TpI64, TpI8, TpU16, TpU32, TpU64, TpU8};
     pub type Genotype = TpI8;
     pub type UInt = TpU32;
     pub type Usize = TpU64;
     pub type Int = TpI32;
     pub type U8 = TpU8;
+    pub type I8 = TpI8;
     pub type U16 = TpU16;
     pub type U32 = TpU32;
     pub type U64 = TpU64;
+    pub type I64 = TpI64;
     pub type Bool = TpBool;
     pub const F: usize = 52;
     pub type Real = tp_fixedpoint::TpFixed64<F>;
@@ -37,8 +35,9 @@ mod inner {
 pub use tp_fixedpoint::timing_shield::TpEq;
 
 #[cfg(not(feature = "obliv"))]
-mod inner {
+mod types {
     pub type U8 = u8;
+    pub type I8 = i8;
     pub type U16 = u16;
     pub type U32 = u32;
     pub type U64 = u64;
@@ -50,7 +49,7 @@ mod inner {
     pub type Real = f64;
 }
 
-use inner::*;
+use types::*;
 
 use crate::mcmc::IterOption;
 use ndarray::{Array1, Array2};
@@ -62,13 +61,6 @@ use std::str::FromStr;
 pub fn log_template(name: impl std::fmt::Display, param: impl std::fmt::Display) -> String {
     format!("\t* {name}\t: {param}")
 }
-
-//use std::cell::RefCell;
-//use std::fs::File;
-//use std::io::BufWriter;
-//thread_local! {
-//pub static DEBUG_FILE: RefCell<BufWriter<File>> = RefCell::new(BufWriter::new(File::create("debug.txt").unwrap()));
-//}
 
 use clap::{value_parser, Parser};
 

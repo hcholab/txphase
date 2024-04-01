@@ -1,5 +1,5 @@
 use super::{InitRank, RankList};
-use crate::pbwt_trie::{Node, PbwtTrieInput};
+use crate::neighbor_finding::pbwt_trie::{Node, PbwtTrieInput};
 
 #[cfg(feature = "obliv")]
 use obliv_utils::top_s::{merge_top_s, select_top_s_stable};

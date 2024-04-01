@@ -130,13 +130,8 @@ impl<'a> Mcmc<'a> {
     fn initialize(params: &'a McmcSharedParams, genotypes: ArrayView1<Genotype>, id: &str) -> Self {
         println!("=== Initialization ({id}) ===",);
         let now = Instant::now();
-        #[cfg(feature = "obliv")]
-        use compressed_pbwt_obliv::mcmc_init::mcmc_init;
 
-        #[cfg(not(feature = "obliv"))]
-        use compressed_pbwt::mcmc_init::mcmc_init;
-
-        let (h_0, h_1) = mcmc_init(
+        let (h_0, h_1) = crate::neighbor_finding::mcmc_init(
             genotypes.as_slice().unwrap(),
             &params.pbwt_tries,
             params.ref_panel.n_haps,
@@ -227,27 +222,18 @@ impl<'a> Mcmc<'a> {
                 .map(|v| (v[0] == 1, v[1] == 1))
                 .unzip();
 
-            #[cfg(feature = "obliv")]
-            use compressed_pbwt_obliv::nn::find_top_neighbors;
-
-            #[cfg(not(feature = "obliv"))]
-            use compressed_pbwt::nn::find_top_neighbors;
-            //use crate::neighbors_finding::find_top_neighbors;
-
-            let mut nn_0 = find_top_neighbors(
+            let mut nn_0 = crate::neighbor_finding::find_top_neighbors(
                 &h_0,
                 self.params.s,
                 &self.params.pbwt_tries,
-                //self.params.ref_panel.iter(),
                 self.params.ref_panel.n_haps,
                 &pbwt_group_filter,
             );
 
-            let nn_1 = find_top_neighbors(
+            let nn_1 = crate::neighbor_finding::find_top_neighbors(
                 &h_1,
                 self.params.s,
                 &self.params.pbwt_tries,
-                //self.params.ref_panel.iter(),
                 self.params.ref_panel.n_haps,
                 &pbwt_group_filter,
             );

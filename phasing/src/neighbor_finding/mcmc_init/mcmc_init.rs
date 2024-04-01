@@ -1,6 +1,6 @@
-use crate::mcmc_init::init_single_site::init_single_site;
-use crate::mcmc_init::init_tree::build_init_tree;
-use crate::pbwt_trie::{PbwtTrie, PbwtTrieInput};
+use crate::neighbor_finding::mcmc_init::init_single_site::init_single_site;
+use crate::neighbor_finding::mcmc_init::init_tree::build_init_tree;
+use crate::neighbor_finding::pbwt_trie::{PbwtTrie, PbwtTrieInput};
 use crate::{Bool, I8};
 
 #[cfg(feature = "obliv")]

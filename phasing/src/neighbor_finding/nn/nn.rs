@@ -1,11 +1,11 @@
-use crate::nn::nn_tree::{build_rank_level, init_last_rank_level};
+use crate::neighbor_finding::nn::nn_tree::{build_rank_level, init_last_rank_level};
 
 #[cfg(feature = "obliv")]
 use crate::U16;
 
 use super::{NNRank, RankList};
 
-use crate::pbwt_trie::{nearest_group, PbwtTrie, PbwtTrieInput};
+use crate::neighbor_finding::pbwt_trie::{nearest_group, PbwtTrie, PbwtTrieInput};
 use crate::{Bool, U32};
 
 #[cfg(feature = "obliv")]
