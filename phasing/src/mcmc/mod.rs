@@ -62,7 +62,6 @@ impl<'a> Mcmc<'a> {
         params: &'a McmcSharedParams,
         genotypes: ArrayView1<Genotype>,
         iterations: &[IterOption],
-        use_rss: bool,
         mut rng: impl Rng,
         id: &str,
     ) -> Array2<Genotype> {
@@ -99,7 +98,7 @@ impl<'a> Mcmc<'a> {
         let mut mcmc = Self::initialize(&params, genotypes.view(), id);
 
         for iter in iterations_iternal {
-            mcmc.iteration(iter, use_rss, &mut rng, id);
+            mcmc.iteration(iter, &mut rng, id);
         }
 
         #[cfg(feature = "obliv")]
@@ -187,13 +186,7 @@ impl<'a> Mcmc<'a> {
         }
     }
 
-    fn iteration(
-        &mut self,
-        iter_option: IterOptionInternal,
-        use_rss: bool,
-        mut rng: impl Rng,
-        id: &str,
-    ) {
+    fn iteration(&mut self, iter_option: IterOptionInternal, mut rng: impl Rng, id: &str) {
         println!("=== {:?} Iteration ({id}) ===", iter_option);
         let now = Instant::now();
 
@@ -252,7 +245,7 @@ impl<'a> Mcmc<'a> {
             {
                 println!(
                     "\tInsert target: {:?} ms",
-                    compressed_pbwt_obliv::nn::INSERT
+                    crate::neighbor_finding::timing::INSERT
                         .with(|v| {
                             let out = *v.borrow();
                             *v.borrow_mut() = std::time::Duration::ZERO;
@@ -262,7 +255,7 @@ impl<'a> Mcmc<'a> {
                 );
                 println!(
                     "\tInitialize ranks: {:?} ms",
-                    compressed_pbwt_obliv::nn::INIT_RANKS
+                    crate::neighbor_finding::timing::INIT_RANKS
                         .with(|v| {
                             let out = *v.borrow();
                             *v.borrow_mut() = std::time::Duration::ZERO;
@@ -272,7 +265,7 @@ impl<'a> Mcmc<'a> {
                 );
                 println!(
                     "\tNN merging & lookups: {:?} ms",
-                    compressed_pbwt_obliv::nn::LOOKUP
+                    crate::neighbor_finding::timing::LOOKUP
                         .with(|v| {
                             let out = *v.borrow();
                             *v.borrow_mut() = std::time::Duration::ZERO;
@@ -282,7 +275,7 @@ impl<'a> Mcmc<'a> {
                 );
                 println!(
                     "\tUpdate PBWT between blocks: {:?} ms",
-                    compressed_pbwt_obliv::nn::UPDATE
+                    crate::neighbor_finding::timing::UPDATE
                         .with(|v| {
                             let out = *v.borrow();
                             *v.borrow_mut() = std::time::Duration::ZERO;
@@ -303,10 +296,6 @@ impl<'a> Mcmc<'a> {
         let n_windows = windows.len();
         let mut ks = Vec::new();
         let mut max_ks = Vec::new();
-        let mut max_u_ks = Vec::new();
-        let mut n_unique_states = Vec::new();
-        let mut n_unique_states_ratios = Vec::new();
-        let mut n_unique_states_ratios_2 = Vec::new();
         let mut window_sizes = Vec::new();
         let mut tprob_pairs = Array2::<Real>::zeros((P, P));
 
@@ -321,7 +310,6 @@ impl<'a> Mcmc<'a> {
         for (window_i, ((start_w, end_w), (start_write_w, end_write_w))) in
             windows.into_iter().enumerate()
         {
-            let t = Instant::now();
             sum_window_size +=
                 self.params.variants[end_w - 1].bp - self.params.variants[start_w].bp;
             let genotype_graph_w = self.genotype_graph.slice(start_w, end_w);
@@ -338,137 +326,41 @@ impl<'a> Mcmc<'a> {
 
             window_sizes.push((end_w - start_w) as f64);
 
-            let (tprobs_window, tprobs_window_e) = if use_rss {
-                let t = Instant::now();
-                let (full_filter, k) = find_nn_bitmap(neighbors_w, params_w.ref_panel.n_haps);
+            let t = Instant::now();
+            let (unfolded, filter, n_full_states) =
+                filter_blocks(neighbors_w, &params_w.ref_panel.blocks);
 
-                #[cfg(feature = "obliv")]
-                {
-                    //TODO remove this
-                    ks.push(k.expose() as f64);
-                }
-                #[cfg(not(feature = "obliv"))]
-                {
-                    ks.push(k as f64);
-                }
+            //TODO remove this
+            ks.push(n_full_states.expose() as f64);
 
-                let filtered_blocks = params_w
-                    .ref_panel
-                    .blocks
-                    .iter()
-                    .map(|b| {
-                        crate::rss_hmm::filtered_block::FilteredBlockSliceObliv::from_block_slice(
-                            b,
-                            &full_filter,
-                        )
-                    })
-                    .collect::<Vec<_>>();
+            FILTER.with(|v| {
+                let mut v = v.borrow_mut();
+                *v += t.elapsed();
+            });
 
-                FILTER.with(|v| {
-                    let mut v = v.borrow_mut();
-                    *v += t.elapsed();
-                });
+            #[cfg(feature = "obliv")]
+            let (tprobs_window, tprobs_window_e) = crate::hmm::Hmm::forward_backward(
+                unfolded.view(),
+                filter.view(),
+                n_full_states,
+                genotype_graph_w.graph.view(),
+                &self.params.hmm_params,
+                &rprobs_w,
+                Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
+                start_w == 0,
+            );
 
-                //TODO remove this
-                {
-                    n_unique_states.extend(
-                        filtered_blocks
-                            .iter()
-                            .map(|v| v.n_unique_states().expose() as f64),
-                    );
-                    for block in filtered_blocks.iter() {
-                        let a = block.n_unique_states().expose();
-                        let b = (max_k as f64 * block.n_unique_haps() as f64
-                            / self.params.ref_panel.n_haps as f64
-                            * 2.)
-                            .ceil();
-                        max_u_ks.push(b);
-                        assert!(b > a as f64);
-                    }
-
-                    n_unique_states_ratios.extend(
-                        filtered_blocks.iter().map(|v| {
-                            v.n_unique_states().expose() as f64 / k.expose() as f64 * 100.
-                        }),
-                    );
-                    n_unique_states_ratios_2.extend(
-                        filtered_blocks
-                            .iter()
-                            .map(|v| v.n_unique_states().expose() as f64 / max_k as f64 * 100.),
-                    );
-                }
-
-                let fwbw_out = crate::rss_hmm::reduced_obliv::HmmReduced::fwbw(
-                    start_w,
-                    &filtered_blocks,
-                    params_w.ref_panel.n_sites,
-                    k,
-                    params_w.ref_panel.n_haps,
-                    genotype_graph_w.graph.view(),
-                    self.params.hmm_params.eprob,
-                    &rprobs_w,
-                    Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(false, bool)).view(),
-                );
-
-                #[cfg(feature = "obliv")]
-                let (first_tprobs, first_tprobs_e, tprobs, tprobs_e) = fwbw_out;
-
-                #[cfg(not(feature = "obliv"))]
-                let (first_tprobs, tprobs) = fwbw_out;
-
-                let mut tprobs_window = tprobs;
-                #[cfg(feature = "obliv")]
-                let mut tprobs_window_e = tprobs_e;
-
-                if window_i == 0 {
-                    Zip::from(tprobs_window.slice_mut(s![0, .., ..]).rows_mut())
-                        .for_each(|mut r| r.assign(&first_tprobs));
-
-                    #[cfg(feature = "obliv")]
-                    Zip::from(tprobs_window_e.slice_mut(s![0, .., ..]).rows_mut())
-                        .for_each(|mut r| r.assign(&first_tprobs_e));
-                }
-
-                (tprobs_window, tprobs_window_e)
-            } else {
-                let t = Instant::now();
-                let (unfolded, filter, n_full_states) =
-                    filter_blocks(neighbors_w, &params_w.ref_panel.blocks);
-
-                //TODO remove this
-                ks.push(n_full_states.expose() as f64);
-
-                FILTER.with(|v| {
-                    let mut v = v.borrow_mut();
-                    *v += t.elapsed();
-                });
-
-                #[cfg(feature = "obliv")]
-                let (tprobs_window, tprobs_window_e) = crate::hmm::Hmm::forward_backward(
-                    unfolded.view(),
-                    filter.view(),
-                    n_full_states,
-                    genotype_graph_w.graph.view(),
-                    &self.params.hmm_params,
-                    &rprobs_w,
-                    Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
-                    start_w == 0,
-                );
-
-                #[cfg(not(feature = "obliv"))]
-                let tprobs_window = crate::hmm::Hmm::forward_backward(
-                    unfolded.view(),
-                    filter.view(),
-                    n_full_states,
-                    genotype_graph_w.graph.view(),
-                    &self.params.hmm_params,
-                    &rprobs_w,
-                    Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
-                    start_w == 0,
-                );
-
-                (tprobs_window, tprobs_window_e)
-            };
+            #[cfg(not(feature = "obliv"))]
+            let tprobs_window = crate::hmm::Hmm::forward_backward(
+                unfolded.view(),
+                filter.view(),
+                n_full_states,
+                genotype_graph_w.graph.view(),
+                &self.params.hmm_params,
+                &rprobs_w,
+                Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
+                start_w == 0,
+            );
 
             #[cfg(feature = "obliv")]
             let tprobs_window_src = tprobs_window.view();
@@ -675,37 +567,6 @@ impl<'a> Mcmc<'a> {
             Statistics::mean(&max_ks),
             Statistics::std_dev(&max_ks)
         );
-        {
-            let ratio = ks
-                .iter()
-                .zip(max_ks.iter())
-                .map(|(k, max_k)| k / max_k * 100.)
-                .collect::<Vec<_>>();
-            println!(
-                "K/MaxK (%): {:.3}+/-{:.3}",
-                Statistics::mean(&ratio),
-                Statistics::std_dev(&ratio)
-            );
-
-            let ratio = ks
-                .iter()
-                .map(|k| k / self.params.ref_panel.n_haps as f64 * 100.)
-                .collect::<Vec<_>>();
-            println!(
-                "K/#Haps (%): {:.3}+/-{:.3}",
-                Statistics::mean(&ratio),
-                Statistics::std_dev(&ratio)
-            );
-            let ratio = max_ks
-                .iter()
-                .map(|k| k / self.params.ref_panel.n_haps as f64 * 100.)
-                .collect::<Vec<_>>();
-            println!(
-                "MaxK/#Haps (%): {:.3}+/-{:.3}",
-                Statistics::mean(&ratio),
-                Statistics::std_dev(&ratio)
-            );
-        }
         println!(
             "Window sizes (#sites): {:.3}+/-{:.3}",
             Statistics::mean(&window_sizes),
@@ -727,6 +588,7 @@ impl<'a> Mcmc<'a> {
             .as_millis()
         );
 
+        #[cfg(feature = "benchmarking")]
         println!(
             "\tFilter Ref Panel: {:?} ms",
             FILTER
@@ -739,126 +601,7 @@ impl<'a> Mcmc<'a> {
         );
 
         #[cfg(feature = "benchmarking")]
-        if use_rss {
-            println!(
-                "\tEmission: {:?} ms",
-                crate::rss_hmm::reduced_obliv::EMISS
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
-
-            println!(
-                "\tTransition: {:?} ms",
-                crate::rss_hmm::reduced_obliv::TRANS
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
-
-            println!(
-                "\tCollapse: {:?} ms",
-                crate::rss_hmm::reduced_obliv::COLL
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
-
-            println!(
-                "\tCombine 1: {:?} ms",
-                crate::rss_hmm::reduced_obliv::COMB1
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
-
-            println!(
-                "\tCombine 2: {:?} ms",
-                crate::rss_hmm::reduced_obliv::COMB2
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
-
-            println!(
-                "\tExpand: {:?} ms",
-                crate::rss_hmm::reduced_obliv::EXPAND
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
-
-            println!(
-                "\tAlpha-Pre: {:?} ms",
-                crate::rss_hmm::reduced_obliv::PRE
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
-
-            println!(
-                "\tAlpha-Post: {:?} ms",
-                crate::rss_hmm::reduced_obliv::POST
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
-
-            println!(
-                "\tBlock Transition: {:?} ms",
-                crate::rss_hmm::reduced_obliv::BLOCK
-                    .with(|v| {
-                        let out = *v.borrow();
-                        *v.borrow_mut() = std::time::Duration::ZERO;
-                        out
-                    })
-                    .as_millis()
-            );
-            println!(
-                "U-K: {:.3}+/-{:.3}",
-                Statistics::mean(&n_unique_states),
-                Statistics::std_dev(&n_unique_states)
-            );
-            println!(
-                "U-K/K (%): {:.3}+/-{:.3}",
-                Statistics::mean(&n_unique_states_ratios),
-                Statistics::std_dev(&n_unique_states_ratios)
-            );
-            println!(
-                "U-K/MaxK (%): {:.3}+/-{:.3}",
-                Statistics::mean(&n_unique_states_ratios_2),
-                Statistics::std_dev(&n_unique_states_ratios_2)
-            );
-            println!(
-                "Max U-K (%): {:.3}+/-{:.3}",
-                Statistics::mean(&max_u_ks),
-                Statistics::std_dev(&max_u_ks)
-            );
-        } else {
+        {
             println!(
                 "\tEmission: {:?} ms",
                 crate::hmm::EMISS

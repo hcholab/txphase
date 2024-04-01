@@ -7,7 +7,6 @@ mod genotype_graph;
 mod hmm;
 mod mcmc;
 mod neighbor_finding;
-mod rss_hmm;
 mod utils;
 mod variants;
 
@@ -82,8 +81,6 @@ struct Cli {
     min_m3vcf_unique_haps: Option<usize>,
     #[arg(long)]
     max_m3vcf_unique_haps: Option<usize>,
-    #[arg(long)]
-    use_rss: bool,
     #[arg(
         long,
         default_missing_value("true"),
@@ -309,7 +306,6 @@ fn main() {
             &mcmc_params,
             filtered_genotypes.view(),
             &mcmc_iterations,
-            cli.use_rss,
             rng,
             &1.to_string(),
         );
@@ -446,7 +442,6 @@ fn main() {
                     &mcmc_params,
                     filtered_genotypes.view(),
                     &mcmc_iterations,
-                    cli.use_rss,
                     rng,
                     &id.to_string(),
                 );

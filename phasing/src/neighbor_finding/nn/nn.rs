@@ -12,7 +12,7 @@ use crate::{Bool, U32};
 use timing_shield::TpEq;
 
 #[cfg(feature = "benchmarking")]
-mod timing {
+pub mod timing {
     pub use std::cell::RefCell;
     pub use std::time::{Duration, Instant};
     thread_local! {
@@ -22,8 +22,9 @@ mod timing {
         pub static UPDATE: RefCell<Duration> = RefCell::new(Duration::ZERO);
     }
 }
+
 #[cfg(feature = "benchmarking")]
-pub use timing::*;
+use timing::*;
 
 pub fn find_top_neighbors(
     input_hap: &[Bool],
