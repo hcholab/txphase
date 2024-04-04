@@ -8,6 +8,7 @@ pub use params::*;
 use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::combine_dips;
 use crate::mcmc::filter::*;
+use crate::memory::RealMemory;
 use crate::variants::{Rarity, Variant};
 use crate::{tp_value, Bool, Genotype, Real, Usize, U8};
 use rand::Rng;
@@ -97,8 +98,10 @@ impl<'a> Mcmc<'a> {
 
         let mut mcmc = Self::initialize(&params, genotypes.view(), id);
 
+        let mut bprob_memory = RealMemory::new();
+
         for iter in iterations_iternal {
-            mcmc.iteration(iter, &mut rng, id);
+            mcmc.iteration(iter, &mut bprob_memory, &mut rng, id);
         }
 
         #[cfg(feature = "obliv")]
@@ -186,7 +189,13 @@ impl<'a> Mcmc<'a> {
         }
     }
 
-    fn iteration(&mut self, iter_option: IterOptionInternal, mut rng: impl Rng, id: &str) {
+    fn iteration(
+        &mut self,
+        iter_option: IterOptionInternal,
+        bprob_memory: &mut RealMemory,
+        mut rng: impl Rng,
+        id: &str,
+    ) {
         println!("=== {:?} Iteration ({id}) ===", iter_option);
         let now = Instant::now();
 
@@ -348,6 +357,7 @@ impl<'a> Mcmc<'a> {
                 &rprobs_w,
                 Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
                 start_w == 0,
+                bprob_memory,
             );
 
             #[cfg(not(feature = "obliv"))]
@@ -523,6 +533,7 @@ impl<'a> Mcmc<'a> {
                     prev_ind.1 = cond.select(phased_ind_window[[i, 1]], prev_ind.1);
                 }
             }
+
             #[cfg(not(feature = "obliv"))]
             {
                 tmp.assign(&phased_ind_window);
@@ -531,6 +542,7 @@ impl<'a> Mcmc<'a> {
                     phased_ind_window[[phased_ind_window.nrows() - 1, 1]],
                 );
             }
+
             HMM.with(|v| {
                 let mut v = v.borrow_mut();
                 *v += t.elapsed();
@@ -645,9 +657,19 @@ impl<'a> Mcmc<'a> {
                     })
                     .as_millis()
             );
+            println!(
+                "\tMemory allocation: {:?} ms",
+                crate::hmm::MEMORY
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
         }
 
-        println!("Elapsed: {} ms", (Instant::now() - now).as_millis());
+        println!("Elapsed: {} ms", now.elapsed().as_millis());
         println!();
     }
 

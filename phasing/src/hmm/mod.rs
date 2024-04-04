@@ -4,6 +4,7 @@ pub use params::*;
 #[cfg(feature = "obliv")]
 use crate::dynamic_fixed::*;
 use crate::genotype_graph::{G, P};
+use crate::memory::RealMemory;
 use crate::{Bool, Genotype, Real, Usize};
 #[cfg(feature = "obliv")]
 use ndarray::{Array1, ArrayViewMut1};
@@ -21,6 +22,7 @@ thread_local! {
     pub static TRANS: RefCell<Duration> = RefCell::new(Duration::ZERO);
     pub static COLL: RefCell<Duration> = RefCell::new(Duration::ZERO);
     pub static COMB: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static MEMORY: RefCell<Duration> = RefCell::new(Duration::ZERO);
 }
 
 use ndarray::{s, Array2, Array3, ArrayView1, ArrayView2, ArrayViewMut2, Zip};
@@ -83,7 +85,7 @@ pub fn combine_dips(
     }
 }
 #[cfg(feature = "obliv")]
-type Backward = (Array3<Real>, Array2<TpI16>);
+type Backward = Array2<TpI16>;
 
 #[cfg(not(feature = "obliv"))]
 type Backward = Array3<Real>;
@@ -110,6 +112,7 @@ impl Hmm {
         rprobs: &RprobsSlice,
         _ignored_sites: ArrayView1<Bool>,
         is_first_window: bool,
+        bprob_memory: &mut RealMemory,
     ) -> Tprobs {
         let m = ref_panel.nrows();
         let k = ref_panel.ncols();
@@ -117,7 +120,7 @@ impl Hmm {
         let mut rprobs_iter = rprobs.get_forward(n_full_states);
 
         #[cfg(feature = "obliv")]
-        let (bprobs, bprobs_e) = Self::backward(
+        let bprobs_e = Self::backward(
             ref_panel,
             ref_panel_filter,
             n_full_states,
@@ -125,7 +128,10 @@ impl Hmm {
             hmm_params,
             rprobs,
             _ignored_sites,
+            bprob_memory,
         );
+
+        let bprobs = bprob_memory.borrow_3d(m, P, k);
 
         #[cfg(not(feature = "obliv"))]
         let bprobs = self.backward(
@@ -167,6 +173,7 @@ impl Hmm {
         let mut tprobs_3x = Array3::<Real>::zeros((m.div_ceil(3), P, P));
         #[cfg(feature = "obliv")]
         let mut tprobs_3x_e = Array3::<TpI16>::from_elem((m.div_ceil(3), P, P), TpI16::protect(0));
+
         #[cfg(feature = "obliv")]
         let mut tprobs_3x_fwd = prev_fprobs.clone();
         #[cfg(feature = "obliv")]
@@ -355,15 +362,27 @@ impl Hmm {
         hmm_params: &HmmParams,
         rprobs: &RprobsSlice,
         _ignored_sites: ArrayView1<Bool>,
+        bprob_memory: &mut RealMemory,
     ) -> Backward {
         let m = ref_panel.nrows();
         let n = ref_panel.ncols();
 
         let mut rprobs_iter = rprobs.get_backward(n_full_states);
-        let mut bprobs = Array3::<Real>::zeros((m, P, n));
+
+        #[cfg(feature = "benchmarking")]
+        let t = Instant::now();
+
+        let mut bprobs = bprob_memory.borrow_3d_mut(m, P, n);
+
+        #[cfg(feature = "benchmarking")]
+        MEMORY.with(|v| {
+            let mut v = v.borrow_mut();
+            *v += t.elapsed();
+        });
 
         #[cfg(feature = "obliv")]
         let mut bprobs_e = Array2::<TpI16>::from_elem((m, P), TpI16::protect(0));
+
 
         Self::init(
             ref_panel.row(m - 1),
@@ -441,7 +460,7 @@ impl Hmm {
         }
 
         #[cfg(feature = "obliv")]
-        return (bprobs, bprobs_e);
+        return bprobs_e;
 
         #[cfg(not(feature = "obliv"))]
         return bprobs;
