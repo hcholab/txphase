@@ -18,7 +18,9 @@ use clap::{value_parser, Parser};
 #[derive(Parser, Debug)]
 struct Cli {
     #[arg(long, default_value_t = 7777)]
-    sp_port: u16,
+    worker_port_base: u16,
+    #[arg(long, default_value_t = 1)]
+    n_workers: usize,
     #[arg(long, value_parser=value_parser!(PathBuf))]
     ref_panel: PathBuf,
     #[arg(long, value_parser=value_parser!(PathBuf))]
@@ -31,7 +33,7 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
-    println!("Port: \t\t\t{}", cli.sp_port);
+    println!("Worker port base: \t\t\t{}", cli.worker_port_base);
     println!("Reference panel: \t{:?}", cli.ref_panel);
     println!("Genetic map: \t\t{:?}", cli.genetic_map);
     println!("Input: \t\t\t{:?}", cli.input);
@@ -81,28 +83,64 @@ fn main() {
         .zip(afreq_bitmask.iter())
         .for_each(|(b, a)| *b |= *a);
 
-    let mut sp_stream = bufstream::BufStream::new(tcp_keep_connecting(SocketAddr::from((
-        IpAddr::from_str("127.0.0.1").unwrap(),
-        cli.sp_port,
-    ))));
+    let sample_id = std::sync::atomic::AtomicUsize::new(0);
+    let worker_id = std::sync::atomic::AtomicUsize::new(0);
+    let mut all_results: Vec<Option<Array2<i8>>> = vec![None; target_samples.len()];
+    std::thread::scope(|s| {
+        let join_handles = (0..cli.n_workers)
+            .map(|_| {
+                s.spawn(|| {
+                    let worker_id = worker_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let mut worker_stream =
+                        bufstream::BufStream::new(tcp_keep_connecting(SocketAddr::from((
+                            IpAddr::from_str("127.0.0.1").unwrap(),
+                            cli.worker_port_base + worker_id as u16,
+                        ))));
+                    println!("Host: connected to Worker {worker_id}");
+                    bincode::serialize_into(&mut worker_stream, &ref_panel_meta).unwrap();
+                    bincode::serialize_into(&mut worker_stream, &ref_panel_blocks).unwrap();
+                    bincode::serialize_into(&mut worker_stream, &ref_sites_bitmask).unwrap();
+                    bincode::serialize_into(&mut worker_stream, &interpolated_cms).unwrap();
+                    bincode::serialize_into(&mut worker_stream, &bps).unwrap();
+                    worker_stream.flush().unwrap();
+                    let mut results = Vec::new();
 
-    println!("Host: connected to SP");
+                    loop {
+                        let sample_id = sample_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        if sample_id >= target_samples.len() {
+                            break;
+                        }
+                        println!("Host: sending Sample {sample_id} to Worker {worker_id}");
+                        bincode::serialize_into(&mut worker_stream, &target_samples[sample_id])
+                            .unwrap();
+                        bincode::serialize_into(&mut worker_stream, &sample_id).unwrap();
+                        worker_stream.flush().unwrap();
+                        results.push((
+                            sample_id,
+                            bincode::deserialize_from::<_, Array2<i8>>(&mut worker_stream).unwrap(),
+                        ));
+                    }
+                    results
+                })
+            })
+            .collect::<Vec<_>>();
 
-    bincode::serialize_into(&mut sp_stream, &ref_panel_meta).unwrap();
-    bincode::serialize_into(&mut sp_stream, &ref_panel_blocks).unwrap();
-    bincode::serialize_into(&mut sp_stream, &ref_sites_bitmask).unwrap();
-    bincode::serialize_into(&mut sp_stream, &interpolated_cms).unwrap();
-    bincode::serialize_into(&mut sp_stream, &bps).unwrap();
-    bincode::serialize_into(&mut sp_stream, &target_samples).unwrap();
-    sp_stream.flush().unwrap();
+        for join_hanle in join_handles {
+            let results = join_hanle.join().unwrap();
+            for (sample_id, phased) in results {
+                all_results[sample_id] = Some(phased);
+            }
+        }
+    });
 
-    let phased: Vec<ndarray::Array2<i8>> = bincode::deserialize_from(&mut sp_stream).unwrap();
-
-    println!("phased len = {}", phased.len());
+    let all_results = all_results
+        .into_iter()
+        .map(|v| v.unwrap())
+        .collect::<Vec<_>>();
 
     write_vcf(
         &cli.output,
-        &phased[..],
+        &all_results[..],
         &input_bcf_header,
         &input_records_filtered,
     );
@@ -119,8 +157,6 @@ fn process_input(
     bcf::header::HeaderView,
     Vec<bcf::record::Record>,
 ) {
-    //let ref_sites = site::sites_from_csv_path(ref_sites_path).unwrap();
-
     let (input_sites, input_bcf_header, input_bcf_records) =
         site::sites_from_bcf_path(input_path).unwrap();
 

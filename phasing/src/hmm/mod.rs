@@ -383,7 +383,6 @@ impl Hmm {
         #[cfg(feature = "obliv")]
         let mut bprobs_e = Array2::<TpI16>::from_elem((m, P), TpI16::protect(0));
 
-
         Self::init(
             ref_panel.row(m - 1),
             ref_panel_filter.view(),

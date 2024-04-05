@@ -3,12 +3,12 @@
 
 ARCH_LIBDIR ?= /lib/$(shell $(CC) -dumpmachine)
 
-SELF_EXE = $(realpath target/release/phasing)
+SELF_EXE = target/release/phasing
 
 .PHONY: all
-all: $(SELF_EXE) phasing.manifest
+all: $(SELF_EXE) phasing/phasing.manifest
 ifeq ($(SGX),1)
-all: phasing.manifest.sgx phasing.sig
+all: phasing/phasing.manifest.sgx phasing/phasing.sig
 endif
 
 ifeq ($(DEBUG),1)
@@ -22,10 +22,8 @@ endif
 # performance that makes testing by running a benchmark with ab painful. The primary goal
 # of the DEBUG setting is to control Gramine's loglevel.
 -include $(SELF_EXE).d # See also: .cargo/config.toml
-$(SELF_EXE): Cargo.toml
-	RUSTFLAGS="$(RUSTFLAGS)" cargo +nightly build $(PROFILE)
 
-phasing.manifest: phasing.manifest.template
+phasing/phasing.manifest: phasing/phasing.manifest.template
 	gramine-manifest \
 		-Dlog_level=$(GRAMINE_LOG_LEVEL) \
 		-Darch_libdir=$(ARCH_LIBDIR) \
@@ -34,11 +32,11 @@ phasing.manifest: phasing.manifest.template
 
 # Make on Ubuntu <= 20.04 doesn't support "Rules with Grouped Targets" (`&:`),
 # see the phasing example for details on this workaround.
-phasing.manifest.sgx phasing.sig: sgx_sign
+phasing/phasing.manifest.sgx phasing/phasing.sig: sgx_sign
 	@:
 
 .INTERMEDIATE: sgx_sign
-sgx_sign: phasing.manifest $(SELF_EXE)
+sgx_sign: phasing/phasing.manifest $(SELF_EXE)
 	gramine-sgx-sign \
 		--manifest $< \
 		--output $<.sgx
@@ -49,14 +47,10 @@ else
 GRAMINE = gramine-sgx
 endif
 
-.PHONY: start-gramine
-start-gramine: all
-	$(GRAMINE) phasing
+.PHONY: run
+run: all
+	$(GRAMINE) phasing/phasing
 
 .PHONY: clean
 clean:
-	$(RM) -rf *.token *.sig *.manifest.sgx *.manifest result-* OUTPUT
-
-.PHONY: distclean
-distclean: clean
-	$(RM) -rf target/ Cargo.lock
+	$(RM) -rf phasing/*.token phasing/*.sig phasing/*.manifest.sgx phasing/*.manifest 

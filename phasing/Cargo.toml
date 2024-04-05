@@ -3,10 +3,7 @@ name = "phasing"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [features]
-#default = ["obliv", "benchmarking"]
 default = ["obliv"]
 benchmarking = []
 obliv = ["tp-fixedpoint", "obliv-utils"]
@@ -28,33 +25,8 @@ anyhow = "1.0"
 statrs = "0.16"
 num-traits = "0.2"
 lazy_static = "1.4"
-rayon = "1.8"
 clap = { version = "4.5.0", features = ["derive"] }
 timing-shield = "0.3.0"
 
 #[dev-dependencies]
 #rand_chacha = "0.3"
-
-[package.metadata.fortanix-sgx]
-# stack size (in bytes) for each thread, the default stack size is 0x20000.
-stack-size=0x200000
-# heap size (in bytes), the default heap size is 0x2000000.
-#heap-size=0x700000000
-heap-size=0x100000000
-# the default number of threads is equal to the number of available CPUs of
-# the current system.
-# Gotcha: Don't forget to count the main thread when counting number of
-# threads.
-threads=9
-# SSA frame size (in pages) for each thread, the default SSA frame size is 1.
-# You normally don't need to change the SSA frame size.
-ssaframesize=1
-# whether to enable EDP debugging features in the enclave, debugging is
-# enabled by default.
-#debug=true
-
-
-[profile.release]
-debug=true
-#overflow-checks = true 
-

@@ -19,11 +19,11 @@ killall host >/dev/null 2>&1
 
 cargo +nightly build --release -p host && \
 cargo +nightly build --release -p phasing $FEATURES && \
-(for worker_id in $(seq 0 $(($N_WORKERS - 1)))
+make SGX=1 EDMM=1 && \
+(
+for worker_id in $(seq 0 $(($N_WORKERS - 1)))
 do
-    target/release/phasing --host-port $(($PORT + $worker_id)) $PHASING_OPTIONS &
-    pid[$worker_id]=$!
+    gramine-sgx phasing/phasing --host-port $(($PORT + $worker_id)) $PHASING_OPTIONS &
 done
-trap "kill $(printf " %d" "${pid[@]}"); exit 1" INT
 target/release/host $HOST_OPTIONS
 )

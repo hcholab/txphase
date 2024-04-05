@@ -1,5 +1,4 @@
 #![feature(test)]
-#![feature(bench_black_box)]
 use colored::*;
 use std::arch::x86_64::_rdtsc;
 use std::hint::black_box;

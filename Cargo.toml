@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "host",
+    "phasing",
+    "m3vcf",
+    "obliv-utils",
+    "tp-fixedpoint",
+    "common",
+]
