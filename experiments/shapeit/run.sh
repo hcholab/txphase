@@ -20,12 +20,11 @@ bcftools view -S $SAMPLE_LIST $INPUT -O b -o $OUTPUT_DIR/input_samples.bcf && \
 bcftools index $OUTPUT_DIR/input_samples.bcf && \
 mkdir -p $SIZE_DIR && \
 echo -e "${RED}### Phasing ###${NC}" && \
-/usr/bin/time -f "%e %M" -o $SIZE_DIR/time_mem.txt $MAIN_DIR/shapeit-bin/phase_common \
+/usr/bin/time -f "%e %M" -o $SIZE_DIR/time_mem.txt $MAIN_DIR/shapeit-bin/phase_common_static \
     --input $OUTPUT_DIR/input_samples.bcf \
     --reference $VCF_REF_PANEL \
     --map $GMAP \
     --region $CHR \
-    --filter-maf 0.001 \
     --thread $N_CPUS \
     --output $SIZE_DIR/phased.bcf \
     --log $SIZE_DIR/log.txt && \

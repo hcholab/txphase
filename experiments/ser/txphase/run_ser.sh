@@ -6,8 +6,7 @@ export UKB_REF_PANEL_SIZE=$2
 OUTPUT_DIR_SIZE=$OUTPUT_DIR/$UKB_REF_PANEL_SIZE
 
 MAIN_DIR=$(git rev-parse --show-toplevel)
-
-N_CPUS=$(cat /proc/cpuinfo | grep processor | wc -l)
+N_CPUS=$(nproc --all)
 
 PHASING_OPTIONS="--n-cpus $N_CPUS --single-sample=false"
 

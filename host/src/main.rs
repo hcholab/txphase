@@ -21,6 +21,8 @@ struct Cli {
     worker_port_base: u16,
     #[arg(long, default_value_t = 1)]
     n_workers: usize,
+    #[arg(long)]
+    filter_maf: Option<f32>,
     #[arg(long, value_parser=value_parser!(PathBuf))]
     ref_panel: PathBuf,
     #[arg(long, value_parser=value_parser!(PathBuf))]
@@ -60,23 +62,29 @@ fn main() {
 
     const THRES: f32 = 0.001;
 
-    let afreq_filter = afreqs
-        .iter()
-        .map(|f| f.min(1. - f) > THRES)
-        .collect::<Vec<_>>();
+    let (afreqs_filter, sites) = if let Some(&maf_threshold) = cli.filter_maf.as_ref() {
+        let afreqs_filter = afreqs
+            .iter()
+            .map(|f| f.min(1. - f) > maf_threshold)
+            .collect::<Vec<_>>();
 
-    let afreq_sites = afreq_filter
-        .iter()
-        .zip(sites.iter())
-        .filter_map(|(b, s)| if *b { Some(s.clone()) } else { None })
-        .collect::<Vec<_>>();
+        let sites = afreqs_filter
+            .iter()
+            .zip(sites.iter())
+            .filter_map(|(b, s)| if *b { Some(s.clone()) } else { None })
+            .collect::<Vec<_>>();
+
+        (afreqs_filter, sites)
+    } else {
+        (vec![true; afreqs.len()], sites)
+    };
 
     let (target_samples, afreq_bitmask, input_bcf_header, input_records_filtered) =
-        process_input(&cli.input, &afreq_sites);
+        process_input(&cli.input, &sites);
 
     let mut ref_sites_bitmask = vec![false; sites.len()];
 
-    afreq_filter
+    afreqs_filter
         .iter()
         .zip(ref_sites_bitmask.iter_mut())
         .filter_map(|(a, b)| if *a { Some(b) } else { None })

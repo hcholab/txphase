@@ -21,7 +21,6 @@ echo -e "${RED}### Phasing ###${NC}" && \
     --reference $VCF_REF_PANEL \
     --map $GMAP \
     --region $CHR \
-    --filter-maf 0.001 \
     --thread $N_CPUS \
     --output $SIZE_DIR/phased.bcf \
     --log $SIZE_DIR/log.txt && \

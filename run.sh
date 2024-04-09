@@ -2,6 +2,7 @@
 
 DATASET_ENV=$1
 PHASING_OPTIONS=$2
+OUTPUT_DIR=${3:-tmp/phased.vcf.gz}
 
 source config.sh
 source $DATASET_ENV
@@ -13,7 +14,7 @@ HOST_OPTIONS="\
     --ref-panel $(realpath $M3VCF_REF_PANEL) \
     --genetic-map $(realpath $GMAP) \
     --input $(realpath $INPUT) \
-    --output $(realpath tmp/phased.vcf.gz)"
+    --output $(realpath $OUTPUT_DIR)"
 
 killall host >/dev/null 2>&1
 
