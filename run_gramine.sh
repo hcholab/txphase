@@ -25,6 +25,8 @@ make SGX=1 EDMM=1 && \
 for worker_id in $(seq 0 $(($N_WORKERS - 1)))
 do
     gramine-sgx phasing/phasing --host-port $(($PORT + $worker_id)) $PHASING_OPTIONS &
+    pid[$worker_id]=$!
 done
+trap "kill -s SIGKILL $(printf " %d" "${pid[@]}"); exit 1" INT
 target/release/host $HOST_OPTIONS
 )

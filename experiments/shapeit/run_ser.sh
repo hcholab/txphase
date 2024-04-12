@@ -10,15 +10,15 @@ source $MAIN_DIR/data/datasets/ukb/env_all.sh
 
 MISSING_SITES_DIR=$MAIN_DIR/data/datasets/ukb/targets/formatted/missing_sites
 
-N_CPUS=16
+N_CPUS=$(nproc --all)
 RED='\033[1;31m'
 NC='\033[0m' # No Color
 
 mkdir -p $SIZE_DIR && \
 echo -e "${RED}### Phasing ###${NC}" && \
 /usr/bin/time -f "%e %M" -o $SIZE_DIR/time_mem.txt $MAIN_DIR/shapeit-bin/phase_common_static \
-    --input $INPUT \
-    --reference $VCF_REF_PANEL \
+    --input $INPUT_SER \
+    --reference $BCF_REF_PANEL \
     --map $GMAP \
     --region $CHR \
     --thread $N_CPUS \
