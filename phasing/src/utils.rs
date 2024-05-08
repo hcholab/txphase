@@ -78,9 +78,6 @@ mod inner {
     }
 }
 
-#[cfg(feature = "leak-resist")]
-use timing_shield::{TpOrd, TpU32};
-
 #[inline]
 pub fn next_log2(v: u32) -> u32 {
     31 - v.next_power_of_two().leading_zeros()
