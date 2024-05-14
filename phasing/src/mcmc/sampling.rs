@@ -113,6 +113,15 @@ fn constrained_paired_sample(
         (weights1, weights2)
     };
 
+    #[cfg(all(feature = "obliv", not(feature = "dsfp")))]
+    let (weights1, weights2) = {
+        let sum_1 = weights1.sum();
+        let weights1 = &weights1 / sum_1;
+        let sum_2 = weights2.sum();
+        let weights2 = &weights2 / sum_2;
+        (weights1, weights2)
+    };
+
     let mut combined = Array1::<Real>::zeros(P);
     #[cfg(feature = "obliv")]
     let mut combined_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
@@ -139,6 +148,13 @@ fn constrained_paired_sample(
 }
 
 fn weighted_sample(weights: ArrayView1<Real>, mut rng: impl Rng) -> U8 {
+    {
+        let weights = weights.map(|v| v.expose_into_f32());
+        if weights.sum() == 0. {
+            println!("Warning: 0 weights in sampling")
+        }
+    }
+
     //for &i in weights {
     //assert_ne!(i, 0.);
     //}

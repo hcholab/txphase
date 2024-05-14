@@ -32,11 +32,34 @@ pub fn combine_dips(
     tprobs_dips: ArrayViewMut2<Real>,
     #[cfg(feature = "obliv")] cond: Bool,
 ) {
+    //#[cfg(all(feature = "obliv", not(feature = "dsfp")))]
+    //{
+    //let tprobs = tprobs.map(|v| v.expose_into_f32());
+    //Zip::from(tprobs.columns())
+    //.for_each(|r| {
+    //let sum = r.sum();
+    //if sum == 0. {
+    //println!("{:?}", tprobs);
+    //panic!();
+    //}
+    //});
+    ////for &p in &tprobs_dips {
+    ////if p <= 0. {
+    ////println!("{:?}", tprobs_dips);
+    ////panic!();
+    ////}
+
+    ////}
+    //}
+
     #[cfg(not(feature = "obliv"))]
     let mut tprobs_dips = tprobs_dips;
 
     #[cfg(not(feature = "obliv"))]
     let tprobs = &tprobs * (1. / tprobs.sum());
+
+    #[cfg(all(feature = "obliv", not(feature = "dsfp")))]
+    let tprobs = &tprobs / tprobs.sum();
 
     #[cfg(feature = "obliv")]
     let mut _tprobs_dips = tprobs_dips;
@@ -57,7 +80,7 @@ pub fn combine_dips(
         }
     }
 
-    #[cfg(feature = "obliv")]
+    #[cfg(all(feature = "obliv"))]
     {
         renorm_equalize_scale_all(tprobs_dips.view_mut(), tprobs_dips_e_ext.view_mut());
         let mut tprobs_dips_e = Array1::<TpI16>::from_elem(P, TpI16::protect(0));
@@ -68,7 +91,14 @@ pub fn combine_dips(
         );
 
         let (sum, sum_e) = sum_scale(tprobs_dips.view(), tprobs_dips_e.view());
-        tprobs_dips *= Real::protect_i64(1) / sum;
+        #[cfg(feature = "dsfp")]
+        {
+            tprobs_dips *= Real::protect_i64(1) / sum;
+        }
+        #[cfg(not(feature = "dsfp"))]
+        {
+            tprobs_dips /= sum;
+        }
         tprobs_dips_e.map_mut(|v| *v -= sum_e);
         Zip::from(tprobs_dips.rows_mut())
             .and(&mut tprobs_dips_e)
@@ -223,6 +253,34 @@ impl Hmm {
         }
 
         for i in 1..m {
+            //if i == 950 {
+            //let n_full_states = n_full_states.expose() as usize;
+
+            //#[cfg(feature = "dsfp")]
+            //{
+            //let prev_fprobs = debug_expose_array(
+            //prev_fprobs.slice(s![.., ..n_full_states]),
+            //prev_fprobs_e.view(),
+            //);
+            //let prev_fprobs = &prev_fprobs / prev_fprobs.sum();
+            //println!("smallest = {:?}", prev_fprobs.fold(f64::MAX, |accu, &v| accu.min(v)));
+            //println!("{:?}", prev_fprobs);
+            //}
+
+            //#[cfg(not(feature = "dsfp"))]
+            //{
+            //let prev_fprobs = prev_fprobs
+            //.slice(s![.., ..n_full_states])
+            //.map(|v| v.expose_into_f32());
+
+            //let prev_fprobs = &prev_fprobs / prev_fprobs.sum();
+            //println!("smallest = {:?}", prev_fprobs.fold(f32::MAX, |accu, &v| accu.min(v)));
+            //println!("{:?}", prev_fprobs);
+            //}
+
+            //panic!();
+            //}
+
             let rprobs = rprobs_iter.next().unwrap();
 
             //#[cfg(not(feature = "obliv"))]
@@ -273,6 +331,38 @@ impl Hmm {
                         tprobs_3x.slice_mut(s![i / 3, .., ..]),
                         tprobs_3x_e.slice_mut(s![i / 3, .., ..]),
                     );
+
+                    //if  cond.expose() {
+                    //#[cfg(not(feature = "dsfp"))]
+                    //{
+                    //let tprobs =
+                    //tprobs_3x.slice(s![i / 3, .., ..])
+                    //.map(|v| v.expose_into_f32());
+
+                    //let tprobs = &tprobs / tprobs.sum();
+                    //Zip::from(tprobs.rows())
+                    //.for_each(|r| {
+                    //let sum = r.sum();
+                    //if sum == 0. {
+                    //println!("{:?}", tprobs);
+                    //panic!()
+                    //}
+                    //});
+                    ////println!("smallest = {:?}", tprobs.fold(f32::MAX, |accu, &v| accu.min(v)));
+                    ////println!("{:?}", tprobs);
+                    //}
+                    //#[cfg(feature = "dsfp")]
+                    //{
+                    //let tprobs = debug_expose_array_ext(
+                    //tprobs_3x.slice(s![i / 3, .., ..]),
+                    //tprobs_3x_e.slice(s![i / 3, .., ..]),
+                    //);
+                    //let tprobs = &tprobs / tprobs.sum();
+                    //println!("smallest = {:?}", tprobs.fold(f64::MAX, |accu, &v| accu.min(v)));
+                    //println!("{:?}", tprobs);
+                    //}
+                    ////panic!()
+                    //}
                 };
 
                 let tmp = cur_fprobs.clone();
@@ -309,6 +399,13 @@ impl Hmm {
 
             #[cfg(feature = "obliv")]
             renorm_e(cur_fprobs_e.view_mut());
+
+            #[cfg(all(feature = "obliv", not(feature = "dsfp")))]
+            {
+                let sum = cur_fprobs.sum();
+                let renorm_factor = Real::protect_i64(1) / sum;
+                cur_fprobs *= renorm_factor;
+            }
 
             //#[cfg(feature = "obliv")]
             //{
@@ -449,6 +546,13 @@ impl Hmm {
 
             #[cfg(feature = "obliv")]
             renorm_e(cur_bprob_e);
+
+            #[cfg(all(feature = "obliv", not(feature = "dsfp")))]
+            {
+                let sum = cur_bprob.sum();
+                let renorm_factor = Real::protect_i64(1) / sum;
+                cur_bprob *= renorm_factor;
+            }
 
             //#[cfg(feature = "obliv")]
             //{

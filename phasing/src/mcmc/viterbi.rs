@@ -96,9 +96,23 @@ pub fn viterbi(tprob_dips: ArrayView3<Real>, genotype_graph: ArrayView1<G>) -> A
                 backtrace[[i, h2]] = max_ind;
             }
         }
-        #[cfg(feature = "obliv")]
+
+        #[cfg(all(feature = "obliv", feature = "dsfp"))]
         {
             maxprob = &maxprob_next * (Real::protect_i64(1) / maxprob_next.sum());
+        }
+
+        #[cfg(all(feature = "obliv", not(feature = "dsfp")))]
+        {
+            let sum = maxprob_next.sum();
+            let cond = sum.tp_gt(&0);
+            if !cond.expose() {
+                println!("Warning: 0 probabilities in Viterbi");
+            }
+            let tmp = &maxprob_next / maxprob_next.sum();
+            ndarray::Zip::from(&mut maxprob)
+                .and(&tmp)
+                .for_each(|t, &s| *t = cond.select(s, *t));
         }
 
         #[cfg(not(feature = "obliv"))]

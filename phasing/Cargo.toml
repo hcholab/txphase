@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
+#default = ["obliv", "dsfp"]
 default = ["obliv"]
 benchmarking = []
+dsfp = []
 obliv = ["tp-fixedpoint", "obliv-utils"]
 
 [dependencies]

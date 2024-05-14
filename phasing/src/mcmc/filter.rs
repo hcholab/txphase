@@ -76,18 +76,18 @@ pub fn neighbors_to_filter(neighbors: &[Option<Vec<U32>>]) -> (Vec<U32>, Vec<Boo
         filter
     };
 
-    ////TODO remove this part
-    //neighbors.iter_mut().zip(filter.iter()).for_each(|(n, &b)| {
-    //*n |= (!b).as_u64() << 63;
-    //});
-    //obliv_utils::bitonic_sort::bitonic_sort(&mut neighbors, true);
-    //let mut filter = Vec::with_capacity(neighbors.len());
-    //let mask = !(1 << 63);
-    //for n in &mut neighbors {
-    //let b = (*n >> 63).tp_eq(&1);
-    //filter.push(!b);
-    //*n &= mask;
-    //}
+    //TODO remove this part
+    neighbors.iter_mut().zip(filter.iter()).for_each(|(n, &b)| {
+        *n |= (!b).as_u32() << 31;
+    });
+    obliv_utils::bitonic_sort::bitonic_sort(&mut neighbors, true);
+    let mut filter = Vec::with_capacity(neighbors.len());
+    let mask = !(1 << 31);
+    for n in &mut neighbors {
+        let b = (*n >> 31).tp_eq(&1);
+        filter.push(!b);
+        *n &= mask;
+    }
 
     (neighbors, filter, n_full_states)
 }

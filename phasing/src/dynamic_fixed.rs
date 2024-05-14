@@ -24,14 +24,17 @@ pub fn adjust_scale_row<const F: usize>(
 
 #[inline]
 fn _adjust_scale<const F: usize>(e: TpI16, do_scale_up: TpBool, prob: &mut TpFixed64<F>) {
-    let e = e.tp_gt_eq(&64).select(TpI16::protect(64), e);
+    #[cfg(feature = "dsfp")]
+    {
+        let e = e.tp_gt_eq(&64).select(TpI16::protect(64), e);
 
-    *prob = do_scale_up.select(
-        e.tp_gt_eq(&64)
-            .select(TpFixed64::<F>::ZERO, *prob >> e.expose() as u32),
-        e.tp_lt_eq(&-64)
-            .select(TpFixed64::<F>::NAN, *prob << ((-e).expose()) as u32),
-    )
+        *prob = do_scale_up.select(
+            e.tp_gt_eq(&64)
+                .select(TpFixed64::<F>::ZERO, *prob >> e.expose() as u32),
+            e.tp_lt_eq(&-64)
+                .select(TpFixed64::<F>::NAN, *prob << ((-e).expose()) as u32),
+        )
+    }
 }
 
 pub fn match_scale_single<const F: usize>(

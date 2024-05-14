@@ -16,7 +16,7 @@ HOST_OPTIONS="\
     --n-workers $N_WORKERS \
     --ref-panel $(realpath $M3VCF_REF_PANEL) \
     --genetic-map $(realpath $GMAP) \
-    --input $(realpath $INPUT_SIZE) \
+    --input $(realpath $INPUT_SER_SIZE) \
     --output $(realpath $OUTPUT_DIR)"
 
 killall host >/dev/null 2>&1

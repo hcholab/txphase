@@ -9,7 +9,6 @@ source $DATASET_ENV
 
 N_SAMPLES=$(bcftools query -l $INPUT_SIZE | wc -l)
 N_WORKERS=$(($N_SAMPLES < $N_WORKERS ? $N_SAMPLES: $N_WORKERS))
-echo $N_WORKERS
 
 mkdir -p tmp
 HOST_OPTIONS="\
@@ -17,7 +16,7 @@ HOST_OPTIONS="\
     --n-workers $N_WORKERS \
     --ref-panel $(realpath $M3VCF_REF_PANEL) \
     --genetic-map $(realpath $GMAP) \
-    --input $(realpath $INPUT_SIZE) \
+    --input $(realpath $INPUT_SER_SIZE) \
     --output $(realpath $OUTPUT_DIR)"
 
 killall host >/dev/null 2>&1
