@@ -2,14 +2,13 @@
 
 DATASET_ENV=$1
 PHASING_OPTIONS=$2
-OUTPUT_DIR=${3:-tmp/phased.vcf.gz}
+OUTPUT=${3:-tmp/phased.vcf.gz}
 
 source config.sh
 source $DATASET_ENV
 
 N_SAMPLES=$(bcftools query -l $INPUT_SIZE | wc -l)
 N_WORKERS=$(($N_SAMPLES < $N_WORKERS ? $N_SAMPLES: $N_WORKERS))
-echo $N_WORKERS
 
 mkdir -p tmp
 HOST_OPTIONS="\
@@ -18,7 +17,7 @@ HOST_OPTIONS="\
     --ref-panel $(realpath $M3VCF_REF_PANEL) \
     --genetic-map $(realpath $GMAP) \
     --input $(realpath $INPUT_SIZE) \
-    --output $(realpath $OUTPUT_DIR)"
+    --output $(realpath $OUTPUT)"
 
 killall host >/dev/null 2>&1
 

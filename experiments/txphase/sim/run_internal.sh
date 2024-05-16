@@ -28,9 +28,9 @@ killall host >/dev/null 2>&1
 (cd $MAIN_DIR
 (for worker_id in $(seq 0 $(($N_WORKERS - 1)))
 do
-    target/release/phasing --host-port $(($PORT + $worker_id)) | tee $OUTPUT_DIR_SIZE/worker_${worker_id}.log &
+    /usr/bin/time -f "%M" -o $OUTPUT_DIR_SIZE/worker_${worker_id}_mem.txt target/release/phasing --host-port $(($PORT + $worker_id)) | tee $OUTPUT_DIR_SIZE/worker_${worker_id}.log &
     pid[$worker_id]=$!
 done
 trap "kill $(printf " %d" "${pid[@]}"); exit 1" INT
-target/release/host $HOST_OPTIONS | tee $OUTPUT_DIR_SIZE/host.log
+/usr/bin/time -f "%M" -o $OUTPUT_DIR_SIZE/host_mem.txt target/release/host $HOST_OPTIONS | tee $OUTPUT_DIR_SIZE/host.log
 ))

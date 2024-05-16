@@ -10,8 +10,9 @@ then
     TAR_DIR=.
 fi
 
-MERGED=$TAR_DIR/.switch_rate_merged.vcf.gz
-SER_OUT=$TAR_DIR/ser.txt
+ID=$RANDOM
+MERGED=$TAR_DIR/.switch_rate_merged_$ID.vcf.gz
+SER_OUT=$TAR_DIR/ser_$ID.txt
 
 rm -f $MERGED
 bcftools index -f $TEST

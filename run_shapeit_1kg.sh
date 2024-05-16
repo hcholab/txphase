@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 
-DATA_DIR=data
-source profiles/dataset/1kg.sh
+source data/datasets/1kg/env.sh
 
 ./shapeit-bin/phase_common_static \
-    --input $INPUT \
-    --reference $VCF_REF_PANEL \
+    --input $INPUT_SIZE \
+    --reference $BCF_REF_PANEL \
     --map $GMAP \
     --region $CHR \
-    --thread $(nproc --all)\
-    --filter-maf 0.001 \
+    --thread $(nproc --all) \
     --output tmp/phased.bcf \
     --log tmp/log.txt
 

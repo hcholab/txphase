@@ -11,4 +11,4 @@ MAIN_DIR=$(git rev-parse --show-toplevel)
 source $MAIN_DIR/config.sh
 
 mkdir -p $OUTPUT_DIR_SIZE
-/usr/bin/time -f "%e %M" -o $OUTPUT_DIR_SIZE/time_mem.txt ./run_internal.sh $OUTPUT_DIR $UKB_REF_PANEL_SIZE $UKB_INPUT_SIZE
+/usr/bin/time -f "%e" -o $OUTPUT_DIR_SIZE/time.txt ./run_internal.sh $OUTPUT_DIR $UKB_REF_PANEL_SIZE $UKB_INPUT_SIZE
