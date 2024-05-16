@@ -307,19 +307,25 @@ impl<const F: usize> num_traits::One for TpFixed64<F> {
     }
 }
 
+
 macro_rules! impl_arith {
     ($op: ident, $trait: ident) => {
         paste! {
+            thread_local! {
+                pub static [<N $op:upper>]: RefCell<usize> = RefCell::new(0);
+            }
             impl<const F: usize> std::ops::$trait for TpFixed64<F> {
                 type Output = Self;
                 #[inline]
                 fn $op(self, rhs: Self) -> Self::Output {
+                    [<N $op:upper>].with_borrow_mut(|v| *v+=1);
                     new_self!(self.inner.$op(rhs.inner))
                 }
             }
             impl<const F: usize> std::ops::[<$trait Assign>] for TpFixed64<F> {
                 #[inline]
                 fn [<$op _assign>](&mut self, rhs: Self) {
+                    [<N $op:upper>].with_borrow_mut(|v| *v+=1);
                     self.inner.[<$op _assign>](rhs.inner);
                 }
             }
@@ -363,10 +369,17 @@ impl<const F: usize> std::ops::Neg for TpFixed64<F> {
     }
 }
 
+
+use std::cell::RefCell;
+thread_local! {
+    pub static NMUL: RefCell<usize> = RefCell::new(0);
+    pub static NDIV: RefCell<usize> = RefCell::new(0);
+}
 impl<const F: usize> std::ops::Mul for TpFixed64<F> {
     type Output = Self;
     #[inline]
     fn mul(self, rhs: Self) -> Self::Output {
+        NMUL.with_borrow_mut(|v| *v+=1);
         new_self!(
             ((Into::<TpI128>::into(self.inner) * Into::<TpI128>::into(rhs.inner)) >> F as u32)
                 .into()
@@ -385,6 +398,7 @@ impl<const F: usize> std::ops::Mul<i64> for TpFixed64<F> {
     type Output = Self;
     #[inline]
     fn mul(self, rhs: i64) -> Self::Output {
+        NMUL.with_borrow_mut(|v| *v+=1);
         new_self!(self.inner * rhs)
     }
 }
@@ -393,6 +407,7 @@ impl<const F: usize> std::ops::Mul<TpI64> for TpFixed64<F> {
     type Output = Self;
     #[inline]
     fn mul(self, rhs: TpI64) -> Self::Output {
+        NMUL.with_borrow_mut(|v| *v+=1);
         new_self!(self.inner * rhs)
     }
 }
@@ -400,6 +415,7 @@ impl<const F: usize> std::ops::Mul<TpI64> for TpFixed64<F> {
 impl<const F: usize> std::ops::MulAssign<TpI64> for TpFixed64<F> {
     #[inline]
     fn mul_assign(&mut self, rhs: TpI64) {
+        NMUL.with_borrow_mut(|v| *v+=1);
         self.inner *= rhs;
     }
 }
@@ -408,6 +424,7 @@ impl<const F: usize> std::ops::Div for TpFixed64<F> {
     type Output = Self;
     #[inline]
     fn div(self, rhs: Self) -> Self::Output {
+        NDIV.with_borrow_mut(|v| *v+=1);
         let self_is_neg = self.tp_lt(&Self::ZERO);
         let rhs_is_neg = rhs.tp_lt(&Self::ZERO);
         let result_sign_is_pos = self_is_neg.tp_eq(&rhs_is_neg);

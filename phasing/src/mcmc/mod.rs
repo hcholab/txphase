@@ -102,6 +102,10 @@ impl<'a> Mcmc<'a> {
 
         for iter in iterations_iternal {
             mcmc.iteration(iter, &mut bprob_memory, &mut rng, id);
+            println!("# adds = {}", tp_fixedpoint::NADD.with_borrow(|v| *v));
+            println!("# subs = {}", tp_fixedpoint::NSUB.with_borrow(|v| *v));
+            println!("# muls = {}", tp_fixedpoint::NMUL.with_borrow(|v| *v));
+            println!("# divs = {}", tp_fixedpoint::NDIV.with_borrow(|v| *v));
         }
 
         #[cfg(feature = "obliv")]
@@ -125,6 +129,10 @@ impl<'a> Mcmc<'a> {
 
         mcmc.genotype_graph
             .traverse_graph_pair(mcmc.phased_ind.view(), mcmc.estimated_haps.view_mut());
+        println!("# adds = {}", tp_fixedpoint::NADD.with_borrow(|v| *v));
+        println!("# subs = {}", tp_fixedpoint::NSUB.with_borrow(|v| *v));
+        println!("# muls = {}", tp_fixedpoint::NMUL.with_borrow(|v| *v));
+        println!("# divs = {}", tp_fixedpoint::NDIV.with_borrow(|v| *v));
 
         mcmc.estimated_haps
     }
