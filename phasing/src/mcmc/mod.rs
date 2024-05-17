@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use std::cell::RefCell;
 thread_local! {
     pub static FILTER: RefCell<Duration> = RefCell::new(Duration::ZERO);
+    pub static FILTER_FULL: RefCell<Duration> = RefCell::new(Duration::ZERO);
     pub static HMM: RefCell<Duration> = RefCell::new(Duration::ZERO);
 }
 
@@ -101,7 +102,7 @@ impl<'a> Mcmc<'a> {
         let mut bprob_memory = RealMemory::new();
 
         for iter in iterations_iternal {
-            mcmc.iteration(iter, &mut bprob_memory, &mut rng, id);
+            mcmc.iteration_test_filter(iter, &mut bprob_memory, &mut rng, id);
         }
 
         #[cfg(feature = "obliv")]
@@ -610,6 +611,510 @@ impl<'a> Mcmc<'a> {
                     out
                 })
                 .as_millis()
+        );
+
+        #[cfg(feature = "benchmarking")]
+        {
+            println!(
+                "\tEmission: {:?} ms",
+                crate::hmm::EMISS
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "\tTransition: {:?} ms",
+                crate::hmm::TRANS
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "\tCollapse: {:?} ms",
+                crate::hmm::COLL
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+
+            println!(
+                "\tCombine: {:?} ms",
+                crate::hmm::COMB
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+            println!(
+                "\tMemory allocation: {:?} ms",
+                crate::hmm::MEMORY
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+        }
+
+        println!("Elapsed: {} ms", now.elapsed().as_millis());
+        println!();
+    }
+
+    fn iteration_test_filter(
+        &mut self,
+        iter_option: IterOptionInternal,
+        bprob_memory: &mut RealMemory,
+        mut rng: impl Rng,
+        id: &str,
+    ) {
+        println!("=== {:?} Iteration ({id}) ===", iter_option);
+        let now = Instant::now();
+
+        let pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
+
+        let neighbors = {
+            let pbwt_group_filter = pbwt_group_filter
+                .into_iter()
+                .zip(&self.params.pbwt_evaluted)
+                .map(|(a, &b)| a && b)
+                .collect::<Vec<_>>();
+
+            #[cfg(feature = "obliv")]
+            let (h_0, h_1): (Vec<_>, Vec<_>) = self
+                .estimated_haps
+                .rows()
+                .into_iter()
+                .map(|v| (v[0].tp_eq(&1), v[1].tp_eq(&1)))
+                .unzip();
+
+            #[cfg(not(feature = "obliv"))]
+            let (h_0, h_1): (Vec<_>, Vec<_>) = self
+                .estimated_haps
+                .rows()
+                .into_iter()
+                .map(|v| (v[0] == 1, v[1] == 1))
+                .unzip();
+
+            let mut nn_0 = crate::neighbor_finding::find_top_neighbors(
+                &h_0,
+                self.params.s,
+                &self.params.pbwt_tries,
+                self.params.ref_panel.n_haps,
+                &pbwt_group_filter,
+            );
+
+            let nn_1 = crate::neighbor_finding::find_top_neighbors(
+                &h_1,
+                self.params.s,
+                &self.params.pbwt_tries,
+                self.params.ref_panel.n_haps,
+                &pbwt_group_filter,
+            );
+
+            for (a, b) in nn_0.iter_mut().zip(nn_1.into_iter()) {
+                a.as_mut().map(|v| v.extend(b.unwrap().into_iter()));
+            }
+
+            nn_0
+        };
+
+        {
+            println!("Neighbors Finding: {} ms", now.elapsed().as_millis());
+
+            #[cfg(feature = "benchmarking")]
+            {
+                println!(
+                    "\tInsert target: {:?} ms",
+                    crate::neighbor_finding::timing::INSERT
+                        .with(|v| {
+                            let out = *v.borrow();
+                            *v.borrow_mut() = std::time::Duration::ZERO;
+                            out
+                        })
+                        .as_millis()
+                );
+                println!(
+                    "\tInitialize ranks: {:?} ms",
+                    crate::neighbor_finding::timing::INIT_RANKS
+                        .with(|v| {
+                            let out = *v.borrow();
+                            *v.borrow_mut() = std::time::Duration::ZERO;
+                            out
+                        })
+                        .as_millis()
+                );
+                println!(
+                    "\tNN merging & lookups: {:?} ms",
+                    crate::neighbor_finding::timing::LOOKUP
+                        .with(|v| {
+                            let out = *v.borrow();
+                            *v.borrow_mut() = std::time::Duration::ZERO;
+                            out
+                        })
+                        .as_millis()
+                );
+                println!(
+                    "\tUpdate PBWT between blocks: {:?} ms",
+                    crate::neighbor_finding::timing::UPDATE
+                        .with(|v| {
+                            let out = *v.borrow();
+                            *v.borrow_mut() = std::time::Duration::ZERO;
+                            out
+                        })
+                        .as_millis()
+                );
+            }
+        }
+
+        let windows = self.windows(&mut rng);
+
+        #[cfg(feature = "obliv")]
+        let mut prev_ind = (U8::protect(0), U8::protect(0));
+        #[cfg(not(feature = "obliv"))]
+        let mut prev_ind = (0, 0);
+        let mut sum_window_size = 0;
+        let n_windows = windows.len();
+        let mut ks = Vec::new();
+        let mut max_ks = Vec::new();
+        let mut window_sizes = Vec::new();
+        let mut tprob_pairs = Array2::<Real>::zeros((P, P));
+
+        let mut i = 0;
+
+        let rprobs = self.params.hmm_params.get_rprobs(
+            self.ignored_sites.view(),
+            &self.genotype_graph,
+            self.params.variants.view(),
+        );
+
+        for (window_i, ((start_w, end_w), (start_write_w, end_write_w))) in
+            windows.into_iter().enumerate()
+        {
+            sum_window_size +=
+                self.params.variants[end_w - 1].bp - self.params.variants[start_w].bp;
+            let genotype_graph_w = self.genotype_graph.slice(start_w, end_w);
+            let params_w = self.params.slice(start_w, end_w);
+            let rprobs_w = rprobs.slice(start_w, end_w);
+
+            let neighbors_w = &neighbors[start_w..end_w];
+
+            let max_k = neighbors_w
+                .iter()
+                .filter_map(|v| v.as_ref().map(|v| v.len()))
+                .sum::<usize>();
+            max_ks.push(max_k as f64);
+
+            window_sizes.push((end_w - start_w) as f64);
+
+            // Full
+            let full_unfolded = {
+                // expand to full
+                let mut full = Array2::<i8>::zeros((end_w - start_w, params_w.ref_panel.n_haps));
+                for (src, mut tar) in params_w.ref_panel.iter().zip(full.rows_mut().into_iter()) {
+                    tar.assign(&src);
+                }
+                // pack to U64
+                let t = Instant::now();
+                let (unfolded, _filter, _n_full_states) = filter_full(neighbors_w, full.view());
+
+                FILTER_FULL.with(|v| {
+                    let mut v = v.borrow_mut();
+                    *v += t.elapsed();
+                });
+                unfolded
+            };
+
+            let t = Instant::now();
+            let (unfolded, filter, n_full_states) =
+                filter_blocks(neighbors_w, &params_w.ref_panel.blocks);
+
+            FILTER.with(|v| {
+                let mut v = v.borrow_mut();
+                *v += t.elapsed();
+            });
+
+            assert_eq!(
+                unfolded.map(|v| v.expose()),
+                full_unfolded.map(|v| v.expose())
+            );
+
+            //TODO remove this
+            ks.push(n_full_states.expose() as f64);
+
+            #[cfg(feature = "obliv")]
+            let (tprobs_window, tprobs_window_e) = crate::hmm::Hmm::forward_backward(
+                unfolded.view(),
+                filter.view(),
+                n_full_states,
+                genotype_graph_w.graph.view(),
+                &self.params.hmm_params,
+                &rprobs_w,
+                Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
+                start_w == 0,
+                bprob_memory,
+            );
+
+            #[cfg(not(feature = "obliv"))]
+            let tprobs_window = crate::hmm::Hmm::forward_backward(
+                unfolded.view(),
+                filter.view(),
+                n_full_states,
+                genotype_graph_w.graph.view(),
+                &self.params.hmm_params,
+                &rprobs_w,
+                Array1::from_elem(params_w.ref_panel.n_sites, tp_value!(true, bool)).view(),
+                start_w == 0,
+            );
+
+            #[cfg(feature = "obliv")]
+            let tprobs_window_src = tprobs_window.view();
+
+            #[cfg(feature = "obliv")]
+            let tprobs_window_src_e = tprobs_window_e.view();
+
+            #[cfg(feature = "obliv")]
+            let mut tprobs_window_target = self.tprobs.slice_mut(s![start_w..end_w, .., ..]);
+
+            #[cfg(feature = "obliv")]
+            let mut prob_mask_target = self.prob_mask.slice_mut(s![start_w..end_w, .., ..]);
+
+            #[cfg(not(feature = "obliv"))]
+            let tprobs_window_src =
+                tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
+
+            #[cfg(not(feature = "obliv"))]
+            let genotype_graph = &self.genotype_graph;
+
+            #[cfg(not(feature = "obliv"))]
+            let mut tprobs_window_target =
+                self.tprobs
+                    .slice_mut(s![start_write_w..end_write_w, .., ..]);
+
+            #[cfg(not(feature = "obliv"))]
+            let mut prob_mask_target =
+                self.prob_mask
+                    .slice_mut(s![start_write_w..end_write_w, .., ..]);
+
+            #[cfg(feature = "obliv")]
+            let mut j = 0u64;
+
+            #[cfg(feature = "obliv")]
+            let epsilon = Real::protect_f32(1e-6);
+
+            if iter_option == IterOptionInternal::Pruning {
+                Zip::from(tprobs_window_target.outer_iter_mut())
+                    .and(tprobs_window_src.outer_iter())
+                    .for_each(|mut t, s| {
+                        #[cfg(feature = "obliv")]
+                        {
+                            let cond = (start_write_w - start_w as u64).tp_lt_eq(&j)
+                                & (end_write_w - start_w as u64).tp_gt(&j);
+                            let s_e = tprobs_window_src_e.slice(s![j as usize, .., ..]);
+                            combine_dips(s, s_e, t.view_mut(), cond);
+                            j += 1;
+                        }
+
+                        #[cfg(not(feature = "obliv"))]
+                        if i == 0 || genotype_graph.graph[i].is_segment_marker() {
+                            combine_dips(s, t.view_mut());
+                        } else {
+                            let mut t = t;
+                            t.fill(0.);
+                        }
+                        i += 1;
+                    });
+            } else if iter_option == IterOptionInternal::Main(true) {
+                Zip::from(tprobs_window_target.outer_iter_mut())
+                    .and(tprobs_window_src.outer_iter())
+                    .and(prob_mask_target.outer_iter_mut())
+                    .for_each(|mut t, s, mut m| {
+                        #[cfg(feature = "obliv")]
+                        {
+                            let cond = (start_write_w - start_w as u64).tp_lt_eq(&j)
+                                & (end_write_w - start_w as u64).tp_gt(&j);
+                            let s_e = tprobs_window_src_e.slice(s![j as usize, .., ..]);
+                            combine_dips(s, s_e, t.view_mut(), cond);
+                            Zip::from(&t)
+                                .and(&mut m)
+                                .for_each(|&t, m| *m = t.tp_lt(&epsilon) & cond);
+                            j += 1;
+                        }
+
+                        #[cfg(not(feature = "obliv"))]
+                        if i == 0 || genotype_graph.graph[i].is_segment_marker() {
+                            combine_dips(s, t.view_mut());
+                            Zip::from(&t).and(&mut m).for_each(|&t, m| *m = t <= 1e-6);
+                        } else {
+                            let mut t = t;
+                            t.fill(0.);
+                        }
+                        i += 1;
+                    });
+            } else if iter_option == IterOptionInternal::Main(false) {
+                Zip::from(tprobs_window_target.outer_iter_mut())
+                    .and(tprobs_window_src.outer_iter())
+                    .for_each(|mut t, s| {
+                        #[cfg(feature = "obliv")]
+                        {
+                            let cond = (start_write_w - start_w as u64).tp_lt_eq(&j)
+                                & (end_write_w - start_w as u64).tp_gt(&j);
+                            tprob_pairs.fill(Real::ZERO);
+                            let s_e = tprobs_window_src_e.slice(s![j as usize, .., ..]);
+                            combine_dips(s, s_e, tprob_pairs.view_mut(), cond);
+                            t += &tprob_pairs;
+                            j += 1;
+                        }
+
+                        #[cfg(not(feature = "obliv"))]
+                        if i == 0 || genotype_graph.graph[i].is_segment_marker() {
+                            combine_dips(s, tprob_pairs.view_mut());
+                            t += &tprob_pairs;
+                        }
+
+                        i += 1;
+                    });
+            }
+
+            #[cfg(not(feature = "obliv"))]
+            let tprobs_window_src =
+                tprobs_window.slice_mut(s![start_write_w - start_w..end_write_w - start_w, .., ..]);
+
+            // sample
+            #[cfg(feature = "obliv")]
+            let phased_ind_window = sampling::forward_sampling(
+                prev_ind,
+                tprobs_window.view(),
+                tprobs_window_src_e.view(),
+                genotype_graph_w.graph.view(),
+                window_i == 0,
+                start_write_w - start_w as u64,
+                &mut rng,
+            );
+
+            #[cfg(not(feature = "obliv"))]
+            let phased_ind_window = sampling::forward_sampling(
+                prev_ind,
+                tprobs_window_src.view(),
+                genotype_graph_w
+                    .graph
+                    .slice(s![start_write_w - start_w..end_write_w - start_w]),
+                is_first_window,
+                &mut rng,
+            );
+
+            #[cfg(feature = "obliv")]
+            let mut tmp = self.phased_ind.slice_mut(s![start_w..end_w, ..]);
+
+            #[cfg(not(feature = "obliv"))]
+            let mut tmp = self
+                .phased_ind
+                .slice_mut(s![start_write_w..end_write_w, ..]);
+
+            #[cfg(feature = "obliv")]
+            {
+                ndarray::Zip::indexed(tmp.rows_mut())
+                    .and(phased_ind_window.rows())
+                    .for_each(|i, mut t, s| {
+                        let cond = (start_write_w - start_w as u64).tp_lt_eq(&(i as u64))
+                            & (end_write_w - start_w as u64).tp_gt(&(i as u64));
+                        t[0] = cond.select(s[0], t[0]);
+                        t[1] = cond.select(s[1], t[1]);
+                    });
+
+                for i in 0..phased_ind_window.nrows() {
+                    let cond = (end_write_w - start_w as u64 - 1).tp_eq(&(i as u64));
+                    prev_ind.0 = cond.select(phased_ind_window[[i, 0]], prev_ind.0);
+                    prev_ind.1 = cond.select(phased_ind_window[[i, 1]], prev_ind.1);
+                }
+            }
+
+            #[cfg(not(feature = "obliv"))]
+            {
+                tmp.assign(&phased_ind_window);
+                prev_ind = (
+                    phased_ind_window[[phased_ind_window.nrows() - 1, 0]],
+                    phased_ind_window[[phased_ind_window.nrows() - 1, 1]],
+                );
+            }
+
+            HMM.with(|v| {
+                let mut v = v.borrow_mut();
+                *v += t.elapsed();
+            });
+        }
+
+        self.genotype_graph
+            .traverse_graph_pair(self.phased_ind.view(), self.estimated_haps.view_mut());
+
+        if iter_option == IterOptionInternal::Pruning {
+            self.genotype_graph.prune(self.tprobs.view());
+
+            #[cfg(not(feature = "obliv"))]
+            {
+                let n_new_segments = self.genotype_graph.n_segments();
+                println!("#new-segments: {n_new_segments}",);
+                println!(
+                    "Trimming: {:.2}%",
+                    (1. - n_new_segments as f64 / self.n_old_segments as f64) * 100.
+                );
+            }
+
+            self.cur_overlap_region_len *= 2;
+        }
+
+        use statrs::statistics::Statistics;
+        println!(
+            "K: {:.3}+/-{:.3}",
+            Statistics::mean(&ks),
+            Statistics::std_dev(&ks)
+        );
+        println!(
+            "Max K: {:.3}+/-{:.3}",
+            Statistics::mean(&max_ks),
+            Statistics::std_dev(&max_ks)
+        );
+        println!(
+            "Window sizes (#sites): {:.3}+/-{:.3}",
+            Statistics::mean(&window_sizes),
+            Statistics::std_dev(&window_sizes)
+        );
+
+        println!(
+            "Total window size (Mb): {:.2} Mb",
+            sum_window_size as f64 / n_windows as f64 / 1e6
+        );
+
+        println!(
+            "HMM+Filter: {:?} ms",
+            HMM.with(|v| {
+                let out = *v.borrow();
+                *v.borrow_mut() = std::time::Duration::ZERO;
+                out
+            })
+            .as_millis()
+        );
+
+        println!(
+            "\tFilter Compressed Ref Panel: {:?} ms",
+            FILTER.with(|v| *v.borrow()).as_millis()
+        );
+        println!(
+            "\tFilter Full Ref Panel: {:?} ms",
+            FILTER_FULL.with(|v| *v.borrow()).as_millis()
         );
 
         #[cfg(feature = "benchmarking")]

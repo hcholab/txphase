@@ -1,6 +1,6 @@
 use crate::{Bool, Genotype, UInt, Usize, U16, U32};
 use common::ref_panel::BlockSlice;
-use ndarray::{s, Array1, Array2, ArrayView1, Zip};
+use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, Zip};
 use obliv_utils::vec::OblivVec;
 use tp_fixedpoint::timing_shield::TpU64;
 
@@ -90,6 +90,72 @@ pub fn neighbors_to_filter(neighbors: &[Option<Vec<U32>>]) -> (Vec<U32>, Vec<Boo
     //}
 
     (neighbors, filter, n_full_states)
+}
+
+pub fn filter_full(
+    neighbors: &[Option<Vec<U32>>],
+    haps: ArrayView2<i8>,
+) -> (Array2<Genotype>, Array1<Bool>, Usize) {
+    let (max_k_neighbors, filter, n_full_states) = neighbors_to_filter(neighbors);
+    let mut unfolded =
+        Array2::from_elem((haps.nrows(), max_k_neighbors.len()), Genotype::protect(0));
+
+    let packed = pack_full(haps);
+    for (i, packed) in packed.into_iter().enumerate() {
+        let mut slice = unfolded.slice_mut(s![i * 64..((i + 1) * 64).min(unfolded.nrows()), ..]);
+
+        let unfolded_packed = max_k_neighbors
+            .iter()
+            .map(|&i| packed.get(i))
+            .collect::<Vec<_>>();
+
+        for (mut packed, mut col) in unfolded_packed.into_iter().zip(slice.columns_mut()) {
+            //println!("{:064b}", packed.expose());
+            for h in col.iter_mut() {
+                *h = (packed & 1).as_i8();
+                packed >>= 1;
+            }
+            //println!("{:?}", col.map(|v| v.expose()));
+        }
+    }
+
+    let filter = Array1::from_vec(filter);
+    (unfolded, filter, n_full_states)
+}
+
+pub fn pack_full(haps: ArrayView2<i8>) -> Vec<OblivVec<TpU64>> {
+    let n_full_haps = haps.ncols();
+    let mut packed = Vec::new();
+    let mut cur_bit_count = 0;
+    let mut cur_packed = Some(vec![0u64; n_full_haps]);
+    for row in haps.rows().into_iter() {
+        if cur_bit_count == 64 {
+            packed.push(OblivVec::from_iter(
+                cur_packed
+                    .take()
+                    .unwrap()
+                    .into_iter()
+                    .map(|v| TpU64::protect(v)),
+            ));
+            cur_packed = Some(vec![0u64; n_full_haps]);
+            cur_bit_count = 0;
+        }
+        for (&h, packed) in row.iter().zip(cur_packed.as_mut().unwrap().iter_mut()) {
+            assert!(h >= 0);
+            *packed |= (h as u64) << cur_bit_count;
+        }
+        cur_bit_count += 1;
+    }
+    if cur_bit_count > 0 {
+        packed.push(OblivVec::from_iter(
+            cur_packed
+                .take()
+                .unwrap()
+                .into_iter()
+                .map(|v| TpU64::protect(v)),
+        ));
+    }
+    packed
 }
 
 pub fn filter_blocks<'a>(
