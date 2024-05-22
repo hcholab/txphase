@@ -3,6 +3,7 @@
 #![feature(portable_simd)]
 #![allow(dead_code)]
 
+mod full_neighbor_finding;
 mod genotype_graph;
 mod hmm;
 mod mcmc;
