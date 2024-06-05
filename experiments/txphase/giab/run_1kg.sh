@@ -18,6 +18,7 @@ for ((n=0;n<$N_REPEATS;n++)); do
     port=$(expr $PORT + $n)
     PHASING_OPTIONS="--max-m3vcf-unique-haps=300 \
         --min-m3vcf-unique-haps=200 \
+        --min-het-rate=0.6 \
         --prg-seed $RANDOM"
     HOST_OPTIONS="\
         --worker-port-base $port \

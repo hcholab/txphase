@@ -564,8 +564,6 @@ impl<'a> Mcmc<'a> {
                     (1. - n_new_segments as f64 / self.n_old_segments as f64) * 100.
                 );
             }
-
-            self.cur_overlap_region_len *= 2;
         }
 
         use statrs::statistics::Statistics;
@@ -723,17 +721,23 @@ impl<'a> Mcmc<'a> {
             #[cfg(feature = "obliv")]
             let v = if i == 0 {
                 (
-                    (window.0, window.1 + overlap_len),
+                    (
+                        window.0,
+                        (window.1 + overlap_len).min(self.params.variants.len()),
+                    ),
                     (Usize::protect(window.0 as u64), end_write_boundary),
                 )
             } else if i == windows.len() - 1 {
                 (
-                    (window.0 - overlap_len, window.1),
+                    (window.0.saturating_sub(overlap_len), window.1),
                     (prev_end_write_boundary, Usize::protect(window.1 as u64)),
                 )
             } else {
                 (
-                    (window.0 - overlap_len, window.1 + overlap_len),
+                    (
+                        window.0.saturating_sub(overlap_len),
+                        (window.1 + overlap_len).min(self.params.variants.len()),
+                    ),
                     (prev_end_write_boundary, end_write_boundary),
                 )
             };

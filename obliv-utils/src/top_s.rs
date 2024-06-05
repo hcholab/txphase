@@ -11,10 +11,10 @@ where
         return crate::vec::OblivVec::with_elem(1, ranks.pop().unwrap());
     }
 
-    let mut top_s = crate::vec::OblivVec::with_elem(s, unsafe {
+    let mut top_s = crate::vec::OblivVec::with_elem(s.min(ranks.len()), unsafe {
         std::mem::MaybeUninit::<T>::uninit().assume_init()
     });
-    for j in 0..s.min(ranks.len() - 1) {
+    for j in 0..s.min(ranks.len()) {
         for i in 0..ranks.len() - 1 {
             let [a, b] = unsafe { ranks.get_many_unchecked_mut([i, i + 1]) };
             a.tp_lt_eq(b).cond_swap(a, b);

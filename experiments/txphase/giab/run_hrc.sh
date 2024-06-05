@@ -16,7 +16,8 @@ N_REPEATS=100
 for ((n=0;n<$N_REPEATS;n++)); do
     OUTPUT=$OUTPUT_DIR/phased_$n.vcf.gz
     port=$(expr $PORT + $n)
-    PHASING_OPTIONS="--prg-seed $RANDOM"
+    PHASING_OPTIONS="--min-het-rate=0.6 \
+        --prg-seed $RANDOM"
     HOST_OPTIONS="\
         --worker-port-base $port \
         --n-workers 1 \
