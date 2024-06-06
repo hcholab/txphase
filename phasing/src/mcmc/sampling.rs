@@ -188,7 +188,7 @@ fn weighted_sample(weights: ArrayView1<Real>, mut rng: impl Rng) -> U8 {
         }
         index
             .tp_eq(&(weights.len() as u8))
-            .select(U8::protect(0), index)
+            .select(U8::protect(rng.gen_range(0..weights.len() as u8)), index)
     }
 
     #[cfg(not(feature = "obliv"))]

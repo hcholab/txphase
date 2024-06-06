@@ -3,6 +3,7 @@
 OUTPUT_DIR=$1
 export UKB_REF_PANEL_SIZE=$2
 
+mkdir -p $OUTPUT_DIR/$UKB_REF_PANEL_SIZE
 OUTPUT_DIR_SIZE=$(realpath $OUTPUT_DIR/$UKB_REF_PANEL_SIZE)
 
 MAIN_DIR=$(git rev-parse --show-toplevel)
@@ -20,7 +21,6 @@ HOST_OPTIONS="\
 
 killall host >/dev/null 2>&1
 
-mkdir -p $OUTPUT_DIR_SIZE
 (cd $MAIN_DIR
 cargo +nightly build --release -p host && \
 cargo +nightly build --release -p phasing $FEATURES && \
