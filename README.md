@@ -68,6 +68,10 @@ The instructions below have been tested with a virtual machine in the [Microsoft
   ```bash
   wget https://github.com/hcholab/txphase-test-data/raw/main/HG002_GRCh37_1_22_v4.2.1_benchmark_20.vcf.gz
   ```
+
+   The rest of the dataset can be downloaded from [this link](https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/release/AshkenazimTrio/).
+
+  
 - Start the client
   ```bash
   target/release/client --input HG002_GRCh37_1_22_v4.2.1_benchmark_20.vcf.gz --output phased.vcf.gz &
@@ -90,6 +94,8 @@ The instructions below have been tested with a virtual machine in the [Microsoft
   ```bash
   wget https://github.com/hcholab/txphase-test-data/raw/main/chr20.b37.gmap
   ```
+
+  The rest of the genetic map files can be downloaded from [SHAPEIT4's repository](https://github.com/odelaneau/shapeit4/tree/master/maps).
 
 - Start the phasing service (with SGX)
   ```bash
