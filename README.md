@@ -59,7 +59,6 @@ The instructions below have been tested with a virtual machine in the [Microsoft
   ```bash
   cargo +nightly build --release -p host
   cargo +nightly build --release -p phasing
-  make
   ```
 
 ## Download and run the test data
