@@ -10,6 +10,7 @@ use crate::hmm::combine_dips;
 use crate::mcmc::filter::*;
 use crate::memory::RealMemory;
 use crate::variants::{Rarity, Variant};
+use crate::{log, WORKER_ID};
 use crate::{tp_value, Bool, Genotype, Real, Usize, U8};
 use rand::Rng;
 
@@ -43,6 +44,16 @@ enum IterOptionInternal {
     Main(bool), // First main iteration?
 }
 
+impl std::fmt::Display for IterOptionInternal {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            IterOptionInternal::Burnin => write!(f, "Burn-in"),
+            IterOptionInternal::Pruning => write!(f, "Pruning"),
+            IterOptionInternal::Main(_) => write!(f, "Main"),
+        }
+    }
+}
+
 pub struct Mcmc<'a> {
     params: &'a McmcSharedParams,
     cur_overlap_region_len: usize,
@@ -64,7 +75,7 @@ impl<'a> Mcmc<'a> {
         genotypes: ArrayView1<Genotype>,
         iterations: &[IterOption],
         mut rng: impl Rng,
-        id: &str,
+        sample_id: &str,
     ) -> Array2<Genotype> {
         match iterations.last().unwrap() {
             IterOption::Main(_) => {}
@@ -96,12 +107,12 @@ impl<'a> Mcmc<'a> {
             }
         }
 
-        let mut mcmc = Self::initialize(&params, genotypes.view(), id);
+        let mut mcmc = Self::initialize(&params, genotypes.view(), sample_id);
 
         let mut bprob_memory = RealMemory::new();
 
-        for iter in iterations_iternal {
-            mcmc.iteration(iter, &mut bprob_memory, &mut rng, id);
+        for (i, iter) in iterations_iternal.into_iter().enumerate() {
+            mcmc.iteration(iter, &mut bprob_memory, &mut rng, sample_id, i + 1);
         }
 
         #[cfg(feature = "obliv")]
@@ -129,8 +140,12 @@ impl<'a> Mcmc<'a> {
         mcmc.estimated_haps
     }
 
-    fn initialize(params: &'a McmcSharedParams, genotypes: ArrayView1<Genotype>, id: &str) -> Self {
-        println!("=== Initialization ({id}) ===",);
+    fn initialize(
+        params: &'a McmcSharedParams,
+        genotypes: ArrayView1<Genotype>,
+        sample_id: &str,
+    ) -> Self {
+        log!("=== Initialization (Sample: {sample_id}) ===",);
         let now = Instant::now();
 
         let (h_0, h_1) = crate::neighbor_finding::mcmc_init(
@@ -171,8 +186,8 @@ impl<'a> Mcmc<'a> {
         let n_old_segments = genotype_graph.n_segments();
 
         let ignored_sites = Self::get_ignored_sites(params.variants.view(), genotypes);
-        println!("Initialization: {} ms", (Instant::now() - now).as_millis());
-        println!("",);
+        log!("Elasped time: {} ms", (Instant::now() - now).as_millis());
+        log!("",);
         Self {
             params,
             cur_overlap_region_len: params.overlap_region_len,
@@ -194,9 +209,13 @@ impl<'a> Mcmc<'a> {
         iter_option: IterOptionInternal,
         bprob_memory: &mut RealMemory,
         mut rng: impl Rng,
-        id: &str,
+        sample_id: &str,
+        iter_id: usize,
     ) {
-        println!("=== {:?} Iteration ({id}) ===", iter_option);
+        log!(
+            "=== {} Iteration (Sample: {sample_id}; Iter: {iter_id}) ===",
+            iter_option
+        );
         let now = Instant::now();
 
         let pbwt_group_filter = self.params.randomize_pbwt_group_bitmask(&mut rng);
@@ -248,11 +267,10 @@ impl<'a> Mcmc<'a> {
         };
 
         {
-            println!("Neighbors Finding: {} ms", now.elapsed().as_millis());
-
             #[cfg(feature = "benchmarking")]
             {
-                println!(
+                log!("Neighbors Finding: {} ms", now.elapsed().as_millis());
+                log!(
                     "\tInsert target: {:?} ms",
                     crate::neighbor_finding::timing::INSERT
                         .with(|v| {
@@ -262,7 +280,7 @@ impl<'a> Mcmc<'a> {
                         })
                         .as_millis()
                 );
-                println!(
+                log!(
                     "\tInitialize ranks: {:?} ms",
                     crate::neighbor_finding::timing::INIT_RANKS
                         .with(|v| {
@@ -272,7 +290,7 @@ impl<'a> Mcmc<'a> {
                         })
                         .as_millis()
                 );
-                println!(
+                log!(
                     "\tNN merging & lookups: {:?} ms",
                     crate::neighbor_finding::timing::LOOKUP
                         .with(|v| {
@@ -282,7 +300,7 @@ impl<'a> Mcmc<'a> {
                         })
                         .as_millis()
                 );
-                println!(
+                log!(
                     "\tUpdate PBWT between blocks: {:?} ms",
                     crate::neighbor_finding::timing::UPDATE
                         .with(|v| {
@@ -303,7 +321,7 @@ impl<'a> Mcmc<'a> {
         let mut prev_ind = (0, 0);
         let mut sum_window_size = 0;
         let n_windows = windows.len();
-        let mut ks = Vec::new();
+        //let mut ks = Vec::new();
         let mut max_ks = Vec::new();
         let mut window_sizes = Vec::new();
         let mut tprob_pairs = Array2::<Real>::zeros((P, P));
@@ -339,8 +357,8 @@ impl<'a> Mcmc<'a> {
             let (unfolded, filter, n_full_states) =
                 filter_blocks(neighbors_w, &params_w.ref_panel.blocks);
 
-            //TODO remove this
-            ks.push(n_full_states.expose() as f64);
+            ////TODO remove this
+            //ks.push(n_full_states.expose() as f64);
 
             FILTER.with(|v| {
                 let mut v = v.borrow_mut();
@@ -558,8 +576,8 @@ impl<'a> Mcmc<'a> {
             #[cfg(not(feature = "obliv"))]
             {
                 let n_new_segments = self.genotype_graph.n_segments();
-                println!("#new-segments: {n_new_segments}",);
-                println!(
+                log!("#new-segments: {n_new_segments}",);
+                log!(
                     "Trimming: {:.2}%",
                     (1. - n_new_segments as f64 / self.n_old_segments as f64) * 100.
                 );
@@ -567,39 +585,39 @@ impl<'a> Mcmc<'a> {
         }
 
         use statrs::statistics::Statistics;
-        println!(
-            "K: {:.3}+/-{:.3}",
-            Statistics::mean(&ks),
-            Statistics::std_dev(&ks)
-        );
-        println!(
+        //log!(
+        //"K: {:.3}+/-{:.3}",
+        //Statistics::mean(&ks),
+        //Statistics::std_dev(&ks)
+        //);
+        log!(
             "Max K: {:.3}+/-{:.3}",
             Statistics::mean(&max_ks),
             Statistics::std_dev(&max_ks)
         );
-        println!(
+        log!(
             "Window sizes (#sites): {:.3}+/-{:.3}",
             Statistics::mean(&window_sizes),
             Statistics::std_dev(&window_sizes)
         );
 
-        println!(
+        log!(
             "Total window size (Mb): {:.2} Mb",
             sum_window_size as f64 / n_windows as f64 / 1e6
         );
 
-        println!(
-            "HMM+Filter: {:?} ms",
-            HMM.with(|v| {
-                let out = *v.borrow();
-                *v.borrow_mut() = std::time::Duration::ZERO;
-                out
-            })
-            .as_millis()
-        );
+        //log!(
+        //"HMM+Filter: {:?} ms",
+        //HMM.with(|v| {
+        //let out = *v.borrow();
+        //*v.borrow_mut() = std::time::Duration::ZERO;
+        //out
+        //})
+        //.as_millis()
+        //);
 
         #[cfg(feature = "benchmarking")]
-        println!(
+        log!(
             "\tFilter Ref Panel: {:?} ms",
             FILTER
                 .with(|v| {
@@ -612,7 +630,7 @@ impl<'a> Mcmc<'a> {
 
         #[cfg(feature = "benchmarking")]
         {
-            println!(
+            log!(
                 "\tEmission: {:?} ms",
                 crate::hmm::EMISS
                     .with(|v| {
@@ -623,7 +641,7 @@ impl<'a> Mcmc<'a> {
                     .as_millis()
             );
 
-            println!(
+            log!(
                 "\tTransition: {:?} ms",
                 crate::hmm::TRANS
                     .with(|v| {
@@ -634,7 +652,7 @@ impl<'a> Mcmc<'a> {
                     .as_millis()
             );
 
-            println!(
+            log!(
                 "\tCollapse: {:?} ms",
                 crate::hmm::COLL
                     .with(|v| {
@@ -645,7 +663,7 @@ impl<'a> Mcmc<'a> {
                     .as_millis()
             );
 
-            println!(
+            log!(
                 "\tCombine: {:?} ms",
                 crate::hmm::COMB
                     .with(|v| {
@@ -655,7 +673,7 @@ impl<'a> Mcmc<'a> {
                     })
                     .as_millis()
             );
-            println!(
+            log!(
                 "\tMemory allocation: {:?} ms",
                 crate::hmm::MEMORY
                     .with(|v| {
@@ -667,8 +685,8 @@ impl<'a> Mcmc<'a> {
             );
         }
 
-        println!("Elapsed: {} ms", now.elapsed().as_millis());
-        println!();
+        log!("Elapsed: {} ms", now.elapsed().as_millis());
+        log!("");
     }
 
     fn windows(&self, mut rng: impl Rng) -> Vec<((usize, usize), (Usize, Usize))> {

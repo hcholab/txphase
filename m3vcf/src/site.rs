@@ -5,7 +5,9 @@ use std::io::Result;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone)]
+#[derive(
+    Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Clone, serde::Serialize, serde::Deserialize,
+)]
 pub struct Site {
     pub chr: String,
     pub pos: u32,

@@ -31,10 +31,10 @@ impl McmcSharedParams {
         s: usize,
     ) -> Self {
         let variants = build_variants(&bps, &cms, &afreqs, ref_panel.n_haps);
-        println!(
-            "#rare = {}",
-            variants.iter().filter(|v| v.rarity().is_rare()).count()
-        );
+        //println!(
+        //"#rare = {}",
+        //variants.iter().filter(|v| v.rarity().is_rare()).count()
+        //);
         let hmm_params = HmmParams::new(ref_panel.n_haps);
         let (pbwt_evaluted, pbwt_groups) = Self::get_pbwt_evaluated(&variants, pbwt_modulo);
 
@@ -74,7 +74,7 @@ impl McmcSharedParams {
                 pbwt_tries.push(pbwt);
             });
 
-        println!("#pbwt_groups = {}", pbwt_groups.len());
+        //println!("#pbwt_groups = {}", pbwt_groups.len());
         Self {
             ref_panel,
             variants: Array1::from_vec(variants),

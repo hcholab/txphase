@@ -6,5 +6,5 @@ members = [
     "m3vcf",
     "obliv-utils",
     "tp-fixedpoint",
-    "common",
+    "common", "client",
 ]

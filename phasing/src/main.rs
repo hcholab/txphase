@@ -52,17 +52,28 @@ mod types {
 use types::*;
 
 use crate::mcmc::IterOption;
+use clap::Parser;
 use ndarray::{Array1, Array2};
 use rand::SeedableRng;
+use std::cell::Cell;
 use std::io::Write;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::str::FromStr;
 
-pub fn log_template(name: impl std::fmt::Display, param: impl std::fmt::Display) -> String {
-    format!("\t* {name}\t: {param}")
+thread_local!(static WORKER_ID: Cell<usize>= Cell::new(usize::MAX));
+
+macro_rules! log {
+    ($($arg:tt)*) => {
+        println!("SP Worker {}:: {}", WORKER_ID.get(), format!($($arg)*
+        ));
+    };
 }
 
-use clap::Parser;
+pub(crate) use log;
+
+pub fn log_param_template(name: impl std::fmt::Display, param: impl std::fmt::Display) -> String {
+    format!("\t* {name} : {param}")
+}
 
 #[derive(Parser, Debug)]
 struct Cli {
@@ -115,9 +126,8 @@ fn parse_iterations(s: &str) -> Result<Vec<IterOption>, String> {
 
 fn main() {
     let cli = Cli::parse();
-    println!("{:?}", cli);
 
-    let (host_stream, _) = TcpListener::bind(SocketAddr::from((
+    let (host_stream, host_socket) = TcpListener::bind(SocketAddr::from((
         IpAddr::from_str("127.0.0.1").unwrap(),
         cli.host_port,
     )))
@@ -126,6 +136,11 @@ fn main() {
     .unwrap();
 
     let mut host_stream = bufstream::BufStream::new(host_stream);
+    let worker_id: u16 = bincode::deserialize_from(&mut host_stream).unwrap();
+    WORKER_ID.set(worker_id as usize);
+
+    log!("Host connected from {}", host_socket);
+
     let ref_panel_meta: m3vcf::RefPanelMeta = bincode::deserialize_from(&mut host_stream).unwrap();
     let ref_panel_blocks: Vec<m3vcf::Block> = bincode::deserialize_from(&mut host_stream).unwrap();
     let sites_bitmask: Vec<bool> = bincode::deserialize_from(&mut host_stream).unwrap();
@@ -146,10 +161,20 @@ fn main() {
 
     let mcmc_iterations = parse_iterations(&cli.mcmc_iterations).unwrap();
 
-    println!("PBWT depth: {pbwt_depth}");
-    println!("PBWT modulo: {:.3}", pbwt_modulo);
-    println!("MCMC iterations: {}", cli.mcmc_iterations);
-    println!("Seed: {}", cli.prg_seed);
+    log!("Parameters:");
+    log!("{}", log_param_template("PRG seed", cli.prg_seed));
+    log!("{}", log_param_template("PBWT depth", pbwt_depth));
+    log!("{}", log_param_template("PBWT modulo", pbwt_modulo));
+    log!(
+        "{}",
+        log_param_template("Min. window len. (cM)", cli.min_window_len_cm)
+    );
+    log!("{}", log_param_template("Min. het. rate", cli.min_het_rate));
+    log!(
+        "{}",
+        log_param_template("MCMC iterations", cli.mcmc_iterations)
+    );
+    log!("");
 
     let n_pos_window_overlap = (3. / cli.min_het_rate).ceil() as usize;
 
@@ -180,7 +205,7 @@ fn main() {
 
         let filtered_genotypes = Array1::<Genotype>::from_vec(filtered_genotypes);
 
-        println!("#sites = {}", filtered_genotypes.len());
+        //log!("#sites = {}", filtered_genotypes.len());
 
         let mcmc_params = {
             let mut sites_bitmask = sites_bitmask.clone();
@@ -214,31 +239,31 @@ fn main() {
                 cli.max_m3vcf_unique_haps,
             );
 
-            use statrs::statistics::Statistics;
-            let block_n_unique_haps = ref_panel_new
-                .blocks
-                .iter()
-                .map(|b| b.n_unique() as f64)
-                .collect::<Vec<_>>();
+            //use statrs::statistics::Statistics;
+            //let block_n_unique_haps = ref_panel_new
+            //.blocks
+            //.iter()
+            //.map(|b| b.n_unique() as f64)
+            //.collect::<Vec<_>>();
 
-            let block_n_sites = ref_panel_new
-                .blocks
-                .iter()
-                .map(|b| b.n_sites() as f64)
-                .collect::<Vec<_>>();
-            println!("#Blocks: {}", ref_panel_new.blocks.len());
+            //let block_n_sites = ref_panel_new
+            //.blocks
+            //.iter()
+            //.map(|b| b.n_sites() as f64)
+            //.collect::<Vec<_>>();
+            //log!("#Blocks: {}", ref_panel_new.blocks.len());
 
-            println!(
-                "#Block unique haplotypes: {:.3}+/-{:.3}",
-                Statistics::mean(&block_n_unique_haps),
-                Statistics::std_dev(&block_n_unique_haps)
-            );
+            //log!(
+            //"#Block unique haplotypes: {:.3}+/-{:.3}",
+            //Statistics::mean(&block_n_unique_haps),
+            //Statistics::std_dev(&block_n_unique_haps)
+            //);
 
-            println!(
-                "#Block sites: {:.3}+/-{:.3}",
-                Statistics::mean(&block_n_sites),
-                Statistics::std_dev(&block_n_sites)
-            );
+            //log!(
+            //"#Block sites: {:.3}+/-{:.3}",
+            //Statistics::mean(&block_n_sites),
+            //Statistics::std_dev(&block_n_sites)
+            //);
 
             mcmc::McmcSharedParams::new(
                 ref_panel_new,
@@ -277,7 +302,10 @@ fn main() {
                 r.fill(-1);
             }
         }
+        log!("finished phasing");
         bincode::serialize_into(&mut host_stream, &phased_with_missing).unwrap();
         host_stream.flush().unwrap();
+        log!("sent results to host");
+        log!("done");
     }
 }

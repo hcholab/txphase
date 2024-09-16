@@ -4,19 +4,18 @@ mod geneticmap;
 mod record;
 mod site;
 
-use m3vcf::Site;
 use ndarray::Array2;
-use rust_htslib::bcf;
-use std::collections::HashSet;
 use std::io::Write;
-use std::net::{IpAddr, SocketAddr, TcpStream};
-use std::path::{Path, PathBuf};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use clap::{value_parser, Parser};
 
 #[derive(Parser, Debug)]
 struct Cli {
+    #[arg(long, default_value_t = 7776)]
+    client_port: u16,
     #[arg(long, default_value_t = 7777)]
     worker_port_base: u16,
     #[arg(long, default_value_t = 1)]
@@ -27,21 +26,39 @@ struct Cli {
     ref_panel: PathBuf,
     #[arg(long, value_parser=value_parser!(PathBuf))]
     genetic_map: PathBuf,
-    #[arg(long, value_parser=value_parser!(PathBuf))]
-    input: PathBuf,
-    #[arg(long, value_parser=value_parser!(PathBuf), default_value="phased.vcf.gz")]
-    output: PathBuf,
+}
+
+macro_rules! log {
+    ($($arg:tt)*) => {
+        println!("Host:: {}", format!($($arg)*));
+    };
 }
 
 fn main() {
     let cli = Cli::parse();
-    println!("Worker port base: \t\t\t{}", cli.worker_port_base);
-    println!("Reference panel: \t{:?}", cli.ref_panel);
-    println!("Genetic map: \t\t{:?}", cli.genetic_map);
-    println!("Input: \t\t\t{:?}", cli.input);
-    println!("Output: \t\t{:?}", cli.output);
+    log!("Client port : \t\t{}", cli.client_port);
+    log!("Worker port base: \t{}", cli.worker_port_base);
+    log!("# workers: \t\t{}", cli.n_workers);
+    log!("Reference panel: \t{:?}", cli.ref_panel);
+    log!("Genetic map: \t\t{:?}", cli.genetic_map);
+
+    let (mut client_stream, client_socket) = TcpListener::bind(SocketAddr::from((
+        IpAddr::from_str("127.0.0.1").unwrap(),
+        cli.client_port,
+    )))
+    .unwrap()
+    .accept()
+    .unwrap();
+
+    log!("Client connected from {}", client_socket);
 
     let sites = m3vcf::read_sites(&cli.ref_panel);
+
+    bincode::serialize_into(&mut client_stream, &sites).unwrap();
+    log!("site information sent to Client");
+
+    let afreq_bitmask: Vec<bool> = bincode::deserialize_from(&mut client_stream).unwrap();
+    let target_samples: Vec<Vec<i8>> = bincode::deserialize_from(&mut client_stream).unwrap();
 
     let (ref_panel_meta, ref_panel_block_iter) = m3vcf::load_ref_panel(&cli.ref_panel);
     let ref_panel_blocks = ref_panel_block_iter.collect::<Vec<_>>();
@@ -79,9 +96,6 @@ fn main() {
         (vec![true; afreqs.len()], sites)
     };
 
-    let (target_samples, afreq_bitmask, input_bcf_header, input_records_filtered) =
-        process_input(&cli.input, &sites);
-
     let mut ref_sites_bitmask = vec![false; sites.len()];
 
     afreqs_filter
@@ -99,17 +113,20 @@ fn main() {
             .map(|_| {
                 s.spawn(|| {
                     let worker_id = worker_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    let mut worker_stream =
-                        bufstream::BufStream::new(tcp_keep_connecting(SocketAddr::from((
-                            IpAddr::from_str("127.0.0.1").unwrap(),
-                            cli.worker_port_base + worker_id as u16,
-                        ))));
-                    println!("Host: connected to Worker {worker_id}");
+                    let socket = SocketAddr::from((
+                        IpAddr::from_str("127.0.0.1").unwrap(),
+                        cli.worker_port_base + worker_id as u16,
+                    ));
+                    log!("connecting to Worker {worker_id} @ {} ...", socket);
+                    let mut worker_stream = bufstream::BufStream::new(tcp_keep_connecting(socket));
+                    log!("connected to Worker {worker_id}");
+                    bincode::serialize_into(&mut worker_stream, &(worker_id as u16)).unwrap();
                     bincode::serialize_into(&mut worker_stream, &ref_panel_meta).unwrap();
                     bincode::serialize_into(&mut worker_stream, &ref_panel_blocks).unwrap();
                     bincode::serialize_into(&mut worker_stream, &ref_sites_bitmask).unwrap();
                     bincode::serialize_into(&mut worker_stream, &interpolated_cms).unwrap();
                     bincode::serialize_into(&mut worker_stream, &bps).unwrap();
+                    log!("reference panel sent to Worker {worker_id}");
                     worker_stream.flush().unwrap();
                     let mut results = Vec::new();
 
@@ -118,15 +135,16 @@ fn main() {
                         if sample_id >= target_samples.len() {
                             break;
                         }
-                        println!("Host: sending Sample {sample_id} to Worker {worker_id}");
                         bincode::serialize_into(&mut worker_stream, &target_samples[sample_id])
                             .unwrap();
                         bincode::serialize_into(&mut worker_stream, &sample_id).unwrap();
                         worker_stream.flush().unwrap();
+                        log!("Sample {sample_id} sent to Worker {worker_id}");
                         results.push((
                             sample_id,
                             bincode::deserialize_from::<_, Array2<i8>>(&mut worker_stream).unwrap(),
                         ));
+                        log!("results received from Worker {worker_id}");
                     }
                     results
                 })
@@ -146,128 +164,12 @@ fn main() {
         .map(|v| v.unwrap())
         .collect::<Vec<_>>();
 
-    write_vcf(
-        &cli.output,
-        &all_results[..],
-        &input_bcf_header,
-        &input_records_filtered,
-    );
+    log!("received all results");
 
-    println!("Host: done");
-}
+    bincode::serialize_into(&mut client_stream, &all_results).unwrap();
 
-fn process_input(
-    input_path: &Path,
-    ref_sites: &[Site],
-) -> (
-    Vec<Vec<i8>>,
-    Vec<bool>,
-    bcf::header::HeaderView,
-    Vec<bcf::record::Record>,
-) {
-    let (input_sites, input_bcf_header, input_bcf_records) =
-        site::sites_from_bcf_path(input_path).unwrap();
-
-    assert_eq!(input_sites.len(), input_bcf_records.len());
-
-    let mut overlap = {
-        let ref_sites_set = ref_sites.iter().collect::<HashSet<_>>();
-        let input_sites_set = input_sites.iter().collect::<HashSet<_>>();
-        ref_sites_set
-            .intersection(&input_sites_set)
-            .cloned()
-            .cloned()
-            .collect::<Vec<_>>()
-    };
-
-    overlap.sort_unstable();
-
-    let n_overlap = overlap.len();
-    let n_sites = ref_sites.len();
-
-    let mut bcf_iter = input_sites.into_iter().zip(input_bcf_records.into_iter());
-    let mut ref_sites_iter = ref_sites.into_iter();
-    let mut ref_sites_bitmask = Vec::with_capacity(n_sites);
-
-    let n_samples = input_bcf_header.sample_count() as usize;
-    let mut samples: Vec<Vec<i8>> = vec![Vec::with_capacity(n_sites); n_samples];
-    let mut input_records_filtered = Vec::with_capacity(n_overlap);
-
-    for site in overlap {
-        while let Some(ref_site) = ref_sites_iter.next() {
-            if ref_site == &site {
-                ref_sites_bitmask.push(true);
-                break;
-            } else {
-                ref_sites_bitmask.push(false);
-            }
-        }
-
-        while let Some((target_site, target_record)) = bcf_iter.next() {
-            if target_site == site {
-                let genotypes = target_record.genotypes().unwrap();
-                for (i, sample) in samples.iter_mut().enumerate() {
-                    let genotype: record::Genotype = genotypes.get(i).into();
-                    let genotype: i8 = genotype.as_unphased().into();
-                    sample.push(genotype);
-                }
-                input_records_filtered.push(target_record);
-                break;
-            }
-        }
-    }
-
-    while ref_sites_iter.next().is_some() {
-        ref_sites_bitmask.push(false);
-    }
-
-    return (
-        samples,
-        ref_sites_bitmask,
-        input_bcf_header,
-        input_records_filtered,
-    );
-}
-
-fn write_vcf(
-    file_name: &std::path::Path,
-    phased: &[Array2<i8>],
-    input_bcf_header: &bcf::header::HeaderView,
-    input_records_filtered: &[bcf::record::Record],
-) {
-    use bcf::record::GenotypeAllele;
-
-    let mut genotypes = vec![Vec::new(); input_records_filtered.len()];
-
-    for sample in phased {
-        for (r, g) in sample.rows().into_iter().zip(genotypes.iter_mut()) {
-            if r[0] != -1 && r[1] != -1 {
-                g.push(GenotypeAllele::Phased(r[0] as i32));
-                g.push(GenotypeAllele::Phased(r[1] as i32));
-            } else {
-                g.push(GenotypeAllele::PhasedMissing);
-                g.push(GenotypeAllele::PhasedMissing);
-            }
-        }
-    }
-
-    let mut out_vcf = bcf::Writer::from_path(
-        file_name,
-        &bcf::header::Header::from_template(&input_bcf_header),
-        false,
-        bcf::Format::Vcf,
-    )
-    .unwrap();
-
-    for (genotype, input_record) in genotypes.into_iter().zip(input_records_filtered) {
-        let mut new_record = out_vcf.empty_record();
-        new_record.set_rid(input_record.rid());
-        new_record.set_pos(input_record.pos());
-        new_record.set_id(&input_record.id()).unwrap();
-        new_record.set_alleles(&input_record.alleles()).unwrap();
-        new_record.push_genotypes(&genotype).unwrap();
-        out_vcf.write(&new_record).unwrap();
-    }
+    log!("results sent to Client");
+    log!("done");
 }
 
 fn tcp_keep_connecting(addr: SocketAddr) -> TcpStream {
