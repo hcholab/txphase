@@ -1,4 +1,5 @@
 mod filter;
+mod index_map;
 mod params;
 mod sampling;
 mod viterbi;
@@ -7,10 +8,10 @@ pub use params::*;
 
 use crate::genotype_graph::GenotypeGraph;
 use crate::hmm::combine_dips;
+use crate::log;
 use crate::mcmc::filter::*;
 use crate::memory::RealMemory;
 use crate::variants::{Rarity, Variant};
-use crate::{log, WORKER_ID};
 use crate::{tp_value, Bool, Genotype, Real, Usize, U8};
 use rand::Rng;
 
@@ -321,7 +322,7 @@ impl<'a> Mcmc<'a> {
         let mut prev_ind = (0, 0);
         let mut sum_window_size = 0;
         let n_windows = windows.len();
-        //let mut ks = Vec::new();
+        let mut ks = Vec::new();
         let mut max_ks = Vec::new();
         let mut window_sizes = Vec::new();
         let mut tprob_pairs = Array2::<Real>::zeros((P, P));
@@ -354,11 +355,15 @@ impl<'a> Mcmc<'a> {
             window_sizes.push((end_w - start_w) as f64);
 
             let t = Instant::now();
-            let (unfolded, filter, n_full_states) =
-                filter_blocks(neighbors_w, &params_w.ref_panel.blocks);
 
-            ////TODO remove this
-            //ks.push(n_full_states.expose() as f64);
+            let (unfolded, filter, n_full_states) = filter_blocks(
+                neighbors_w,
+                &params_w.ref_panel.blocks,
+                &params_w.pack_index_map,
+            );
+
+            //TODO remove this
+            ks.push(n_full_states.expose() as f64);
 
             FILTER.with(|v| {
                 let mut v = v.borrow_mut();
@@ -585,11 +590,11 @@ impl<'a> Mcmc<'a> {
         }
 
         use statrs::statistics::Statistics;
-        //log!(
-        //"K: {:.3}+/-{:.3}",
-        //Statistics::mean(&ks),
-        //Statistics::std_dev(&ks)
-        //);
+        log!(
+            "K: {:.3}+/-{:.3}",
+            Statistics::mean(&ks),
+            Statistics::std_dev(&ks)
+        );
         log!(
             "Max K: {:.3}+/-{:.3}",
             Statistics::mean(&max_ks),
@@ -606,27 +611,69 @@ impl<'a> Mcmc<'a> {
             sum_window_size as f64 / n_windows as f64 / 1e6
         );
 
-        //log!(
-        //"HMM+Filter: {:?} ms",
-        //HMM.with(|v| {
-        //let out = *v.borrow();
-        //*v.borrow_mut() = std::time::Duration::ZERO;
-        //out
-        //})
-        //.as_millis()
-        //);
+        log!(
+            "HMM+Filter: {:?} ms",
+            HMM.with(|v| {
+                let out = *v.borrow();
+                *v.borrow_mut() = std::time::Duration::ZERO;
+                out
+            })
+            .as_millis()
+        );
 
         #[cfg(feature = "benchmarking")]
-        log!(
-            "\tFilter Ref Panel: {:?} ms",
-            FILTER
-                .with(|v| {
-                    let out = *v.borrow();
-                    *v.borrow_mut() = std::time::Duration::ZERO;
-                    out
-                })
-                .as_millis()
-        );
+        {
+            log!(
+                "\tFilter Ref Panel: {:?} ms",
+                FILTER
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+            log!(
+                "\t\t Neighbors to filter: {:?} ms",
+                FILTER_1
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+            log!(
+                "\t\t Look up index maps: {:?} ms",
+                FILTER_2
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+            log!(
+                "\t\t Unpack indices: {:?} ms",
+                FILTER_3
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+            log!(
+                "\t\t Unfold: {:?} ms",
+                FILTER_4
+                    .with(|v| {
+                        let out = *v.borrow();
+                        *v.borrow_mut() = std::time::Duration::ZERO;
+                        out
+                    })
+                    .as_millis()
+            );
+        }
 
         #[cfg(feature = "benchmarking")]
         {

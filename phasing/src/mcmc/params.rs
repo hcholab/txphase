@@ -1,4 +1,5 @@
 use crate::hmm::HmmParams;
+use crate::mcmc::index_map::{PackedIndexMap, PackedIndexMapSlice};
 use crate::neighbor_finding::PbwtTrie;
 use crate::variants::{build_variants, Variant};
 use common::ref_panel::{RefPanel, RefPanelSlice};
@@ -9,6 +10,7 @@ const PBWT_MAC: usize = 4;
 
 pub struct McmcSharedParams {
     pub ref_panel: RefPanel,
+    pub packed_index_map: PackedIndexMap,
     pub variants: Array1<Variant>,
     pub hmm_params: HmmParams,
     pub min_window_len_cm: f64,
@@ -74,9 +76,12 @@ impl McmcSharedParams {
                 pbwt_tries.push(pbwt);
             });
 
+        let packed_index_map = PackedIndexMap::new(&ref_panel);
+
         //println!("#pbwt_groups = {}", pbwt_groups.len());
         Self {
             ref_panel,
+            packed_index_map,
             variants: Array1::from_vec(variants),
             min_window_len_cm,
             hmm_params,
@@ -91,6 +96,7 @@ impl McmcSharedParams {
     pub fn slice<'a>(&'a self, start: usize, end: usize) -> McmcSharedParamsSlice<'a> {
         McmcSharedParamsSlice {
             ref_panel: self.ref_panel.slice(start, end),
+            pack_index_map: self.packed_index_map.slice(start, end),
             variants: self.variants.slice(s![start..end]),
         }
     }
@@ -132,5 +138,6 @@ impl McmcSharedParams {
 
 pub struct McmcSharedParamsSlice<'a> {
     pub ref_panel: RefPanelSlice<'a>,
+    pub pack_index_map: PackedIndexMapSlice<'a>,
     pub variants: ArrayView1<'a, Variant>,
 }

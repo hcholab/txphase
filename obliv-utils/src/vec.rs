@@ -81,37 +81,6 @@ where
             .flatten()
             .take(len)
     }
-    pub fn cond_copy_from(&mut self, src: &Self, cond: TpBool) {
-        assert_eq!(self.len(), src.len());
-
-        let capacity = rl_cap::<T>();
-        #[cfg(target_feature = "avx2")]
-        {
-            use crate::cmov::cmov_byte_slice_a64;
-            let num_bytes = self.len().div_ceil(capacity) * 64;
-            unsafe {
-                cmov_byte_slice_a64(
-                    cond.expose(),
-                    src.inner.as_ptr() as *const u64,
-                    self.inner.as_mut_ptr() as *mut u64,
-                    num_bytes as usize,
-                );
-            }
-        }
-        #[cfg(not(target_feature = "avx2"))]
-        {
-            use crate::cmov::cmov_byte_slice_a8;
-            let count = self.len().div_ceil(capacity) * 64 / 8;
-            unsafe {
-                cmov_byte_slice_a8(
-                    cond.expose(),
-                    src.inner.as_ptr() as *const u64,
-                    self.inner.as_mut_ptr() as *mut u64,
-                    count as usize,
-                );
-            }
-        }
-    }
 
     fn cal_ind(&self, i: TpU32) -> (TpU32, TpU8) {
         match log2::<T>() {
@@ -148,6 +117,13 @@ where
             inner,
             len: n as u32,
             last_len: (n % rl_cap::<T>()) as u8,
+        }
+    }
+
+    pub fn cond_copy_from(&mut self, src: &Self, cond: TpBool) {
+        assert_eq!(self.len(), src.len());
+        for (a, b) in self.inner.iter_mut().zip(src.inner.iter()) {
+            Aligned::<T>::tp_cond_swap(cond, a, &mut b.clone());
         }
     }
 }
@@ -207,6 +183,14 @@ where
         item
     }
 
+    pub fn cond_swap(&mut self, i: TpU32, item: &mut T, cond: TpBool) {
+        let (alinged_ind, inner_ind) = self.cal_ind(i);
+        for (i, aligned) in self.inner.iter_mut().enumerate() {
+            let target = &mut aligned.0[inner_ind.expose() as usize];
+            (cond & alinged_ind.tp_eq(&(i as u32))).cond_swap(target, item);
+        }
+    }
+
     pub fn apply(&mut self, i: TpU32, mut f: impl FnMut(&mut T)) {
         let (alinged_ind, inner_ind) = self.cal_ind(i);
         for (i, aligned) in self.inner.iter_mut().enumerate() {
@@ -221,8 +205,24 @@ where
 
     pub fn cond_copy_from_slice(&mut self, src: &[T], cond: TpBool) {
         assert_eq!(self.len(), src.len());
-        for (target, source) in self.iter_mut().zip(src.iter()) {
-            *target = cond.select(source.clone(), target.clone());
+        if src.as_ptr().is_aligned_to(64) {
+            let (_, src_mid, src_tail) = unsafe { src.align_to::<Aligned<T>>() };
+            for (a, b) in self.inner.iter_mut().zip(src_mid.iter()) {
+                Aligned::<T>::tp_cond_swap(cond, a, &mut b.clone());
+            }
+            let target_unaligned = &mut self.inner[src_mid.len()..];
+            for (target, source) in (target_unaligned
+                .iter_mut()
+                .map(|v| v.0.iter_mut())
+                .flatten())
+            .zip(src_tail.iter())
+            {
+                *target = cond.select(source.clone(), target.clone());
+            }
+        } else {
+            for (target, source) in self.iter_mut().zip(src.iter()) {
+                *target = cond.select(source.clone(), target.clone());
+            }
         }
     }
 }

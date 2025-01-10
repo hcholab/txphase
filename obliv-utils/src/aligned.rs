@@ -1,4 +1,4 @@
-use timing_shield::{TpBool, TpCondSwap, TpOrd, TpU8};
+use timing_shield::{TpBool, TpCondSwap, TpOrd};
 
 pub const fn rl_cap<T>() -> usize {
     64 / std::mem::size_of::<T>()
@@ -61,60 +61,16 @@ where
     }
 }
 
-//impl<T> Aligned<T>
-//where
-//[(); rl_cap::<T>()]:,
-//T: TpOrd + TpCondSwap + Clone,
-//{
-//pub fn obliv_merge_sort_pos(&mut self, pos: usize) {
-//let mut buffer = Self::default();
-//merge_sort_aligned(&mut self.0[..pos + 1], &mut buffer.0[..pos + 1])
-//}
-
-//pub fn obliv_merge_sort_last(&mut self) {
-//let mut buffer = Self::default();
-//merge_sort_aligned(&mut self.0, &mut buffer.0)
-//}
-//}
-
-pub fn merge_sort_aligned<T: TpOrd + TpCondSwap + Clone>(
-    items: &mut [T],
-    buffer: &mut [T],
-    ascending: bool,
-) {
-    assert_eq!(items.len(), buffer.len());
-    if items.len() == 2 {
-        let [a, b] = unsafe { items.get_many_unchecked_mut([0, 1]) };
-        (!(ascending ^ a.tp_gt(b))).cond_swap(a, b);
-    } else if items.len() > 2 {
-        {
-            let (items_a, items_b) = items.split_at_mut(items.len() / 2);
-            let (buffer_a, buffer_b) = buffer.split_at_mut(buffer.len() / 2);
-            merge_sort_aligned(items_a, buffer_a, ascending);
-            merge_sort_aligned(items_b, buffer_b, ascending);
-        }
-
-        buffer.clone_from_slice(items);
-        let (buffer_a, buffer_b) = buffer.split_at(items.len() / 2);
-
-        let mut a_ptr = TpU8::protect(0);
-        let mut b_ptr = TpU8::protect(0);
-        let (mut some_a, mut cur_a) = (TpBool::protect(true), &buffer_a[0]);
-        let (mut some_b, mut cur_b) = (TpBool::protect(true), &buffer_b[0]);
-
-        for item in items.iter_mut() {
-            let select_a = some_a & ((!some_b) | (ascending ^ cur_a.tp_gt(cur_b)));
-            *item = select_a.select(cur_a.to_owned(), cur_b.to_owned());
-            a_ptr = select_a.select(a_ptr + 1, a_ptr);
-            b_ptr = select_a.select(b_ptr, b_ptr + 1);
-            (some_a, cur_a) = get_item(&buffer_a, a_ptr);
-            (some_b, cur_b) = get_item(&buffer_b, b_ptr);
+impl<T> TpCondSwap for Aligned<T>
+where
+    [(); rl_cap::<T>()]:,
+{
+    fn tp_cond_swap(cond: TpBool, a: &mut Self, b: &mut Self) {
+        use tp_fixedpoint::TpU64x8;
+        unsafe {
+            let a = &mut *(a as *mut _ as *mut TpU64x8);
+            let b = &mut *(b as *mut _ as *mut TpU64x8);
+            TpU64x8::tp_cond_swap(cond, a, b);
         }
     }
-}
-
-fn get_item<T: Clone>(items: &[T], index: TpU8) -> (TpBool, &T) {
-    let cond = index.tp_lt(&(items.len() as u8));
-    let index = cond.select(index, TpU8::protect(0));
-    (cond, &items[index.expose() as usize])
 }
