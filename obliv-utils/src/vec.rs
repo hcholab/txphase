@@ -235,7 +235,7 @@ where
     pub(crate) fn bubble_sort_last(&mut self) {
         for i in (1..self.inner.len()).rev() {
             let len = self.inner.len();
-            let [a, b] = self.inner.get_many_mut([i - 1, i]).unwrap();
+            let [a, b] = self.inner.get_disjoint_mut([i - 1, i]).unwrap();
             if i == len - 1 {
                 b.obliv_bubble_sort_pos(self.last_len as usize - 1);
             } else {

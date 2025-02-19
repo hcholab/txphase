@@ -65,6 +65,32 @@ impl OblivBitmap {
     }
 }
 
+impl FromIterator<TpBool> for OblivBitmap {
+    fn from_iter<T>(iter: T) -> Self
+    where
+        T: IntoIterator<Item = TpBool>,
+    {
+
+        let mut n_bits = 0;
+        let mut cur_bits = 0;
+        let mut inner = Vec::new();
+        let mut cur = TpU64::protect(0);
+
+        for b in iter {
+            if cur_bits == 64 {
+                cur_bits = 0;
+                inner.push(cur);
+                cur = TpU64::protect(0);
+            }
+            cur |= (b.as_u64()) << cur_bits;
+            n_bits += 1;
+            cur_bits += 1;
+        }
+        inner.push(cur);
+        Self::from_inner(OblivVec::from_iter(inner.into_iter()), n_bits)
+    }
+}
+
 #[inline]
 fn cal_ind(index: TpU32) -> (TpU32, TpU8) {
     (index >> 6, index.as_u8() & 0b111111)

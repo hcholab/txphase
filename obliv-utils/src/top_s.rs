@@ -16,7 +16,7 @@ where
     });
     for j in 0..s.min(ranks.len()) {
         for i in 0..ranks.len() - 1 {
-            let [a, b] = unsafe { ranks.get_many_unchecked_mut([i, i + 1]) };
+            let [a, b] = unsafe { ranks.get_disjoint_unchecked_mut([i, i + 1]) };
             a.tp_lt_eq(b).cond_swap(a, b);
         }
         top_s[j] = ranks.pop().unwrap();
@@ -43,7 +43,7 @@ where
     });
     for j in 0..s {
         for i in 0..ranks.len() - 1 {
-            let [a, b] = unsafe { ranks.get_many_unchecked_mut([i, i + 1]) };
+            let [a, b] = unsafe { ranks.get_disjoint_unchecked_mut([i, i + 1]) };
             a.tp_lt(b).cond_swap(a, b);
         }
         top_s[j] = ranks.pop().unwrap();

@@ -50,7 +50,7 @@ where
 {
     pub fn obliv_bubble_sort_pos(&mut self, pos: usize) {
         for i in (1..pos + 1).rev() {
-            let [a, b] = self.0.get_many_mut([i - 1, i]).unwrap();
+            let [a, b] = self.0.get_disjoint_mut([i - 1, i]).unwrap();
             let do_swap = b.tp_lt(&a);
             do_swap.cond_swap(a, b);
         }
