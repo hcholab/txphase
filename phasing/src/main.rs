@@ -1,4 +1,6 @@
 #![feature(stmt_expr_attributes)]
+#![allow(incomplete_features)]
+#![feature(generic_const_exprs)]
 #![feature(iter_array_chunks)]
 #![feature(portable_simd)]
 #![allow(dead_code)]

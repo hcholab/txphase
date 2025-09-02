@@ -181,7 +181,7 @@ fn check_score_div(nn_0: &[(U32, Bool)], nn_1: &[(U32, Bool)]) -> Bool {
         .unwrap()
         * nn_1
             .iter()
-            .map(|v| (v.0 + 1))
+            .map(|v| v.0 + 1)
             .reduce(|acc, x| acc * x)
             .unwrap();
     let score_div_1 = nn_1
@@ -191,7 +191,7 @@ fn check_score_div(nn_0: &[(U32, Bool)], nn_1: &[(U32, Bool)]) -> Bool {
         .unwrap()
         * nn_0
             .iter()
-            .map(|v| (v.0 + 1))
+            .map(|v| v.0 + 1)
             .reduce(|acc, x| acc * x)
             .unwrap();
     score_div_0.tp_gt(&score_div_1)

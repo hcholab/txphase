@@ -1,8 +1,6 @@
 #![feature(generic_const_exprs)]
-#![feature(get_many_mut)]
 #![allow(incomplete_features)]
 #![feature(int_roundings)]
-#![feature(slice_take)]
 
 pub mod aligned;
 pub mod bitmap;

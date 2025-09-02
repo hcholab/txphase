@@ -1,4 +1,3 @@
-#![feature(const_mut_refs)]
 #![feature(portable_simd)]
 #![allow(dead_code)]
 

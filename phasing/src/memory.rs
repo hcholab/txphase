@@ -8,12 +8,12 @@ impl RealMemory {
     pub fn new() -> Self {
         Self(Vec::new())
     }
-    pub fn borrow_3d(&mut self, d0: usize, d1: usize, d2: usize) -> ArrayView3<Real> {
+    pub fn borrow_3d(&mut self, d0: usize, d1: usize, d2: usize) -> ArrayView3<'_, Real> {
         assert!(d0 * d1 * d2 <= self.0.len());
         ArrayView3::from_shape((d0, d1, d2), &self.0[..d0 * d1 * d2]).unwrap()
     }
 
-    pub fn borrow_3d_mut(&mut self, d0: usize, d1: usize, d2: usize) -> ArrayViewMut3<Real> {
+    pub fn borrow_3d_mut(&mut self, d0: usize, d1: usize, d2: usize) -> ArrayViewMut3<'_, Real> {
         if self.0.len() < d0 * d1 * d2 {
             unsafe {
                 self.0
