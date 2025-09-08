@@ -17,7 +17,7 @@ The instructions below have been tested with a virtual machine in the [Microsoft
   ```bash
   sudo apt install cmake
   ```
-- [Rust Nightly](https://www.rust-lang.org/tools/install) (tested with version 1.83.0-nightly)
+- [Rust Nightly](https://www.rust-lang.org/tools/install) (tested with version 1.91.0-nightly)
   ```bash
   # Install rustup by following the on-screen instruction
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
