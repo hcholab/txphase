@@ -1,8 +1,11 @@
-# TX-Phase: Secure Phasing of Private Genomes in a Trusted Execution Environment
+# TX-Phase
 
-⚠️ **DISCLAIMER**: This project is in development. Do not use it in production. ⚠️
+TX-Phase is a secure haplotype phasing framework in a Trusted Execution Environment (TEE), implemented in Intel SGX using [the Gramine framework](https://gramineproject.io/). 
 
-**TX-Phase** is a secure haplotype phasing framework in a Trusted Execution Environment (TEE), implemented in Intel SGX using [the Gramine framework](https://gramineproject.io/). 
+The algorithm implemented in this repository is described in the following publication:
+> **TX-Phase: Secure Phasing of Private Genomes in a Trusted Execution Environment** \
+> Natnatee Dokmai, Kaiyuan Zhu, S. Cenk Sahinalp, Hyunghoon Cho \
+> Genome Research, 2025
 
 The instructions below have been tested with a virtual machine in the [Microsoft Azure DCsv3 series](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/dcsv3-series?tabs=sizebasic) and Ubuntu 22.04.
 
@@ -81,7 +84,7 @@ The instructions below have been tested with a virtual machine in the [Microsoft
   target/release/client --sp-ip-address <SP_IP_ADDRESS> --input HG002_GRCh37_1_22_v4.2.1_benchmark_20.vcf.gz --output phased.vcf.gz
   ```
 
-### Service Provider side
+### Service provider side
 - Download the 1KG Phase 3 reference panel (Chr 20) in the M3VCF format
   ```bash
   wget https://github.com/hcholab/txphase-test-data/raw/main/20.1000g.Phase3.v5.With.Parameter.Estimates.m3vcf.gz
@@ -107,3 +110,6 @@ The instructions below have been tested with a virtual machine in the [Microsoft
   target/release/host --ref-panel 20.1000g.Phase3.v5.With.Parameter.Estimates.m3vcf.gz --genetic-map chr20.b37.gmap &
   target/release/phasing
   ```
+## Contact Information
+Ko Dokmai, natnatee@cmkl.ac.th \
+Hoon Cho, hoon.cho@yale.edu
