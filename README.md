@@ -1,6 +1,6 @@
 # TX-Phase
 
-TX-Phase is a secure haplotype phasing framework based on a Trusted Execution Environment (TEE), implemented for Intel SGX using [the Gramine framework](https://gramineproject.io/). 
+TX-Phase is a secure haplotype phasing framework based on the Trusted Execution Environment (TEE) technology, implemented for Intel SGX using [the Gramine framework](https://gramineproject.io/). 
 
 The algorithm implemented in this package is described in the following publication:
 > **TX-Phase: Secure Phasing of Private Genomes in a Trusted Execution Environment** \
