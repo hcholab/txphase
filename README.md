@@ -110,6 +110,45 @@ The instructions below have been tested with a virtual machine in the [Microsoft
   target/release/host --ref-panel 20.1000g.Phase3.v5.With.Parameter.Estimates.m3vcf.gz --genetic-map chr20.b37.gmap &
   target/release/phasing
   ```
+
+## Verify SER on Client Side
+To verify the switch error rate (SER) of the phased output on the client side, we will use trio-based phasing as the ground truth as follows:
+
+- Install [`bcftools`](https://samtools.github.io/bcftools/bcftools.html):
+  ```bash
+  sudo apt install bcftools
+  ```
+
+- Download the VCF files for the parents (HG003 and HG004) on Chromosome 20, along with the pedigree (`.ped`) file describing the familial relationship between HG002, HG003, and HG004. The full dataset can be downloaded from [this link](https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/release/AshkenazimTrio/). The pedigree file was created following the [standard format](https://gatk.broadinstitute.org/hc/en-us/articles/360035531972-PED-Pedigree-format).
+  ```bash
+  wget https://github.com/hcholab/txphase-test-data/raw/refs/heads/main/HG003_GRCh37_1_22_v4.2.1_benchmark_20.vcf.gz
+  wget https://github.com/hcholab/txphase-test-data/raw/refs/heads/main/HG004_GRCh37_1_22_v4.2.1_benchmark_20.vcf.gz
+  wget https://github.com/hcholab/txphase-test-data/raw/refs/heads/main/trio.ped
+  ```
+
+- Index the phased output (assuming the filename is `phased.vcf.gz`) and the parents’ VCF files:
+  ```bash
+  bcftools index phased.vcf.gz
+  bcftools index HG003_GRCh37_1_22_v4.2.1_benchmark_20.vcf.gz
+  bcftools index HG004_GRCh37_1_22_v4.2.1_benchmark_20.vcf.gz
+  ```
+
+- Merge the trio VCF files into a single VCF file:
+  ```bash
+  bcftools merge -m none -Oz -o merged.vcf.gz phased.vcf.gz HG003_GRCh37_1_22_v4.2.1_benchmark_20.vcf.gz HG004_GRCh37_1_22_v4.2.1_benchmark_20.vcf.gz
+  ```
+
+- Use the `bcftools` plugin `trio-switch-rate` to compute the SER:
+  ```bash
+  bcftools +trio-switch-rate merged.vcf.gz -- -p trio.ped
+  ```
+  The output should include lines similar to the following, indicating that the SER is 1.29%:
+  ```text
+  # TRIO	[2]Father	[3]Mother	[4]Child	[5]nTested	[6]nMendelian Errors	[7]nSwitch	[8]nSwitch (%)
+  TRIO	HG003	HG004	HG002	8424	1	109	1.29
+  ```
+
+
 ## Contact Information
 Ko Dokmai, natnatee@cmkl.ac.th \
 Hoon Cho, hoon.cho@yale.edu
