@@ -1,8 +1,8 @@
 # TX-Phase
 
-TX-Phase is a secure haplotype phasing framework in a Trusted Execution Environment (TEE), implemented in Intel SGX using [the Gramine framework](https://gramineproject.io/). 
+TX-Phase is a secure haplotype phasing framework based on a Trusted Execution Environment (TEE), implemented for Intel SGX using [the Gramine framework](https://gramineproject.io/). 
 
-The algorithm implemented in this repository is described in the following publication:
+The algorithm implemented in this package is described in the following publication:
 > **TX-Phase: Secure Phasing of Private Genomes in a Trusted Execution Environment** \
 > Natnatee Dokmai, Kaiyuan Zhu, S. Cenk Sahinalp, Hyunghoon Cho \
 > Genome Research, 2025
@@ -64,7 +64,7 @@ The instructions below have been tested with a virtual machine in the [Microsoft
   cargo +nightly build --release -p phasing
   ```
 
-## Download and run the test data
+## Download Test Data and Run TX-Phase
 ### Client side
 - Download the GIAB target sample HG002 (Chr 20)
   ```bash
@@ -111,7 +111,7 @@ The instructions below have been tested with a virtual machine in the [Microsoft
   target/release/phasing
   ```
 
-## Verify SER on Client Side
+## Verify the Results
 To verify the switch error rate (SER) of the phased output on the client side, we will use trio-based phasing as the ground truth as follows:
 
 - Install [`bcftools`](https://samtools.github.io/bcftools/bcftools.html):
